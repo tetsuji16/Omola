@@ -11,19 +11,41 @@ The first slice deliberately delegates Modelica parsing, checking, translation, 
 - `omola simulate --model FILE.mo --class Qualified.Name [--stop-time SECONDS] [--output PREFIX]` calls OMC `simulate`.
 - Rust crates contain only standard-library dependencies. The compiler remains a separate process; no OMC code is embedded or copied.
 
-## Windows development
+## Install prerequisites and run the smoke model
 
-1. Install Rust using the official rustup installer and ensure `cargo` is on `PATH`.
-2. Install OpenModelica and ensure `omc.exe` is on `PATH`; alternatively set `OMOLA_OMC` to the full `omc.exe` path.
-3. From this repository run:
+The checked-in `examples/BouncingBall.mo` uses only built-in Modelica syntax and has no third-party library dependency. The expected simulation variables are `height` (m) and `velocity` (m/s); `gravity`, `restitution`, and `initialHeight` are parameters. Running it requires an installed OpenModelica Compiler (OMC). This is a backend smoke test, not a Dymola parity test.
+
+Install Rust with the official [rustup instructions](https://www.rust-lang.org/tools/install): on Windows use the linked `rustup-init.exe`; on macOS/Linux the standard command is:
+
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Install OpenModelica using the [official Windows download](https://openmodelica.org/download/download-windows/) and ensure `omc.exe` is on `PATH`. On Debian/Ubuntu, follow the repository setup for your release in the [official Linux instructions](https://openmodelica.org/download/download-linux/), then run `sudo apt update && sudo apt install openmodelica`. OpenModelica's [official macOS page](https://openmodelica.org/download/download-mac/) notes that native binaries were discontinued after 1.16; use its Linux Docker alternative. From the repository root, the included development image provides both OMC and Rust:
+
+```sh
+docker build -f .devcontainer/Dockerfile -t omola-dev .
+docker run --rm -v "$PWD:/workspaces/Omola" -w /workspaces/Omola omola-dev cargo run -p omola -- doctor
+docker run --rm -v "$PWD:/workspaces/Omola" -w /workspaces/Omola omola-dev sh -lc 'cargo run -p omola -- check --model examples/BouncingBall.mo --class BouncingBall && cargo run -p omola -- simulate --model examples/BouncingBall.mo --class BouncingBall --stop-time 3 --output "target/omola smoke spaces/BouncingBall"'
+```
+
+On Windows PowerShell with Rust and OMC installed, run:
 
 ```powershell
 cargo run -p omola -- doctor
-cargo run -p omola -- check --model .\examples\BouncingBall.mo --class BouncingBall
-cargo run -p omola -- simulate --model .\examples\BouncingBall.mo --class BouncingBall --stop-time 3 --output .\out\BouncingBall
+cargo run -p omola -- check --model examples\BouncingBall.mo --class BouncingBall
+cargo run -p omola -- simulate --model examples\BouncingBall.mo --class BouncingBall --stop-time 3 --output "out\smoke results\BouncingBall"
 ```
 
-The final command becomes runnable when the example model is added in issue 02. To check the current Rust workspace once Rust is installed, run `cargo check --workspace` and `cargo run -p omola -- doctor`.
+On macOS/Linux with native OMC installed, the equivalent commands are:
+
+```sh
+cargo run -p omola -- doctor
+cargo run -p omola -- check --model examples/BouncingBall.mo --class BouncingBall
+cargo run -p omola -- simulate --model examples/BouncingBall.mo --class BouncingBall --stop-time 3 --output "out/smoke results/BouncingBall"
+```
+
+The output prefix may contain spaces. To validate Rust without OMC, run `cargo check --workspace`; this is a build-only check and does not exercise the compiler backend. The OMC commands above are backend integration checks.
 
 The compiler is resolved in this order: a non-empty `OMOLA_OMC` executable path, then `omc.exe` from `PATH` on Windows (or `omc` on Unix). A configured path that does not exist is reported directly; it does not silently fall back to PATH. The adapter reports the OMC version with each successful command result, rejects invalid Modelica class names and stop times before creating a script, and removes its temporary `.mos` file and compiler workspace after success or failure. Simulation passes OMC a unique prefix in that isolated workspace, then copies the resulting MAT file to `<output-prefix>_res.mat`; existing result files are not overwritten. This allows output prefixes containing spaces despite OMC's generated makefile path handling.
 
@@ -41,7 +63,7 @@ docker run --rm -v "${PWD}:/workspaces/Omola" -w /workspaces/Omola omola-dev car
 docker run --rm -v "${PWD}:/workspaces/Omola" -w /workspaces/Omola omola-dev cargo run -p omola -- doctor
 ```
 
-The same image can be opened as a development container in VS Code using `.devcontainer/devcontainer.json`. CI runs formatting, tests, and Clippy on both Linux and Windows without requiring OMC for unit tests.
+The same image can be opened as a development container in VS Code using `.devcontainer/devcontainer.json`. CI runs formatting, tests, and Clippy on both Linux and Windows without requiring OMC for unit tests. To run the optional backend integration job, manually dispatch the Rust workflow with `run_omc` enabled; it builds this image, checks and simulates `BouncingBall`, and uploads a concise command log. Normal CI is build/unit validation only and does not claim backend integration coverage.
 
 ## Scope and truth in compatibility claims
 

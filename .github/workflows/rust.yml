@@ -5,6 +5,12 @@ on:
     branches: [main, "codex/**"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      run_omc:
+        description: Run the OpenModelica backend smoke test
+        type: boolean
+        required: true
+        default: false
 
 jobs:
   checks:
@@ -21,3 +27,26 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo test --workspace
       - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  omc-integration:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_omc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build OpenModelica development image
+        run: docker build -f .devcontainer/Dockerfile -t omola-dev .
+      - name: Check and simulate the smoke model
+        run: |
+          mkdir -p target/omc-smoke-log
+          set -o pipefail
+          docker run --rm -v "$PWD:/workspaces/Omola" -w /workspaces/Omola omola-dev sh -lc '
+            cargo check --workspace &&
+            cargo run -p omola -- doctor &&
+            cargo run -p omola -- check --model examples/BouncingBall.mo --class BouncingBall &&
+            cargo run -p omola -- simulate --model examples/BouncingBall.mo --class BouncingBall --stop-time 3 --output "target/omola smoke spaces/BouncingBall"
+          ' 2>&1 | tee target/omc-smoke-log/omc-integration.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: omola-omc-smoke-log
+          path: target/omc-smoke-log/omc-integration.log
