@@ -16,4 +16,4 @@
 
 ## Implementation status
 
-The checked-in model and OS-specific setup instructions are implemented. The OMC integration workflow now runs on pull requests (and can also be manually dispatched) on Linux and Windows and stores concise logs. It also checks that an `initialHeight=2` parameter override changes the exported initial height from 1 to 2. Keep this issue open until PR-triggered OMC checks pass on both operating systems.
+The checked-in model and OS-specific setup instructions are implemented. PR-triggered OMC integration runs the Linux model check/simulation and parameter differential, and stores concise logs. GitHub Actions run #22 also completed the Windows OMC project simulation and uploaded its log artifact. The acceptance criteria are met; issue #2 was closed after that evidence.
