@@ -13,3 +13,7 @@
 - The GUI roadmap states which editing/plotting workflows remain unsupported and defines acceptance steps for a later UI.
 
 **Validation commands:** `cargo test --workspace`; `cargo run -p omola -- project validate examples/project.toml`; `cargo run -p omola -- project simulate examples/project.toml`.
+
+## Implementation status
+
+Schema-1 project manifests, exact library pins, package roots, CLI validation/simulation, and text-first editor roadmap are implemented. Linux OMC simulation has been exercised for the sample and package-root fixture, including package-root lookup and manifest parameter overrides. PR-triggered Windows OMC validation/simulation and an uploaded log are now configured; leave this issue open until that Windows OMC job passes.

@@ -297,9 +297,9 @@ license = "MIT"
 distribution = "GitHub-hosted CI action; not included in Omola binaries. Tag is a mutable upstream reference."
 
 [[workflow_actions]]
-reference = "OpenModelica/setup-openmodelica@v1.0"
+reference = "OpenModelica/setup-openmodelica@419f31141aa79a22f7033def5626047dd3bb5069"
 source = "https://github.com/OpenModelica/setup-openmodelica"
 license = "OSMC Public License 1.8 (upstream repository)"
-distribution = "GitHub-hosted optional Windows OMC CI action; not included in Omola binaries. Tag is a mutable upstream reference."
+distribution = "GitHub-hosted Windows OMC CI action; not included in Omola binaries. Pinned to an immutable upstream commit."
 
 

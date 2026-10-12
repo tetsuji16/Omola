@@ -13,3 +13,7 @@
 - README clearly distinguishes build-only checks from backend integration checks.
 
 **Validation commands:** `cargo check --workspace`; `cargo run -p omola -- doctor`; `cargo run -p omola -- check --model examples/BouncingBall.mo --class BouncingBall`; `cargo run -p omola -- simulate --model examples/BouncingBall.mo --class BouncingBall --stop-time 3 --output out/BouncingBall`.
+
+## Implementation status
+
+The checked-in model and OS-specific setup instructions are implemented. The OMC integration workflow now runs on pull requests (and can also be manually dispatched) on Linux and Windows and stores concise logs. It also checks that an `initialHeight=2` parameter override changes the exported initial height from 1 to 2. Keep this issue open until PR-triggered OMC checks pass on both operating systems.

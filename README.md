@@ -81,7 +81,7 @@ docker run --rm -v "${PWD}:/workspaces/Omola" -w /workspaces/Omola omola-dev car
 docker run --rm -v "${PWD}:/workspaces/Omola" -w /workspaces/Omola omola-dev cargo run -p omola -- doctor
 ```
 
-The same image can be opened as a development container in VS Code using `.devcontainer/devcontainer.json`. CI runs formatting, tests, and Clippy on both Linux and Windows without requiring OMC for unit tests. To run the optional backend integration job, manually dispatch the Rust workflow with `run_omc` enabled; it builds this image, checks and simulates `BouncingBall`, and uploads a concise command log. Normal CI is build/unit validation only and does not claim backend integration coverage.
+The same image can be opened as a development container in VS Code using `.devcontainer/devcontainer.json`. CI runs formatting, tests, and Clippy on both Linux and Windows without requiring OMC for unit tests. Pull requests also run the OMC backend integration: Linux builds this image; Windows installs the pinned OMC through the upstream setup action. Both check/simulate the sample and upload command logs. The Rust-only checks remain independent of OMC; merge CI and backend integration coverage are reported separately.
 
 ## Scope and truth in compatibility claims
 
