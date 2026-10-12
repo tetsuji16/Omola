@@ -3,6 +3,7 @@ use std::{env, path::PathBuf, process::ExitCode};
 
 mod bridge;
 mod compat;
+mod fmi;
 mod results;
 
 fn main() -> ExitCode {
@@ -37,6 +38,18 @@ fn main() -> ExitCode {
     }
     if args.first().map(String::as_str) == Some("results") {
         return match results::run(&args[1..]) {
+            Ok(text) => {
+                print!("{text}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("omola: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    if args.first().map(String::as_str) == Some("fmi") {
+        return match fmi::run(&args[1..]) {
             Ok(text) => {
                 print!("{text}");
                 ExitCode::SUCCESS

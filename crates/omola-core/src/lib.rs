@@ -232,6 +232,134 @@ impl Omc {
         Ok(result)
     }
 
+    /// Export one FMU through OMC and copy the resulting archive without overwriting.
+    pub fn export_fmu(
+        &self,
+        source: &Path,
+        class: &str,
+        version: &str,
+        fmu_type: &str,
+        output: &Path,
+    ) -> Result<CommandResult, BackendError> {
+        validate_class(class)?;
+        let source = readable_model(source)?;
+        if !matches!(version, "1.0" | "2.0") {
+            return Err(BackendError::InvalidInput(
+                "supported export version selectors are 1.0 and 2.0; consult installed OMC capabilities".into(),
+            ));
+        }
+        if !matches!(fmu_type, "me" | "cs" | "me_cs") {
+            return Err(BackendError::InvalidInput(
+                "FMU type must be me, cs, or me_cs".into(),
+            ));
+        }
+        if version == "1.0" && fmu_type != "me" {
+            return Err(BackendError::InvalidInput(
+                "the documented FMI 1.0 export profile supports Model Exchange only".into(),
+            ));
+        }
+        if output.extension().and_then(|extension| extension.to_str()) != Some("fmu") {
+            return Err(BackendError::InvalidInput(
+                "FMU output path must use the .fmu extension".into(),
+            ));
+        }
+        let output = absolute_output(output)?;
+        if output.exists() {
+            return Err(BackendError::InvalidInput(format!(
+                "refusing to overwrite existing FMU: {}",
+                output.display()
+            )));
+        }
+        if let Some(parent) = output.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        // OMC emits C identifiers from the prefix; hyphens can make its
+        // generated .c/.h names disagree and silently prevent FMU creation.
+        let prefix = unique_name("fmu").replace('-', "_");
+        let script = format!(
+            "clearMessages();\nloaded := loadFile(\"{}\");\nif not loaded then print(\"OMOLA_FMI_LOAD_FAILED\\n\" + getErrorString()); end if;\nif loaded then fmu := buildModelFMU({}, version=\"{}\", fmuType=\"{}\", fileNamePrefix=\"{}\"); print(\"OMOLA_FMI_FILE:\" + fmu + \"\\n\"); end if;\n",
+            modelica_string(&source.to_string_lossy()),
+            class,
+            version,
+            fmu_type,
+            prefix
+        );
+        let (mut result, workspace, _cleanup) = self.run_script_in_temp(&script)?;
+        let generated = workspace.join(format!("{prefix}.fmu"));
+        if result.output.contains("OMOLA_FMI_LOAD_FAILED") || !generated.is_file() {
+            return Err(BackendError::InvalidCompilerResponse {
+                version: result.omc_version,
+                output: result.output,
+            });
+        }
+        let mut source_file = fs::File::open(&generated)?;
+        let mut destination_file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&output)?;
+        if let Err(error) = io::copy(&mut source_file, &mut destination_file) {
+            let _ = fs::remove_file(&output);
+            return Err(BackendError::Io(error));
+        }
+        result.output = result.output.replace(
+            &generated.to_string_lossy().to_string(),
+            &output.to_string_lossy(),
+        );
+        result.result_file = Some(output);
+        Ok(result)
+    }
+
+    /// Import an FMU as a generated Modelica wrapper into a new directory.
+    pub fn import_fmu(
+        &self,
+        archive: &Path,
+        output_dir: &Path,
+    ) -> Result<CommandResult, BackendError> {
+        let archive = archive.canonicalize()?;
+        if !archive.is_file() {
+            return Err(BackendError::InvalidInput(format!(
+                "FMU archive is not a file: {}",
+                archive.display()
+            )));
+        }
+        let output_dir = absolute_output(output_dir)?;
+        if output_dir.exists() {
+            return Err(BackendError::InvalidInput(format!(
+                "refusing to write imported FMU into an existing directory: {}",
+                output_dir.display()
+            )));
+        }
+        if let Some(parent) = output_dir.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::create_dir(&output_dir)?;
+        let script = format!(
+            "clearMessages();\nsetCommandLineOptions(\"--allowNonStandardModelica=reinitInAlgorithms\");\nimported := importFMU(\"{}\", workdir=\"{}\", fullPath=true);\nprint(\"OMOLA_IMPORTED_FMU:\" + imported + \"\\n\");\n",
+            modelica_string(&archive.to_string_lossy()),
+            modelica_string(&output_dir.to_string_lossy())
+        );
+        let mut result = self.run_script(&script)?;
+        let generated = result
+            .output
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("OMOLA_IMPORTED_FMU:"))
+            .map(str::trim)
+            .filter(|path| !path.is_empty() && *path != "\"\"")
+            .map(PathBuf::from)
+            .ok_or_else(|| BackendError::InvalidCompilerResponse {
+                version: result.omc_version.clone(),
+                output: result.output.clone(),
+            })?;
+        if !generated.is_file() {
+            return Err(BackendError::InvalidCompilerResponse {
+                version: result.omc_version,
+                output: result.output,
+            });
+        }
+        result.result_file = Some(generated);
+        Ok(result)
+    }
+
     /// Run a script and return versioned command output. Scratch scripts are deleted on every exit.
     pub fn run_script(&self, script: &str) -> Result<CommandResult, BackendError> {
         self.run_script_in_temp(script).map(|(result, _, _)| result)
