@@ -30,6 +30,7 @@ pub fn write_run_metadata(
     model: &Path,
     class: &str,
     started_at_unix_ms: u128,
+    parameters: &[(String, String)],
 ) -> Result<PathBuf, BackendError> {
     let result_path =
         result
@@ -57,7 +58,10 @@ pub fn write_run_metadata(
             .display()
             .to_string(),
         class: class.into(),
-        parameters: Vec::new(),
+        parameters: parameters
+            .iter()
+            .map(|(name, value)| format!("{name}={value}"))
+            .collect(),
         output_result_file: result_path.display().to_string(),
         solver_settings: settings,
         units: "Not reported by the OMC result metadata used by this adapter".into(),
@@ -556,5 +560,32 @@ mod tests {
     fn quoted_names_and_crlf_are_parsed() {
         let parsed = parse_csv("time,\"long, name\"\r\n0,1\r\n").unwrap();
         assert_eq!(parsed[0], ["time", "long, name"]);
+    }
+
+    #[test]
+    fn run_sidecar_records_requested_parameter_overrides() {
+        let dir = std::env::temp_dir().join(format!(
+            "omola-metadata-test-{}-{}",
+            std::process::id(),
+            now_unix_ms()
+        ));
+        fs::create_dir(&dir).unwrap();
+        let result_file = dir.join("sample_res.mat");
+        let result = CommandResult {
+            omc_version: "OpenModelica 1.27.1".into(),
+            output: "simulationOptions = \"stopTime = 1.0\"".into(),
+            result_file: Some(result_file),
+        };
+        let path = write_run_metadata(
+            &result,
+            Path::new("model.mo"),
+            "Demo",
+            now_unix_ms(),
+            &[("gravity".into(), "9.81".into())],
+        )
+        .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(json["parameters"][0], "gravity=9.81");
+        fs::remove_dir_all(dir).unwrap();
     }
 }

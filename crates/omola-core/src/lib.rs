@@ -40,6 +40,14 @@ pub enum BackendError {
     },
 }
 
+pub struct SimulationConfig<'a> {
+    pub stop_time: f64,
+    pub result: Option<&'a Path>,
+    pub libraries: &'a [(String, String)],
+    pub package_roots: &'a [PathBuf],
+    pub parameters: &'a [(String, String)],
+}
+
 impl std::fmt::Display for BackendError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -183,7 +191,34 @@ impl Omc {
         libraries: &[(String, String)],
         package_roots: &[PathBuf],
     ) -> Result<CommandResult, BackendError> {
+        self.simulate_project_model_with_parameters(
+            source,
+            class,
+            SimulationConfig {
+                stop_time,
+                result,
+                libraries,
+                package_roots,
+                parameters: &[],
+            },
+        )
+    }
+
+    pub fn simulate_project_model_with_parameters(
+        &self,
+        source: &Path,
+        class: &str,
+        config: SimulationConfig<'_>,
+    ) -> Result<CommandResult, BackendError> {
+        let SimulationConfig {
+            stop_time,
+            result,
+            libraries,
+            package_roots,
+            parameters,
+        } = config;
         validate_class(class)?;
+        validate_parameter_overrides(parameters)?;
         let source = readable_model(source)?;
         if !stop_time.is_finite() || stop_time < 0.0 {
             return Err(BackendError::InvalidInput(
@@ -219,9 +254,21 @@ impl Omc {
         let mut script = self.package_path_script(package_roots)?;
         script.push_str("clearMessages();\n");
         script.push_str(&load_libraries_script(libraries)?);
+        let simflags = if parameters.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "-override={}",
+                parameters
+                    .iter()
+                    .map(|(name, value)| format!("{name}={value}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        };
         script.push_str(&format!(
-            "loaded := loadFile(\"{}\");\nif not loaded then print(getErrorString()); end if;\nsimulationResult := simulate({}, stopTime={}, fileNamePrefix=\"{}\");\nprint(\"OMOLA_RESULT_FILE:\" + simulationResult.resultFile);\n",
-            modelica_string(&source.to_string_lossy()), class, stop_time, output_prefix
+            "loaded := loadFile(\"{}\");\nif not loaded then print(getErrorString()); end if;\nsimulationResult := simulate({}, stopTime={}, fileNamePrefix=\"{}\", simflags=\"{}\");\nprint(\"OMOLA_RESULT_FILE:\" + simulationResult.resultFile);\n",
+            modelica_string(&source.to_string_lossy()), class, stop_time, output_prefix, modelica_string(&simflags)
         ));
         let (mut result, workspace, _cleanup) = self.run_script_in_temp(&script)?;
         let generated = match find_result_file(&result.output) {
@@ -546,6 +593,31 @@ fn validate_class(class: &str) -> Result<(), BackendError> {
     }
 }
 
+pub fn validate_parameter_overrides(parameters: &[(String, String)]) -> Result<(), BackendError> {
+    let mut seen = std::collections::HashSet::new();
+    for (name, value) in parameters {
+        validate_class(name).map_err(|_| {
+            BackendError::InvalidInput(format!("invalid Modelica parameter name: {name}"))
+        })?;
+        let number = value.parse::<f64>().map_err(|_| {
+            BackendError::InvalidInput(format!(
+                "parameter `{name}` must have a finite numeric value"
+            ))
+        })?;
+        if !number.is_finite() {
+            return Err(BackendError::InvalidInput(format!(
+                "parameter `{name}` must have a finite numeric value"
+            )));
+        }
+        if !seen.insert(name) {
+            return Err(BackendError::InvalidInput(format!(
+                "parameter override repeated: {name}"
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn load_libraries_script(libraries: &[(String, String)]) -> Result<String, BackendError> {
     let mut script = String::new();
     for (name, version) in libraries {
@@ -666,6 +738,20 @@ mod tests {
             validate_library_pins(&[("FixtureLib".into(), "1.0\") ; print(1)".into())]).is_err()
         );
         assert!(validate_library_pins(&[("Bad;Name".into(), "1.0".into())]).is_err());
+    }
+
+    #[test]
+    fn parameter_overrides_are_numeric_unique_and_identifier_bounded() {
+        assert!(validate_parameter_overrides(&[("gravity".into(), "9.81".into())]).is_ok());
+        assert!(validate_parameter_overrides(&[("Demo.gravity".into(), "-1e2".into())]).is_ok());
+        assert!(validate_parameter_overrides(&[("gravity".into(), "NaN".into())]).is_err());
+        assert!(validate_parameter_overrides(&[("gravity".into(), "1,foo=2".into())]).is_err());
+        assert!(validate_parameter_overrides(&[("x;print(1)".into(), "2".into())]).is_err());
+        assert!(validate_parameter_overrides(&[
+            ("x".into(), "1".into()),
+            ("x".into(), "2".into())
+        ])
+        .is_err());
     }
 
     #[test]

@@ -1,6 +1,8 @@
 # Result artifacts
 
-`omola simulate` writes the result file produced by the selected OpenModelica Compiler and an adjacent JSON sidecar (`<result-stem>.json`). The versioned sidecar records Unix-millisecond start/completion times, Omola/OMC versions, source path and class, result path, and the solver-options text reported by OMC. Parameter overrides are not available in the current CLI, so `parameters` is an empty list; units are not reported by this adapter.
+`omola simulate` writes the result file produced by the selected OpenModelica Compiler and an adjacent JSON sidecar (`<result-stem>.json`). The versioned sidecar records Unix-millisecond start/completion times, Omola/OMC versions, source path and class, numeric parameter overrides, result path, and the solver-options text reported by OMC. Units are not reported by this adapter. CLI and project-manifest overrides currently accept finite numeric scalar values only.
+
+Numeric overrides are passed using OpenModelica's documented [`simulate` scripting API](https://git.openmodelica.org/Documentation/OpenModelica.Scripting.simulate.html) and the runtime [`-override` flag](https://openmodelica.org/doc/OpenModelicaUsersGuide/1.27/simulationflags.html). The sidecar records requested values, not effective post-initialization readback.
 
 `omola results inspect FILE.csv` accepts UTF-8 CSV with a `time` first column and at least one variable. It rejects duplicate/empty headers, blank cells, non-finite/non-numeric data, uneven rows, and decreasing time. Equal adjacent times are allowed for solver event points. `omola results inspect FILE.mat` delegates header and variable discovery to OMC. Other extensions, including `.dsres`, are rejected with an explicit unsupported-format diagnostic.
 

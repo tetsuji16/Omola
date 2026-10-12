@@ -8,7 +8,7 @@ The first slice deliberately delegates Modelica parsing, checking, translation, 
 
 - `omola doctor` locates OMC through `OMOLA_OMC` or `PATH` and reports its version. Missing OMC yields a setup diagnostic.
 - `omola check --model FILE.mo --class Qualified.Name` loads the file and calls OMC `checkModel`.
-- `omola simulate --model FILE.mo --class Qualified.Name [--stop-time SECONDS] [--output PREFIX]` calls OMC `simulate`.
+- `omola simulate --model FILE.mo --class Qualified.Name [--stop-time SECONDS] [--parameters name=value,name=value] [--output PREFIX]` calls OMC `simulate`; numeric parameter overrides are validated and recorded in the run sidecar.
 - `omola project validate|simulate examples/project.toml` opens the versioned schema-1 manifest, validates relative package/source paths and exact dependency pins, then delegates checking/simulation to OMC. Modelica files remain user-owned and unchanged.
 - `omola results inspect FILE.csv|FILE.mat` inspects strict CSV or OpenModelica-generated MAT results; `omola results export-csv FILE.mat --variables x,y --output FILE.csv` uses OMC's scripting API to export selected scalar variables.
 - `omola fmi capabilities`, `omola fmi export`, `omola fmi import`, and `omola fmi validate` report the documented OMC profile, delegate FMU operations to OMC, and check basic archive/XML metadata.
@@ -55,11 +55,11 @@ cargo run -p omola -- project validate examples/project.toml
 cargo run -p omola -- project simulate examples/project.toml --output "out/project results/BouncingBall"
 ```
 
-The project schema, path/dependency policy, migration boundary, and unsupported editor workflows are described in [the project workflow proposal](docs/project-workflow.md). The sample manifest points to the existing `BouncingBall.mo`; it does not copy or modify the Modelica source. Windows CI checks the Rust workspace; OMC model execution on Windows still requires a Windows installation and is not claimed as verified by the Linux container run.
+The project schema, path/dependency policy, migration boundary, and unsupported editor workflows are described in [the project workflow proposal](docs/project-workflow.md). The sample manifest points to the existing `BouncingBall.mo`; it does not copy or modify the Modelica source. OMC integration jobs run on pull requests and can also be requested manually; Windows runs install the pinned OpenModelica version through its setup action.
 
 The output prefix may contain spaces. To validate Rust without OMC, run `cargo check --workspace`; this is a build-only check and does not exercise the compiler backend. The OMC commands above are backend integration checks.
 
-Each successful simulation writes a `<result>_res.json` run metadata sidecar containing model/backend versions, timestamps, output path, and the solver options reported by OMC. Parameter overrides are not available in the CLI, so the metadata currently records an empty parameter list rather than effective model parameter values. CSV inspection rejects missing/non-numeric cells, duplicate headers, and non-monotonic time. CSV export preserves selected variable names and writes round-trippable `f64` text for values it receives; the OMC 1.27.1 scripting formatter is limited to 13 significant digits in this path to avoid its fixed-buffer truncation on event values. Units are not available from this OMC export API and are not inferred.
+Each successful simulation writes a `<result>_res.json` run metadata sidecar containing model/backend versions, timestamps, numeric parameter overrides, output path, and the solver options reported by OMC. The sidecar records requested overrides, not a readback of effective values after model initialization. CSV inspection rejects missing/non-numeric cells, duplicate headers, and non-monotonic time. CSV export preserves selected variable names and writes round-trippable `f64` text for values it receives; the OMC 1.27.1 scripting formatter is limited to 13 significant digits in this path to avoid its fixed-buffer truncation on event values. Units are not available from this OMC export API and are not inferred.
 
 These commands do **not** establish Dymola result compatibility. `.mat` inspection/export is delegated to the selected OpenModelica version, `.dsres` is explicitly unsupported, and no Dymola MAT/DSRES decoder or proprietary result-format guarantee is included. See [result artifact behavior](docs/result-artifacts.md).
 

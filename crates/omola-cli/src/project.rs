@@ -1,6 +1,7 @@
-use omola_core::{BackendError, CommandResult, Omc};
+use omola_core::{BackendError, CommandResult, Omc, SimulationConfig};
 use serde::Deserialize;
 use std::{
+    collections::BTreeMap,
     fs,
     path::{Component, Path, PathBuf},
 };
@@ -31,11 +32,16 @@ struct LibraryPin {
 #[serde(deny_unknown_fields)]
 struct Simulation {
     stop_time: f64,
+    #[serde(default)]
+    parameters: BTreeMap<String, f64>,
 }
 
 impl Default for Simulation {
     fn default() -> Self {
-        Self { stop_time: 1.0 }
+        Self {
+            stop_time: 1.0,
+            parameters: BTreeMap::new(),
+        }
     }
 }
 
@@ -74,15 +80,37 @@ pub(crate) fn run(args: &[String]) -> Result<String, BackendError> {
         &project.package_roots,
     )?;
     let output = output.unwrap_or_else(|| project.root.join("out").join(&project.manifest.name));
-    let result = backend.simulate_project_model(
+    let parameters: Vec<(String, String)> = project
+        .manifest
+        .simulation
+        .parameters
+        .iter()
+        .map(|(name, value)| (name.clone(), value.to_string()))
+        .collect();
+    let started_at_unix_ms = now_unix_ms();
+    let result = backend.simulate_project_model_with_parameters(
         &project.model_file,
         &project.manifest.entry_model,
-        project.manifest.simulation.stop_time,
-        Some(&output),
-        &project.libraries,
-        &project.package_roots,
+        SimulationConfig {
+            stop_time: project.manifest.simulation.stop_time,
+            result: Some(&output),
+            libraries: &project.libraries,
+            package_roots: &project.package_roots,
+            parameters: &parameters,
+        },
     )?;
-    Ok(format_project_result("simulated", &project, &result))
+    let metadata = crate::results::write_run_metadata(
+        &result,
+        &project.model_file,
+        &project.manifest.entry_model,
+        started_at_unix_ms,
+        &parameters,
+    )?;
+    Ok(format!(
+        "{}\nRun metadata: {}",
+        format_project_result("simulated", &project, &result),
+        metadata.display()
+    ))
 }
 
 fn format_project_result(action: &str, project: &LoadedProject, result: &CommandResult) -> String {
@@ -126,6 +154,13 @@ fn load_project(path: &Path) -> Result<LoadedProject, BackendError> {
         ));
     }
     validate_stop_time(manifest.simulation.stop_time)?;
+    let parameters: Vec<(String, String)> = manifest
+        .simulation
+        .parameters
+        .iter()
+        .map(|(name, value)| (name.clone(), value.to_string()))
+        .collect();
+    omola_core::validate_parameter_overrides(&parameters)?;
     let root = manifest_path
         .parent()
         .unwrap_or(Path::new("."))
@@ -163,6 +198,13 @@ fn load_project(path: &Path) -> Result<LoadedProject, BackendError> {
         libraries,
         package_roots,
     })
+}
+
+fn now_unix_ms() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
 }
 
 fn validate_stop_time(stop_time: f64) -> Result<(), BackendError> {
@@ -244,5 +286,44 @@ package_roots = ["."]
         assert!(validate_stop_time(-1.0).is_err());
         assert!(validate_stop_time(f64::INFINITY).is_err());
         assert!(validate_stop_time(0.1).is_ok());
+    }
+
+    #[test]
+    fn simulation_manifest_accepts_numeric_parameter_overrides_and_rejects_unknown_fields() {
+        let parsed: Project = toml::from_str(
+            r#"
+schema_version = 1
+name = "demo"
+model_file = "model.mo"
+entry_model = "Demo"
+package_roots = ["."]
+[simulation]
+stop_time = 1.0
+parameters = { gain = 2.5, "Demo.offset" = -1 }
+"#,
+        )
+        .unwrap();
+        assert_eq!(parsed.simulation.parameters["gain"], 2.5);
+        assert_eq!(parsed.simulation.parameters["Demo.offset"], -1.0);
+        let invalid: Project = toml::from_str(
+            r#"
+schema_version = 1
+name = "demo"
+model_file = "model.mo"
+entry_model = "Demo"
+package_roots = ["."]
+[simulation]
+stop_time = 1.0
+parameters = { "gain;print(1)" = 2.5 }
+"#,
+        )
+        .unwrap();
+        let overrides: Vec<_> = invalid
+            .simulation
+            .parameters
+            .iter()
+            .map(|(name, value)| (name.clone(), value.to_string()))
+            .collect();
+        assert!(omola_core::validate_parameter_overrides(&overrides).is_err());
     }
 }

@@ -1,4 +1,4 @@
-use omola_core::{BackendError, Omc};
+use omola_core::{BackendError, Omc, SimulationConfig};
 use std::{env, path::PathBuf, process::ExitCode};
 
 mod bridge;
@@ -138,9 +138,22 @@ pub(crate) fn simulate(args: &[String]) -> Result<String, BackendError> {
             "--stop-time must be finite and non-negative".into(),
         ));
     }
+    let parameters = parse_parameter_overrides(values.get("--parameters"))?;
+    omola_core::validate_parameter_overrides(&parameters)?;
     let output = values.get("--output").map(PathBuf::from);
-    let result = Omc::discover()?.simulate(&model, &class, stop_time, output.as_deref())?;
-    let metadata = results::write_run_metadata(&result, &model, &class, started_at_unix_ms)?;
+    let result = Omc::discover()?.simulate_project_model_with_parameters(
+        &model,
+        &class,
+        SimulationConfig {
+            stop_time,
+            result: output.as_deref(),
+            libraries: &[],
+            package_roots: &[],
+            parameters: &parameters,
+        },
+    )?;
+    let metadata =
+        results::write_run_metadata(&result, &model, &class, started_at_unix_ms, &parameters)?;
     Ok(format!(
         "{}\nResult: {}\nRun metadata: {}\n{}",
         result.omc_version,
@@ -171,7 +184,8 @@ fn required_with_values(
     while i < args.len() {
         let key = &args[i];
         let allowed = matches!(key.as_str(), "--model" | "--class")
-            || (allow_simulation_options && matches!(key.as_str(), "--stop-time" | "--output"));
+            || (allow_simulation_options
+                && matches!(key.as_str(), "--stop-time" | "--output" | "--parameters"));
         if !allowed {
             return Err(BackendError::InvalidInput(format!(
                 "unknown or unsupported option: {key}"
@@ -206,7 +220,31 @@ fn required_with_values(
 }
 
 fn usage() {
-    eprintln!("Omola 0.1 — OpenModelica-backed Modelica workflow\n\nUsage:\n  omola doctor\n  omola check --model FILE.mo --class Modelica.Class\n  omola simulate --model FILE.mo --class Modelica.Class [--stop-time SECONDS] [--output PREFIX]\n  omola project validate MANIFEST.toml\n  omola project simulate MANIFEST.toml [--output PREFIX]\n  omola licenses check [--output REPORT.md]\n  omola results inspect FILE.csv|FILE.mat\n  omola results export-csv FILE.mat --variables x,y --output FILE.csv\n  omola compat run --manifest FILE.toml --format json|markdown\n  omola bridge inventory [--format json|markdown]\n  omola bridge call --function Dymola.function [--model FILE.mo --class Modelica.Class --stop-time SECONDS]\n\nRequires OpenModelica `omc` on PATH or OMOLA_OMC set to its executable path.");
+    eprintln!("Omola 0.1 — OpenModelica-backed Modelica workflow\n\nUsage:\n  omola doctor\n  omola check --model FILE.mo --class Modelica.Class\n  omola simulate --model FILE.mo --class Modelica.Class [--stop-time SECONDS] [--parameters name=value,name=value] [--output PREFIX]\n  omola project validate MANIFEST.toml\n  omola project simulate MANIFEST.toml [--output PREFIX]\n  omola licenses check [--output REPORT.md]\n  omola results inspect FILE.csv|FILE.mat\n  omola results export-csv FILE.mat --variables x,y --output FILE.csv\n  omola compat run --manifest FILE.toml --format json|markdown\n  omola bridge inventory [--format json|markdown]\n  omola bridge call --function Dymola.function [--model FILE.mo --class Modelica.Class --stop-time SECONDS]\n\nRequires OpenModelica `omc` on PATH or OMOLA_OMC set to its executable path.");
+}
+
+fn parse_parameter_overrides(
+    value: Option<&String>,
+) -> Result<Vec<(String, String)>, BackendError> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    if value.is_empty() {
+        return Err(BackendError::InvalidInput(
+            "--parameters must be a comma-separated list of name=value numeric overrides".into(),
+        ));
+    }
+    let mut result = Vec::new();
+    for item in value.split(',') {
+        let (name, number) = item.split_once('=').ok_or_else(|| {
+            BackendError::InvalidInput(format!(
+                "invalid parameter override `{item}`; expected name=value"
+            ))
+        })?;
+        result.push((name.to_owned(), number.to_owned()));
+    }
+    omola_core::validate_parameter_overrides(&result)?;
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -237,5 +275,13 @@ mod tests {
         .unwrap_err()
         .to_string()
         .contains("repeated"));
+    }
+
+    #[test]
+    fn parameter_override_list_is_numeric_and_injection_safe() {
+        let valid = Some("gravity=9.81,Demo.initialHeight=2".to_owned());
+        assert_eq!(parse_parameter_overrides(valid.as_ref()).unwrap().len(), 2);
+        let invalid = Some("gravity=9.81,other=2;print(1)".to_owned());
+        assert!(parse_parameter_overrides(invalid.as_ref()).is_err());
     }
 }

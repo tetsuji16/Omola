@@ -8,3 +8,4 @@ dependencies = []
 
 [simulation]
 stop_time = 3.0
+parameters = { restitution = 0.65, initialHeight = 2.0 }

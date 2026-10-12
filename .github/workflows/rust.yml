@@ -43,7 +43,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   omc-integration:
-    if: github.event_name == 'workflow_dispatch' && inputs.run_omc
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_omc)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -60,6 +60,13 @@ jobs:
             cargo run -p omola -- simulate --model examples/BouncingBall.mo --class BouncingBall --stop-time 3 --output "target/omola smoke spaces/BouncingBall" &&
             cargo run -p omola -- project validate examples/project.toml &&
             cargo run -p omola -- project simulate examples/project.toml --output "target/project smoke spaces/BouncingBall" &&
+            cargo run -p omola -- simulate --model examples/BouncingBall.mo --class BouncingBall --stop-time 3 --parameters restitution=0.65,initialHeight=2 --output "target/parameter smoke spaces/BouncingBall" &&
+            cargo run -p omola -- simulate --model examples/BouncingBall.mo --class BouncingBall --stop-time 0.1 --output target/parameter-baseline/Ball &&
+            cargo run -p omola -- simulate --model examples/BouncingBall.mo --class BouncingBall --stop-time 0.1 --parameters initialHeight=2 --output target/parameter-changed/Ball &&
+            cargo run -p omola -- results export-csv target/parameter-baseline/Ball_res.mat --variables height --output target/parameter-baseline/Ball.csv &&
+            cargo run -p omola -- results export-csv target/parameter-changed/Ball_res.mat --variables height --output target/parameter-changed/Ball.csv &&
+            awk -F, "NR == 2 { if (\$2 < 0.999 || \$2 > 1.001) exit 1 }" target/parameter-baseline/Ball.csv &&
+            awk -F, "NR == 2 { if (\$2 < 1.999 || \$2 > 2.001) exit 1 }" target/parameter-changed/Ball.csv &&
             cargo run -p omola -- project validate tests/project-root/project.toml &&
             cargo run -p omola -- project simulate tests/project-root/project.toml --output "target/project root spaces/RootedModel"
           ' 2>&1 | tee target/omc-smoke-log/omc-integration.log
@@ -70,7 +77,7 @@ jobs:
           path: target/omc-smoke-log/omc-integration.log
 
   omc-integration-windows:
-    if: github.event_name == 'workflow_dispatch' && inputs.run_omc
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_omc)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -88,6 +95,19 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo run -p omola -- project simulate examples/project.toml --output 'target/project smoke spaces/BouncingBall' 2>&1 | Tee-Object -Append target/omc-smoke-log/omc-project-windows.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo run -p omola -- simulate --model examples/BouncingBall.mo --class BouncingBall --stop-time 3 --parameters 'restitution=0.65,initialHeight=2' --output 'target/parameter smoke spaces/BouncingBall' 2>&1 | Tee-Object -Append target/omc-smoke-log/omc-project-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo run -p omola -- simulate --model examples/BouncingBall.mo --class BouncingBall --stop-time 0.1 --output target/parameter-baseline/Ball 2>&1 | Tee-Object -Append target/omc-smoke-log/omc-project-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo run -p omola -- simulate --model examples/BouncingBall.mo --class BouncingBall --stop-time 0.1 --parameters 'initialHeight=2' --output target/parameter-changed/Ball 2>&1 | Tee-Object -Append target/omc-smoke-log/omc-project-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo run -p omola -- results export-csv target/parameter-baseline/Ball_res.mat --variables height --output target/parameter-baseline/Ball.csv 2>&1 | Tee-Object -Append target/omc-smoke-log/omc-project-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo run -p omola -- results export-csv target/parameter-changed/Ball_res.mat --variables height --output target/parameter-changed/Ball.csv 2>&1 | Tee-Object -Append target/omc-smoke-log/omc-project-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $baseHeight = [double](Import-Csv target/parameter-baseline/Ball.csv | Select-Object -First 1).height
+          $changedHeight = [double](Import-Csv target/parameter-changed/Ball.csv | Select-Object -First 1).height
+          if ([Math]::Abs($baseHeight - 1) -gt 0.001 -or [Math]::Abs($changedHeight - 2) -gt 0.001) { throw "parameter override did not change initial height as expected (baseline=$baseHeight, changed=$changedHeight)" }
           cargo run -p omola -- project validate tests/project-root/project.toml 2>&1 | Tee-Object -Append target/omc-smoke-log/omc-project-windows.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo run -p omola -- project simulate tests/project-root/project.toml --output 'target/project root spaces/RootedModel' 2>&1 | Tee-Object -Append target/omc-smoke-log/omc-project-windows.log
