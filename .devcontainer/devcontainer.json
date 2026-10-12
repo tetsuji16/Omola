@@ -1,0 +1,10 @@
+{
+  "name": "Omola OpenModelica + Rust",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "workspaceFolder": "/workspaces/Omola",
+  "remoteUser": "root",
+  "postCreateCommand": "cargo check --workspace"
+}

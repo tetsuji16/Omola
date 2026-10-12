@@ -25,6 +25,24 @@ cargo run -p omola -- simulate --model .\examples\BouncingBall.mo --class Bounci
 
 The final command becomes runnable when the example model is added in issue 02. To check the current Rust workspace once Rust is installed, run `cargo check --workspace` and `cargo run -p omola -- doctor`.
 
+The compiler is resolved in this order: a non-empty `OMOLA_OMC` executable path, then `omc.exe` from `PATH` on Windows (or `omc` on Unix). A configured path that does not exist is reported directly; it does not silently fall back to PATH. The adapter reports the OMC version with each successful command result, rejects invalid Modelica class names and stop times before creating a script, and removes its temporary `.mos` file and compiler workspace after success or failure. Simulation passes OMC a unique prefix in that isolated workspace, then copies the resulting MAT file to `<output-prefix>_res.mat`; existing result files are not overwritten. This allows output prefixes containing spaces despite OMC's generated makefile path handling.
+
+## Linux development container
+
+The development image starts from the official `openmodelica/openmodelica:v1.27.1-minimal` image and installs the stable Rust toolchain. It is a development environment, not a redistributable Omola runtime image. The OpenModelica minimal image does not include Modelica libraries; no MSL or Dymola files are copied into the repository or image. Install only libraries whose licenses and provenance are compatible with your use.
+
+With Docker Desktop using Linux containers, build and run the checks from PowerShell:
+
+```powershell
+docker build -f .devcontainer/Dockerfile -t omola-dev .
+docker run --rm -v "${PWD}:/workspaces/Omola" -w /workspaces/Omola omola-dev cargo fmt --all -- --check
+docker run --rm -v "${PWD}:/workspaces/Omola" -w /workspaces/Omola omola-dev cargo test --workspace
+docker run --rm -v "${PWD}:/workspaces/Omola" -w /workspaces/Omola omola-dev cargo clippy --workspace --all-targets -- -D warnings
+docker run --rm -v "${PWD}:/workspaces/Omola" -w /workspaces/Omola omola-dev cargo run -p omola -- doctor
+```
+
+The same image can be opened as a development container in VS Code using `.devcontainer/devcontainer.json`. CI runs formatting, tests, and Clippy on both Linux and Windows without requiring OMC for unit tests.
+
 ## Scope and truth in compatibility claims
 
 “Dymola compatible” is not a single property. We track separately: (1) standard Modelica language semantics, (2) Modelica Standard Library and third-party library behavior, (3) Dymola-specific annotations and extensions, (4) Dymola scripting functions and automation, (5) result file import/export and numerical equivalence, (6) graphical authoring and project workflows, and (7) vendor libraries, integrations, licensing, and hosted product features. A green result in one row never implies compatibility in the others.
