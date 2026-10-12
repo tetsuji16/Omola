@@ -9,7 +9,8 @@ The first slice deliberately delegates Modelica parsing, checking, translation, 
 - `omola doctor` locates OMC through `OMOLA_OMC` or `PATH` and reports its version. Missing OMC yields a setup diagnostic.
 - `omola check --model FILE.mo --class Qualified.Name` loads the file and calls OMC `checkModel`.
 - `omola simulate --model FILE.mo --class Qualified.Name [--stop-time SECONDS] [--output PREFIX]` calls OMC `simulate`.
-- Rust crates contain only standard-library dependencies. The compiler remains a separate process; no OMC code is embedded or copied.
+- `omola compat run --manifest tests/compat/manifest.toml --format json|markdown` runs the versioned sample corpus and reports measured pass/fail/skip counts.
+- The core crate uses only the Rust standard library; the CLI uses Serde/TOML/JSON for versioned compatibility manifests and reports. OMC remains a separate process; no compiler code is embedded or copied.
 
 ## Install prerequisites and run the smoke model
 
@@ -66,6 +67,15 @@ docker run --rm -v "${PWD}:/workspaces/Omola" -w /workspaces/Omola omola-dev car
 The same image can be opened as a development container in VS Code using `.devcontainer/devcontainer.json`. CI runs formatting, tests, and Clippy on both Linux and Windows without requiring OMC for unit tests. To run the optional backend integration job, manually dispatch the Rust workflow with `run_omc` enabled; it builds this image, checks and simulates `BouncingBall`, and uploads a concise command log. Normal CI is build/unit validation only and does not claim backend integration coverage.
 
 ## Scope and truth in compatibility claims
+
+The initial compatibility corpus is under `tests/compat`. Run it with OpenModelica using:
+
+```sh
+cargo run -p omola -- compat run --manifest tests/compat/manifest.toml --format markdown
+cargo run -p omola -- compat run --manifest tests/compat/manifest.toml --format json
+```
+
+The current corpus contains an original bouncing-ball simulation, a first-order ODE with numerical CSV golden samples, a negative syntax diagnostic, and an explicitly skipped vendor-library case. Golden values are sampled through OMC `val()` at declared times and compared using absolute/relative tolerances; the report records variable names, time interpolation, and units. These are measured results for the listed fixtures only and never imply Dymola compatibility.
 
 “Dymola compatible” is not a single property. We track separately: (1) standard Modelica language semantics, (2) Modelica Standard Library and third-party library behavior, (3) Dymola-specific annotations and extensions, (4) Dymola scripting functions and automation, (5) result file import/export and numerical equivalence, (6) graphical authoring and project workflows, and (7) vendor libraries, integrations, licensing, and hosted product features. A green result in one row never implies compatibility in the others.
 

@@ -1,8 +1,26 @@
 use omola_core::{BackendError, Omc};
 use std::{env, path::PathBuf, process::ExitCode};
 
+mod compat;
+
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("compat") {
+        return match compat::run(&args[1..]) {
+            Ok((text, has_failures)) => {
+                print!("{text}");
+                if has_failures {
+                    ExitCode::FAILURE
+                } else {
+                    ExitCode::SUCCESS
+                }
+            }
+            Err(error) => {
+                eprintln!("omola: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     let result = match args.first().map(String::as_str) {
         Some("doctor") if args.len() == 1 => doctor(),
         Some("check") => check(&args[1..]),
@@ -120,7 +138,7 @@ fn required_with_values(
 }
 
 fn usage() {
-    eprintln!("Omola 0.1 — OpenModelica-backed Modelica workflow\n\nUsage:\n  omola doctor\n  omola check --model FILE.mo --class Modelica.Class\n  omola simulate --model FILE.mo --class Modelica.Class [--stop-time SECONDS] [--output PREFIX]\n\nRequires OpenModelica `omc` on PATH or OMOLA_OMC set to its executable path.");
+    eprintln!("Omola 0.1 — OpenModelica-backed Modelica workflow\n\nUsage:\n  omola doctor\n  omola check --model FILE.mo --class Modelica.Class\n  omola simulate --model FILE.mo --class Modelica.Class [--stop-time SECONDS] [--output PREFIX]\n  omola compat run --manifest FILE.toml --format json|markdown\n\nRequires OpenModelica `omc` on PATH or OMOLA_OMC set to its executable path.");
 }
 
 #[cfg(test)]
