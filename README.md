@@ -8,24 +8,109 @@ The first slice deliberately delegates Modelica parsing, checking, translation, 
 
 - `omola doctor` locates OMC through `OMOLA_OMC` or `PATH` and reports its version. Missing OMC yields a setup diagnostic.
 - `omola check --model FILE.mo --class Qualified.Name` loads the file and calls OMC `checkModel`.
-- `omola simulate --model FILE.mo --class Qualified.Name [--stop-time SECONDS] [--output PREFIX]` calls OMC `simulate`.
-- Rust crates contain only standard-library dependencies. The compiler remains a separate process; no OMC code is embedded or copied.
+- `omola simulate --model FILE.mo --class Qualified.Name [--stop-time SECONDS] [--parameters name=value,name=value] [--output PREFIX]` calls OMC `simulate`; numeric parameter overrides are validated and recorded in the run sidecar.
+- `omola project validate|simulate examples/project.toml` opens the versioned schema-1 manifest, validates relative package/source paths and exact dependency pins, then delegates checking/simulation to OMC. Modelica files remain user-owned and unchanged.
+- `omola results inspect FILE.csv|FILE.mat` inspects strict CSV or OpenModelica-generated MAT results; `omola results export-csv FILE.mat --variables x,y --output FILE.csv` uses OMC's scripting API to export selected scalar variables.
+- `omola fmi capabilities`, `omola fmi export`, `omola fmi import`, and `omola fmi validate` report the documented OMC profile, delegate FMU operations to OMC, and check basic archive/XML metadata.
+- `omola compat run --manifest tests/compat/manifest.toml --format json|markdown` runs the versioned sample corpus and reports measured pass/fail/skip counts.
+- `omola release verify --scorecard target/compatibility.json --manifest tests/compat/manifest.toml --gates docs/release-gates.toml` rejects stale, incomplete, failing, or below-threshold scorecards.
+- `omola bridge inventory --format markdown|json` reports the small documented Dymola scripting subset; `omola bridge call --function Dymola.simulateModel ...` runs only its declared partial mapping. Unsupported Dymola functions and unmapped simulation parameters return a capability-specific error.
+- `omola licenses check [--output REPORT.md]` compares the locked Cargo dependency closure, CI action references, and development container image against the provenance inventory; it exits unsuccessfully on unrecorded or changed dependencies.
+- The core crate uses only the Rust standard library; the CLI uses Serde/TOML/JSON for versioned compatibility manifests and reports. OMC remains a separate process; no compiler code is embedded or copied.
 
-## Windows development
+## Install prerequisites and run the smoke model
 
-1. Install Rust using the official rustup installer and ensure `cargo` is on `PATH`.
-2. Install OpenModelica and ensure `omc.exe` is on `PATH`; alternatively set `OMOLA_OMC` to the full `omc.exe` path.
-3. From this repository run:
+The checked-in `examples/BouncingBall.mo` uses only built-in Modelica syntax and has no third-party library dependency. The expected simulation variables are `height` (m) and `velocity` (m/s); `gravity`, `restitution`, and `initialHeight` are parameters. Running it requires an installed OpenModelica Compiler (OMC). This is a backend smoke test, not a Dymola parity test.
+
+Install Rust with the official [rustup instructions](https://www.rust-lang.org/tools/install): on Windows use the linked `rustup-init.exe`; on macOS/Linux the standard command is:
+
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Install OpenModelica using the [official Windows download](https://openmodelica.org/download/download-windows/) and ensure `omc.exe` is on `PATH`. On Debian/Ubuntu, follow the repository setup for your release in the [official Linux instructions](https://openmodelica.org/download/download-linux/), then run `sudo apt update && sudo apt install openmodelica`. OpenModelica's [official macOS page](https://openmodelica.org/download/download-mac/) notes that native binaries were discontinued after 1.16; use its Linux Docker alternative. From the repository root, the included development image provides both OMC and Rust:
+
+```sh
+docker build -f .devcontainer/Dockerfile -t omola-dev .
+docker run --rm -v "$PWD:/workspaces/Omola" -w /workspaces/Omola omola-dev cargo run -p omola -- doctor
+docker run --rm -v "$PWD:/workspaces/Omola" -w /workspaces/Omola omola-dev sh -lc 'cargo run -p omola -- check --model examples/BouncingBall.mo --class BouncingBall && cargo run -p omola -- simulate --model examples/BouncingBall.mo --class BouncingBall --stop-time 3 --output "target/omola smoke spaces/BouncingBall"'
+```
+
+On Windows PowerShell with Rust and OMC installed, run:
 
 ```powershell
 cargo run -p omola -- doctor
-cargo run -p omola -- check --model .\examples\BouncingBall.mo --class BouncingBall
-cargo run -p omola -- simulate --model .\examples\BouncingBall.mo --class BouncingBall --stop-time 3 --output .\out\BouncingBall
+cargo run -p omola -- check --model examples\BouncingBall.mo --class BouncingBall
+cargo run -p omola -- simulate --model examples\BouncingBall.mo --class BouncingBall --stop-time 3 --output "out\smoke results\BouncingBall"
+cargo run -p omola -- project validate examples\project.toml
+cargo run -p omola -- project simulate examples\project.toml --output "out\project results\BouncingBall"
 ```
 
-The final command becomes runnable when the example model is added in issue 02. To check the current Rust workspace once Rust is installed, run `cargo check --workspace` and `cargo run -p omola -- doctor`.
+On macOS/Linux with native OMC installed, the equivalent commands are:
+
+```sh
+cargo run -p omola -- doctor
+cargo run -p omola -- check --model examples/BouncingBall.mo --class BouncingBall
+cargo run -p omola -- simulate --model examples/BouncingBall.mo --class BouncingBall --stop-time 3 --output "out/smoke results/BouncingBall"
+cargo run -p omola -- project validate examples/project.toml
+cargo run -p omola -- project simulate examples/project.toml --output "out/project results/BouncingBall"
+```
+
+The project schema, path/dependency policy, migration boundary, and unsupported editor workflows are described in [the project workflow proposal](docs/project-workflow.md). The sample manifest points to the existing `BouncingBall.mo`; it does not copy or modify the Modelica source. OMC integration jobs run on pull requests and can also be requested manually; Windows runs install the pinned OpenModelica version through its setup action.
+
+The output prefix may contain spaces. To validate Rust without OMC, run `cargo check --workspace`; this is a build-only check and does not exercise the compiler backend. The OMC commands above are backend integration checks.
+
+Each successful simulation writes a `<result>_res.json` run metadata sidecar containing model/backend versions, timestamps, numeric parameter overrides, output path, and the solver options reported by OMC. The sidecar records requested overrides, not a readback of effective values after model initialization. CSV inspection rejects missing/non-numeric cells, duplicate headers, and non-monotonic time. CSV export preserves selected variable names and writes round-trippable `f64` text for values it receives; the OMC 1.27.1 scripting formatter is limited to 13 significant digits in this path to avoid its fixed-buffer truncation on event values. Units are not available from this OMC export API and are not inferred.
+
+These commands do **not** establish Dymola result compatibility. `.mat` inspection/export is delegated to the selected OpenModelica version, `.dsres` is explicitly unsupported, and no Dymola MAT/DSRES decoder or proprietary result-format guarantee is included. See [result artifact behavior](docs/result-artifacts.md).
+
+FMI export and import are delegated to OMC. `omola fmi capabilities` reports the pinned OMC 1.27.1 documentation profile and states when a different installed version is being used because live capability probing is unavailable. The default artifact export is platform-specific. `fmi validate` checks the archive, model description, FMI version/name, interface declaration, and binary directory; it does not certify FMI conformance or interoperability with Dymola. FMI import is limited to the documented experimental FMI 2.0 Model Exchange wrapper path and records that limitation in a JSON sidecar; see [FMI workflow scope](docs/fmi-workflow.md).
+
+The compiler is resolved in this order: a non-empty `OMOLA_OMC` executable path, then `omc.exe` from `PATH` on Windows (or `omc` on Unix). A configured path that does not exist is reported directly; it does not silently fall back to PATH. The adapter reports the OMC version with each successful command result, rejects invalid Modelica class names and stop times before creating a script, and removes its temporary `.mos` file and compiler workspace after success or failure. Simulation passes OMC a unique prefix in that isolated workspace, then copies the resulting MAT file to `<output-prefix>_res.mat`; existing result files are not overwritten. This allows output prefixes containing spaces despite OMC's generated makefile path handling.
+
+## Linux development container
+
+The development image starts from the official `openmodelica/openmodelica:v1.27.1-minimal` image and installs the stable Rust toolchain. It is a development environment, not a redistributable Omola runtime image. The OpenModelica minimal image does not include Modelica libraries; no MSL or Dymola files are copied into the repository or image. Install only libraries whose licenses and provenance are compatible with your use.
+
+With Docker Desktop using Linux containers, build and run the checks from PowerShell:
+
+```powershell
+docker build -f .devcontainer/Dockerfile -t omola-dev .
+docker run --rm -v "${PWD}:/workspaces/Omola" -w /workspaces/Omola omola-dev cargo fmt --all -- --check
+docker run --rm -v "${PWD}:/workspaces/Omola" -w /workspaces/Omola omola-dev cargo test --workspace
+docker run --rm -v "${PWD}:/workspaces/Omola" -w /workspaces/Omola omola-dev cargo clippy --workspace --all-targets -- -D warnings
+docker run --rm -v "${PWD}:/workspaces/Omola" -w /workspaces/Omola omola-dev cargo run -p omola -- doctor
+```
+
+The same image can be opened as a development container in VS Code using `.devcontainer/devcontainer.json`. CI runs formatting, tests, and Clippy on both Linux and Windows without requiring OMC for unit tests. Pull requests also run the OMC backend integration: Linux builds this image; Windows installs the pinned OMC through the upstream setup action. Both check/simulate the sample and upload command logs. The Rust-only checks remain independent of OMC; merge CI and backend integration coverage are reported separately.
 
 ## Scope and truth in compatibility claims
+
+The initial compatibility corpus is under `tests/compat`. Run it with OpenModelica using:
+
+```sh
+cargo run -p omola -- compat run --manifest tests/compat/manifest.toml --format markdown
+cargo run -p omola -- compat run --manifest tests/compat/manifest.toml --format json
+cargo run -p omola -- release verify --scorecard target/compatibility.json --manifest tests/compat/manifest.toml --gates docs/release-gates.toml
+```
+
+The pull-request OMC job installs the pinned Modelica Standard Library 4.1.0, emits JSON and Markdown compatibility scorecards, and runs the release gate against the exact current manifest. The scorecards are uploaded as CI artifacts. Omola currently has no declared minimum supported OMC version; the pinned release evidence is OpenModelica 1.27.1 and the fixture-level version prefixes in the manifest. Before 1.0, CLI and project-schema changes may break; every project format change must increment its schema version and document migration. After 1.0, CLI/project schemas follow SemVer: breaking changes require a major version, additive compatible changes a minor version, and fixes a patch version.
+
+The bounded corpus pins Modelica Specification 3.6 (the baseline used by MSL 4.1.0) and includes original Omola examples, a Modelica Standard Library 4.1.0 Blocks composition, a first-order ODE with numerical CSV golden samples, and a negative syntax diagnostic. It maps the Modelica Association Modelica-Compliance `Connections.Declarations` category at commit `9734eb101c1adf3bc59ee2ec999e53fffbc13f4b`; that upstream suite entry is explicitly skipped because its package/test harness is not yet integrated. An excluded vendor-library case is also reported as skipped. The report labels execution as “Omola via OpenModelica” and includes source/license/version metadata and pass/fail/skip counts by feature and library. Golden values are sampled through OMC `val()` at declared times and compared using absolute/relative tolerances; the report records variable names, time interpolation, and units. These are measured results for the listed fixtures only and never imply Dymola compatibility.
+
+The MSL model uses the official public library under its BSD 3-Clause license. The repository and development image do not redistribute MSL. With OMC installed and network access available, install the pinned release using OpenModelica's package manager, then run the corpus:
+
+```powershell
+omc tests/compat/install-msl.mos
+cargo run -p omola -- compat run --manifest tests/compat/manifest.toml --format markdown
+cargo run -p omola -- compat run --manifest tests/compat/manifest.toml --format json
+```
+
+The MSL fixture requires the exact 4.1.0 release and is not treated as passed if that library cannot be loaded. The negative syntax fixture demonstrates diagnostic behavior; it does not imply conformance coverage of the complete Modelica language or public conformance suite.
+
+The scripting bridge inventory, official documentation sources, mapped parameters, and unsupported capability diagnostics are documented in [docs/dymola-scripting-bridge.md](docs/dymola-scripting-bridge.md). `simulateModel` is only partially mapped to Omola's file-backed simulation command; translation, interactive plotting, and Dymola's persistent last-error state remain unsupported.
+
+The dependency provenance ledger and CI check are documented in [docs/provenance-licenses.md](docs/provenance-licenses.md) and [licenses/inventory.toml](licenses/inventory.toml). This repository does not bundle OMC, MSL, Dymola libraries/runtime, or an FMI runtime. The devcontainer is a development environment; review the exact upstream distribution and linked-component terms before redistribution. Generated FMUs need a separate package-content audit. Naming/trademark review remains a release gate.
 
 “Dymola compatible” is not a single property. We track separately: (1) standard Modelica language semantics, (2) Modelica Standard Library and third-party library behavior, (3) Dymola-specific annotations and extensions, (4) Dymola scripting functions and automation, (5) result file import/export and numerical equivalence, (6) graphical authoring and project workflows, and (7) vendor libraries, integrations, licensing, and hosted product features. A green result in one row never implies compatibility in the others.
 

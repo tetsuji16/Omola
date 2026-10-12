@@ -1,0 +1,126 @@
+name: Rust
+
+on:
+  push:
+    branches: [main, "codex/**"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      run_omc:
+        description: Run the OpenModelica backend smoke test
+        type: boolean
+        required: true
+        default: false
+
+jobs:
+  license-inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify dependency provenance and generate inventory
+        run: cargo run -p omola -- licenses check --output target/license-inventory.md
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dependency-license-inventory
+          path: target/license-inventory.md
+          if-no-files-found: ignore
+
+  checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - run: cargo fmt --all -- --check
+      - run: cargo test --workspace
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  omc-integration:
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_omc)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build OpenModelica development image
+        run: docker build -f .devcontainer/Dockerfile -t omola-dev .
+      - name: Check and simulate the smoke model
+        run: |
+          mkdir -p target/omc-smoke-log
+          set -o pipefail
+          docker run --rm -v "$PWD:/workspaces/Omola" -w /workspaces/Omola omola-dev sh -lc '
+            cargo check --workspace &&
+            cargo run -p omola -- doctor &&
+            cargo run -p omola -- check --model examples/BouncingBall.mo --class BouncingBall &&
+            cargo run -p omola -- simulate --model examples/BouncingBall.mo --class BouncingBall --stop-time 3 --output "target/omola smoke spaces/BouncingBall" &&
+            cargo run -p omola -- project validate examples/project.toml &&
+            cargo run -p omola -- project simulate examples/project.toml --output "target/project smoke spaces/BouncingBall" &&
+            cargo run -p omola -- simulate --model examples/BouncingBall.mo --class BouncingBall --stop-time 3 --parameters restitution=0.65,initialHeight=2 --output "target/parameter smoke spaces/BouncingBall" &&
+            cargo run -p omola -- simulate --model examples/BouncingBall.mo --class BouncingBall --stop-time 0.1 --output target/parameter-baseline/Ball &&
+            cargo run -p omola -- simulate --model examples/BouncingBall.mo --class BouncingBall --stop-time 0.1 --parameters initialHeight=2 --output target/parameter-changed/Ball &&
+            cargo run -p omola -- results export-csv target/parameter-baseline/Ball_res.mat --variables height --output target/parameter-baseline/Ball.csv &&
+            cargo run -p omola -- results export-csv target/parameter-changed/Ball_res.mat --variables height --output target/parameter-changed/Ball.csv &&
+            awk -F, "NR == 2 { if (\$2 < 0.999 || \$2 > 1.001) exit 1 }" target/parameter-baseline/Ball.csv &&
+            awk -F, "NR == 2 { if (\$2 < 1.999 || \$2 > 2.001) exit 1 }" target/parameter-changed/Ball.csv &&
+            cargo run -p omola -- project validate tests/project-root/project.toml &&
+            cargo run -p omola -- project simulate tests/project-root/project.toml --output "target/project root spaces/RootedModel" &&
+            omc tests/compat/install-msl.mos &&
+            cargo run -p omola -- compat run --manifest tests/compat/manifest.toml --format json > target/compatibility.json &&
+            cargo run -p omola -- compat run --manifest tests/compat/manifest.toml --format markdown > target/compatibility.md &&
+            cargo run -p omola -- release verify --scorecard target/compatibility.json --manifest tests/compat/manifest.toml --gates docs/release-gates.toml
+          ' 2>&1 | tee target/omc-smoke-log/omc-integration.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: omola-omc-smoke-log
+          path: |
+            target/omc-smoke-log/omc-integration.log
+            target/compatibility.json
+            target/compatibility.md
+
+  omc-integration-windows:
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_omc)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: OpenModelica/setup-openmodelica@419f31141aa79a22f7033def5626047dd3bb5069
+        with:
+          version: '1.27.1'
+      - name: Check and simulate project manifests
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path target/omc-smoke-log | Out-Null
+          cargo run -p omola -- project validate examples/project.toml 2>&1 | Tee-Object target/omc-smoke-log/omc-project-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo run -p omola -- project simulate examples/project.toml --output 'target/project smoke spaces/BouncingBall' 2>&1 | Tee-Object -Append target/omc-smoke-log/omc-project-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo run -p omola -- simulate --model examples/BouncingBall.mo --class BouncingBall --stop-time 3 --parameters 'restitution=0.65,initialHeight=2' --output 'target/parameter smoke spaces/BouncingBall' 2>&1 | Tee-Object -Append target/omc-smoke-log/omc-project-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo run -p omola -- simulate --model examples/BouncingBall.mo --class BouncingBall --stop-time 0.1 --output target/parameter-baseline/Ball 2>&1 | Tee-Object -Append target/omc-smoke-log/omc-project-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo run -p omola -- simulate --model examples/BouncingBall.mo --class BouncingBall --stop-time 0.1 --parameters 'initialHeight=2' --output target/parameter-changed/Ball 2>&1 | Tee-Object -Append target/omc-smoke-log/omc-project-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo run -p omola -- results export-csv target/parameter-baseline/Ball_res.mat --variables height --output target/parameter-baseline/Ball.csv 2>&1 | Tee-Object -Append target/omc-smoke-log/omc-project-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo run -p omola -- results export-csv target/parameter-changed/Ball_res.mat --variables height --output target/parameter-changed/Ball.csv 2>&1 | Tee-Object -Append target/omc-smoke-log/omc-project-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $baseHeight = [double](Import-Csv target/parameter-baseline/Ball.csv | Select-Object -First 1).height
+          $changedHeight = [double](Import-Csv target/parameter-changed/Ball.csv | Select-Object -First 1).height
+          if ([Math]::Abs($baseHeight - 1) -gt 0.001 -or [Math]::Abs($changedHeight - 2) -gt 0.001) { throw "parameter override did not change initial height as expected (baseline=$baseHeight, changed=$changedHeight)" }
+          cargo run -p omola -- project validate tests/project-root/project.toml 2>&1 | Tee-Object -Append target/omc-smoke-log/omc-project-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo run -p omola -- project simulate tests/project-root/project.toml --output 'target/project root spaces/RootedModel' 2>&1 | Tee-Object -Append target/omc-smoke-log/omc-project-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: omola-omc-windows-smoke-log
+          path: target/omc-smoke-log/omc-project-windows.log

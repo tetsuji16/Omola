@@ -1,0 +1,82 @@
+schema_version = 2
+name = "Omola Modelica 3.6 / MSL 4.1.0 bounded corpus"
+modelica_spec_version = "3.6 (pinned; MSL 4.1.0 baseline)"
+
+[[fixtures]]
+id = "bouncing-ball-simulate"
+model = "../../examples/BouncingBall.mo"
+class = "BouncingBall"
+operation = "simulate"
+expected = "pass"
+feature_tags = ["modelica.event-handling", "omc.simulate"]
+provenance = "Original Omola example"
+license = "MIT"
+omc_version_prefix = "OpenModelica 1.27."
+libraries = []
+solver = "dassl"
+stop_time = 3.0
+
+[[fixtures]]
+id = "msl-first-order-blocks"
+model = "fixtures/MSLFirstOrder.mo"
+class = "MSLFirstOrder"
+operation = "simulate"
+expected = "pass"
+feature_tags = ["msl.blocks.sources", "msl.blocks.continuous", "modelica.connect"]
+provenance = "Original Omola composition using Modelica Standard Library public blocks"
+license = "MIT (fixture); BSD-3-Clause (Modelica Standard Library 4.1.0)"
+omc_version_prefix = "OpenModelica 1.27."
+libraries = ["Modelica 4.1.0"]
+solver = "dassl"
+stop_time = 1.0
+
+[[fixtures]]
+id = "first-order-numerical-golden"
+model = "fixtures/FirstOrder.mo"
+class = "FirstOrder"
+operation = "simulate"
+expected = "pass"
+feature_tags = ["modelica.ode", "numerical.interpolation"]
+provenance = "Original first-order fixture authored for Omola"
+license = "MIT"
+omc_version_prefix = "OpenModelica 1.27."
+libraries = []
+solver = "dassl"
+stop_time = 1.0
+
+[fixtures.comparison]
+golden_csv = "fixtures/FirstOrder.csv"
+variables = ["x"]
+time_alignment = "interpolate"
+units = { x = "1" }
+absolute_tolerance = 1e-5
+relative_tolerance = 1e-5
+
+[[fixtures]]
+id = "invalid-syntax-diagnostic"
+model = "fixtures/InvalidSyntax.mo"
+class = "InvalidSyntax"
+operation = "check"
+expected = "fail"
+feature_tags = ["modelica.invalid-syntax", "omc.diagnostics"]
+provenance = "Original negative fixture authored for Omola"
+license = "MIT"
+libraries = []
+
+[[fixtures]]
+id = "modelica-compliance-connections-declarations"
+expected = "skip"
+feature_tags = ["modelica.connections", "modelica.compliance.connections-declarations"]
+provenance = "Modelica Association Modelica-Compliance@9734eb101c1adf3bc59ee2ec999e53fffbc13f4b; Connections.Declarations category, linked to Modelica Specification 3.6 section 9.1-9.2; https://github.com/modelica/Modelica-Compliance"
+license = "Modelica License 2 (upstream LICENSE); source not redistributed"
+libraries = ["ModelicaCompliance @ 9734eb101c1adf3bc59ee2ec999e53fffbc13f4b"]
+skip_reason = "Upstream suite is pinned and mapped but not staged: its package/test harness is not integrated into this bounded runner"
+
+[[fixtures]]
+id = "excluded-vendor-library-example"
+expected = "skip"
+feature_tags = ["vendor-library.proprietary-example"]
+provenance = "No model is included; excluded pending user authorization"
+license = "not included"
+libraries = []
+skip_reason = "Fixture intentionally omitted because no redistribution authorization is available"

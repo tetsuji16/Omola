@@ -14,3 +14,11 @@
 - No claim of Dymola parity follows from FMI conformance alone.
 
 **Validation commands:** `cargo test --workspace`; `cargo run -p omola -- fmi capabilities`; `cargo run -p omola -- fmi export --model examples/BouncingBall.mo --class BouncingBall --version 2.0 --type cs --output out/BouncingBall.fmu`; `cargo run -p omola -- fmi validate out/BouncingBall.fmu`.
+
+## Implementation status (2026-10-12)
+
+Implemented in the follow-up PR commit for issue #7: `fmi capabilities`, `fmi export`, `fmi validate`, and the documented OMC-supported experimental FMI 2.0 Model Exchange `fmi import` path. Export delegates to OMC, requires a real generated file, copies without overwriting, and validates ZIP structure, modelDescription.xml, model name/version/interface, and a binaries directory. Export/import record JSON metadata and import limitations. FMI import is not an Omola runtime and does not assert numerical equivalence.
+
+Verified in the pinned OpenModelica 1.27.1 Docker image: BouncingBall FMI 2.0 Co-Simulation and Model Exchange exports, validation of their metadata, and Model Exchange import into a new output directory. The command output directory included spaces. A hyphenated `fileNamePrefix` triggered an OMC generated C/header mismatch and no FMU; Omola now uses identifier-safe prefixes and rejects missing artifacts instead of treating an exit-0/empty result as success.
+
+Capability claims use the official [OpenModelica 1.27.1 FMI guide](https://openmodelica.org/doc/OpenModelicaUsersGuide/1.27/fmitlm.html) and [scripting API](https://openmodelica.org/doc/OpenModelicaUsersGuide/1.27/scripting_api.html), not a live feature probe. Other OMC versions are explicitly labeled unprobed. OMC describes FMU import as experimental and its Modelica wrapper uses a non-standard flag. FMI alone establishes no Dymola parity.

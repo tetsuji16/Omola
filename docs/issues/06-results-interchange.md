@@ -13,3 +13,7 @@
 - Any claimed result interoperability has fixtures, variable/time coverage, unit checks, and stated numeric tolerances.
 
 **Validation commands:** `cargo test --workspace`; `cargo run -p omola -- results inspect PATH`; `cargo run -p omola -- results export-csv PATH --variables x,y --output result.csv`.
+
+## Implementation status
+
+Added finite numeric overrides to `omola simulate --parameters name=value,...` and schema-1 project `[simulation].parameters`; OMC receives these through its `simulate` `simflags`/`-override` interface. Run sidecars record the requested overrides alongside versions, paths, solver output, and timestamps. They do not claim effective-value readback. Empty/missing units remain explicitly unavailable through the current OMC metadata path. The Linux OMC smoke model was simulated using both CLI and project-manifest overrides; sidecars contained the requested values. CSV coverage and unsupported-format handling remain as above. Do not claim Dymola MAT/DSRES compatibility.

@@ -1,0 +1,11 @@
+# Required, measured corpus for the current 0.x release gate.
+# Update this policy only with corresponding fixture and evidence review.
+minimum_pass = 4
+maximum_fail = 0
+maximum_skip = 2
+required_fixtures = [
+  "bouncing-ball-simulate",
+  "msl-first-order-blocks",
+  "first-order-numerical-golden",
+  "invalid-syntax-diagnostic",
+]

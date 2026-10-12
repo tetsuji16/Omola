@@ -13,3 +13,7 @@
 - README clearly distinguishes build-only checks from backend integration checks.
 
 **Validation commands:** `cargo check --workspace`; `cargo run -p omola -- doctor`; `cargo run -p omola -- check --model examples/BouncingBall.mo --class BouncingBall`; `cargo run -p omola -- simulate --model examples/BouncingBall.mo --class BouncingBall --stop-time 3 --output out/BouncingBall`.
+
+## Implementation status
+
+The checked-in model and OS-specific setup instructions are implemented. PR-triggered OMC integration runs the Linux model check/simulation and parameter differential, and stores concise logs. GitHub Actions run #22 also completed the Windows OMC project simulation and uploaded its log artifact. The acceptance criteria are met; issue #2 was closed after that evidence.

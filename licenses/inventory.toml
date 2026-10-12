@@ -1,0 +1,359 @@
+schema_version = 1
+
+# Cargo registry packages in the locked workspace dependency closure.
+cargo_redistribution = "Not vendored. Builds fetch from crates.io; binary distributors must review and retain applicable notices."
+
+container_images = ["openmodelica/openmodelica:v1.27.1-minimal"]
+container_packages = ["ca-certificates", "curl", "build-essential", "git"]
+
+[[cargo_packages]]
+name = "zip"
+version = "2.4.2"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "zopfli"
+version = "0.8.4"
+license = "Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "simd-adler32"
+version = "0.3.10"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "log"
+version = "0.4.34"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "crc32fast"
+version = "1.5.2"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "cfg-if"
+version = "1.0.5"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "bumpalo"
+version = "3.20.3"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "thiserror"
+version = "2.0.21"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "thiserror-impl"
+version = "2.0.21"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "syn"
+version = "3.0.8"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "unicode-ident"
+version = "1.0.27"
+license = "(MIT OR Apache-2.0) AND Unicode-3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "quote"
+version = "1.0.47"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "proc-macro2"
+version = "1.0.107"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "block-buffer"
+version = "0.10.4"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "cpufeatures"
+version = "0.2.17"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "crypto-common"
+version = "0.1.7"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "digest"
+version = "0.10.7"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "generic-array"
+version = "0.14.7"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "libc"
+version = "0.2.190"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "sha2"
+version = "0.10.9"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "typenum"
+version = "1.20.1"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "version_check"
+version = "0.9.5"
+license = "MIT/Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "memchr"
+version = "2.8.3"
+license = "Unlicense OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "indexmap"
+version = "2.14.2"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "hashbrown"
+version = "0.17.1"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "equivalent"
+version = "1.0.2"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "flate2"
+version = "1.1.10"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "miniz_oxide"
+version = "0.9.1"
+license = "MIT OR Zlib OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "adler2"
+version = "2.0.1"
+license = "0BSD OR MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "displaydoc"
+version = "0.2.7"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "crossbeam-utils"
+version = "0.8.23"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "arbitrary"
+version = "1.5.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "derive_arbitrary"
+version = "1.5.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "toml"
+version = "0.8.23"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "toml_edit"
+version = "0.22.27"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "winnow"
+version = "0.7.15"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "toml_write"
+version = "0.1.2"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "toml_datetime"
+version = "0.6.11"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "serde"
+version = "1.0.229"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "serde_derive"
+version = "1.0.229"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "serde_core"
+version = "1.0.229"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "serde_spanned"
+version = "0.6.9"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "serde_json"
+version = "1.0.154"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "zmij"
+version = "1.0.23"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "itoa"
+version = "1.0.18"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "quick-xml"
+version = "0.38.4"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+# External components are separated from Omola code and are not bundled by this repository.
+[[external_components]]
+name = "OpenModelica Compiler (OMC)"
+version = "1.27.1-minimal development image"
+source = "https://github.com/OpenModelica/OpenModelica"
+license = "OSMC-PL 1.8 or AGPL-3.0 as stated by selected official distribution; third-party components retain their own terms"
+distribution = "External process prerequisite; repository does not redistribute the image. Development container only; review selected distribution and linked components before redistribution."
+
+[[external_components]]
+name = "Modelica Standard Library (MSL)"
+version = "4.1.0 compatibility target; optional"
+source = "https://github.com/modelica/ModelicaStandardLibrary"
+license = "BSD-3-Clause"
+distribution = "Not vendored or installed by Omola; user-installed optional library."
+
+[[external_components]]
+name = "Self-authored FixtureLib"
+version = "1.0"
+source = "tests/project-root/packages/FixtureLib 1.0/package.mo"
+license = "MIT (project license)"
+distribution = "Small test fixture shipped in repository."
+
+[[external_components]]
+name = "Dymola vendor libraries and runtime"
+version = "N/A"
+source = "Commercial vendor ecosystem; no binaries or libraries included"
+license = "Applicable Dymola program terms; review for each version/use"
+distribution = "Excluded; no Dymola files/runtime shipped."
+
+[[external_components]]
+name = "FMI runtime"
+version = "None embedded by Omola"
+source = "OMC delegated FMU generation; generated FMU is a separate artifact"
+license = "Depends on generated artifact contents and third-party components"
+distribution = "No FMI runtime bundled by Omola; audit each generated FMU package before redistribution."
+
+[[external_components]]
+name = "Rust toolchain in development container"
+version = "rustup stable channel (resolved at image build time)"
+source = "https://rustup.rs/"
+license = "Apache-2.0 or MIT (Rust project components; see upstream notices)"
+distribution = "Development-only; not embedded in Omola binaries. Toolchain is intentionally not pinned to a dated release yet."
+
+[[external_components]]
+name = "Debian development utilities in container"
+version = "ca-certificates, curl, build-essential, git (distribution versions from base image repositories)"
+source = "Debian package repositories configured by the base image"
+license = "Per-package upstream licenses and Debian copyright notices"
+distribution = "Development-only; not embedded in Omola binaries. Exact transitive OS package versions are supplied by the mutable base-image tag and must be reviewed before republishing the image."
+
+[[workflow_actions]]
+reference = "actions/checkout@v4"
+source = "https://github.com/actions/checkout"
+license = "MIT"
+distribution = "GitHub-hosted CI action; not included in Omola binaries. Tag is a mutable upstream reference."
+
+[[workflow_actions]]
+reference = "dtolnay/rust-toolchain@stable"
+source = "https://github.com/dtolnay/rust-toolchain"
+license = "MIT"
+distribution = "GitHub-hosted CI action; not included in Omola binaries. Tag is a mutable upstream reference."
+
+[[workflow_actions]]
+reference = "actions/upload-artifact@v4"
+source = "https://github.com/actions/upload-artifact"
+license = "MIT"
+distribution = "GitHub-hosted CI action; not included in Omola binaries. Tag is a mutable upstream reference."
+
+[[workflow_actions]]
+reference = "OpenModelica/setup-openmodelica@419f31141aa79a22f7033def5626047dd3bb5069"
+source = "https://github.com/OpenModelica/setup-openmodelica"
+license = "OSMC Public License 1.8 (upstream repository)"
+distribution = "GitHub-hosted Windows OMC CI action; not included in Omola binaries. Pinned to an immutable upstream commit."
+
+
