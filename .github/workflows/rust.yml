@@ -72,7 +72,7 @@ jobs:
             omc tests/compat/install-msl.mos &&
             cargo run -p omola -- compat run --manifest tests/compat/manifest.toml --format json > target/compatibility.json &&
             cargo run -p omola -- compat run --manifest tests/compat/manifest.toml --format markdown > target/compatibility.md &&
-            cargo run -p omola -- release verify --scorecard target/compatibility.json --manifest tests/compat/manifest.toml
+            cargo run -p omola -- release verify --scorecard target/compatibility.json --manifest tests/compat/manifest.toml --gates docs/release-gates.toml
           ' 2>&1 | tee target/omc-smoke-log/omc-integration.log
       - uses: actions/upload-artifact@v4
         if: always()

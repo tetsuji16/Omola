@@ -1,5 +1,6 @@
 use omola_core::{BackendError, CommandResult, Omc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     fs,
@@ -48,6 +49,7 @@ struct Comparison {
 struct Report {
     schema_version: u32,
     manifest: String,
+    manifest_sha256: String,
     execution_label: &'static str,
     omola_version: &'static str,
     omc_version: Option<String>,
@@ -243,8 +245,9 @@ pub fn run(args: &[String]) -> Result<(String, bool), BackendError> {
     }
     let has_failures = totals.fail > 0;
     let report = Report {
-        schema_version: 2,
+        schema_version: 3,
         manifest: manifest.name,
+        manifest_sha256: format!("{:x}", Sha256::digest(manifest_text.as_bytes())),
         execution_label: "Omola via OpenModelica",
         omola_version: env!("CARGO_PKG_VERSION"),
         omc_version,
