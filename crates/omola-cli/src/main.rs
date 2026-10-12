@@ -3,6 +3,7 @@ use std::{env, path::PathBuf, process::ExitCode};
 
 mod bridge;
 mod compat;
+mod results;
 
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -24,6 +25,18 @@ fn main() -> ExitCode {
     }
     if args.first().map(String::as_str) == Some("bridge") {
         return match bridge::run(&args[1..]) {
+            Ok(text) => {
+                print!("{text}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("omola: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    if args.first().map(String::as_str) == Some("results") {
+        return match results::run(&args[1..]) {
             Ok(text) => {
                 print!("{text}");
                 ExitCode::SUCCESS
@@ -71,6 +84,10 @@ fn check(args: &[String]) -> Result<String, BackendError> {
 
 pub(crate) fn simulate(args: &[String]) -> Result<String, BackendError> {
     let (model, class, values) = required_with_values(args, true)?;
+    let started_at_unix_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
     let stop_time = match values.get("--stop-time") {
         Some(value) => value.parse::<f64>().map_err(|_| {
             BackendError::InvalidInput("--stop-time must be a finite non-negative number".into())
@@ -84,14 +101,16 @@ pub(crate) fn simulate(args: &[String]) -> Result<String, BackendError> {
     }
     let output = values.get("--output").map(PathBuf::from);
     let result = Omc::discover()?.simulate(&model, &class, stop_time, output.as_deref())?;
+    let metadata = results::write_run_metadata(&result, &model, &class, started_at_unix_ms)?;
     Ok(format!(
-        "{}\nResult: {}\n{}",
+        "{}\nResult: {}\nRun metadata: {}\n{}",
         result.omc_version,
         result
             .result_file
             .as_ref()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "<missing>".into()),
+        metadata.display(),
         result.output
     ))
 }
@@ -148,7 +167,7 @@ fn required_with_values(
 }
 
 fn usage() {
-    eprintln!("Omola 0.1 — OpenModelica-backed Modelica workflow\n\nUsage:\n  omola doctor\n  omola check --model FILE.mo --class Modelica.Class\n  omola simulate --model FILE.mo --class Modelica.Class [--stop-time SECONDS] [--output PREFIX]\n  omola compat run --manifest FILE.toml --format json|markdown\n  omola bridge inventory [--format json|markdown]\n  omola bridge call --function Dymola.function [--model FILE.mo --class Modelica.Class --stop-time SECONDS]\n\nRequires OpenModelica `omc` on PATH or OMOLA_OMC set to its executable path.");
+    eprintln!("Omola 0.1 — OpenModelica-backed Modelica workflow\n\nUsage:\n  omola doctor\n  omola check --model FILE.mo --class Modelica.Class\n  omola simulate --model FILE.mo --class Modelica.Class [--stop-time SECONDS] [--output PREFIX]\n  omola results inspect FILE.csv|FILE.mat\n  omola results export-csv FILE.mat --variables x,y --output FILE.csv\n  omola compat run --manifest FILE.toml --format json|markdown\n  omola bridge inventory [--format json|markdown]\n  omola bridge call --function Dymola.function [--model FILE.mo --class Modelica.Class --stop-time SECONDS]\n\nRequires OpenModelica `omc` on PATH or OMOLA_OMC set to its executable path.");
 }
 
 #[cfg(test)]

@@ -9,6 +9,7 @@ The first slice deliberately delegates Modelica parsing, checking, translation, 
 - `omola doctor` locates OMC through `OMOLA_OMC` or `PATH` and reports its version. Missing OMC yields a setup diagnostic.
 - `omola check --model FILE.mo --class Qualified.Name` loads the file and calls OMC `checkModel`.
 - `omola simulate --model FILE.mo --class Qualified.Name [--stop-time SECONDS] [--output PREFIX]` calls OMC `simulate`.
+- `omola results inspect FILE.csv|FILE.mat` inspects strict CSV or OpenModelica-generated MAT results; `omola results export-csv FILE.mat --variables x,y --output FILE.csv` uses OMC's scripting API to export selected scalar variables.
 - `omola compat run --manifest tests/compat/manifest.toml --format json|markdown` runs the versioned sample corpus and reports measured pass/fail/skip counts.
 - `omola bridge inventory --format markdown|json` reports the small documented Dymola scripting subset; `omola bridge call --function Dymola.simulateModel ...` runs only its declared partial mapping. Unsupported Dymola functions and unmapped simulation parameters return a capability-specific error.
 - The core crate uses only the Rust standard library; the CLI uses Serde/TOML/JSON for versioned compatibility manifests and reports. OMC remains a separate process; no compiler code is embedded or copied.
@@ -48,6 +49,10 @@ cargo run -p omola -- simulate --model examples/BouncingBall.mo --class Bouncing
 ```
 
 The output prefix may contain spaces. To validate Rust without OMC, run `cargo check --workspace`; this is a build-only check and does not exercise the compiler backend. The OMC commands above are backend integration checks.
+
+Each successful simulation writes a `<result>_res.json` run metadata sidecar containing model/backend versions, timestamps, output path, and the solver options reported by OMC. Parameter overrides are not available in the CLI, so the metadata currently records an empty parameter list rather than effective model parameter values. CSV inspection rejects missing/non-numeric cells, duplicate headers, and non-monotonic time. CSV export preserves selected variable names and writes round-trippable `f64` text for values it receives; the OMC 1.27.1 scripting formatter is limited to 13 significant digits in this path to avoid its fixed-buffer truncation on event values. Units are not available from this OMC export API and are not inferred.
+
+These commands do **not** establish Dymola result compatibility. `.mat` inspection/export is delegated to the selected OpenModelica version, `.dsres` is explicitly unsupported, and no Dymola MAT/DSRES decoder or proprietary result-format guarantee is included. See [result artifact behavior](docs/result-artifacts.md).
 
 The compiler is resolved in this order: a non-empty `OMOLA_OMC` executable path, then `omc.exe` from `PATH` on Windows (or `omc` on Unix). A configured path that does not exist is reported directly; it does not silently fall back to PATH. The adapter reports the OMC version with each successful command result, rejects invalid Modelica class names and stop times before creating a script, and removes its temporary `.mos` file and compiler workspace after success or failure. Simulation passes OMC a unique prefix in that isolated workspace, then copies the resulting MAT file to `<output-prefix>_res.mat`; existing result files are not overwritten. This allows output prefixes containing spaces despite OMC's generated makefile path handling.
 
