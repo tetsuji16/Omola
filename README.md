@@ -13,6 +13,7 @@ The first slice deliberately delegates Modelica parsing, checking, translation, 
 - `omola results inspect FILE.csv|FILE.mat` inspects strict CSV or OpenModelica-generated MAT results; `omola results export-csv FILE.mat --variables x,y --output FILE.csv` uses OMC's scripting API to export selected scalar variables.
 - `omola fmi capabilities`, `omola fmi export`, `omola fmi import`, and `omola fmi validate` report the documented OMC profile, delegate FMU operations to OMC, and check basic archive/XML metadata.
 - `omola compat run --manifest tests/compat/manifest.toml --format json|markdown` runs the versioned sample corpus and reports measured pass/fail/skip counts.
+- `omola release verify --scorecard target/compatibility.json --manifest tests/compat/manifest.toml` rejects incomplete, stale, failing, or version-mismatched scorecards.
 - `omola bridge inventory --format markdown|json` reports the small documented Dymola scripting subset; `omola bridge call --function Dymola.simulateModel ...` runs only its declared partial mapping. Unsupported Dymola functions and unmapped simulation parameters return a capability-specific error.
 - `omola licenses check [--output REPORT.md]` compares the locked Cargo dependency closure, CI action references, and development container image against the provenance inventory; it exits unsuccessfully on unrecorded or changed dependencies.
 - The core crate uses only the Rust standard library; the CLI uses Serde/TOML/JSON for versioned compatibility manifests and reports. OMC remains a separate process; no compiler code is embedded or copied.
@@ -90,7 +91,10 @@ The initial compatibility corpus is under `tests/compat`. Run it with OpenModeli
 ```sh
 cargo run -p omola -- compat run --manifest tests/compat/manifest.toml --format markdown
 cargo run -p omola -- compat run --manifest tests/compat/manifest.toml --format json
+cargo run -p omola -- release verify --scorecard target/compatibility.json --manifest tests/compat/manifest.toml
 ```
+
+The pull-request OMC job installs the pinned Modelica Standard Library 4.1.0, emits JSON and Markdown compatibility scorecards, and runs the release gate against the exact current manifest. The scorecards are uploaded as CI artifacts. Omola currently has no declared minimum supported OMC version; the pinned release evidence is OpenModelica 1.27.1 and the fixture-level version prefixes in the manifest. Before 1.0, CLI and project-schema changes may break; every project format change must increment its schema version and document migration. After 1.0, CLI/project schemas follow SemVer: breaking changes require a major version, additive compatible changes a minor version, and fixes a patch version.
 
 The bounded corpus pins Modelica Specification 3.6 (the baseline used by MSL 4.1.0) and includes original Omola examples, a Modelica Standard Library 4.1.0 Blocks composition, a first-order ODE with numerical CSV golden samples, and a negative syntax diagnostic. It maps the Modelica Association Modelica-Compliance `Connections.Declarations` category at commit `9734eb101c1adf3bc59ee2ec999e53fffbc13f4b`; that upstream suite entry is explicitly skipped because its package/test harness is not yet integrated. An excluded vendor-library case is also reported as skipped. The report labels execution as “Omola via OpenModelica” and includes source/license/version metadata and pass/fail/skip counts by feature and library. Golden values are sampled through OMC `val()` at declared times and compared using absolute/relative tolerances; the report records variable names, time interpolation, and units. These are measured results for the listed fixtures only and never imply Dymola compatibility.
 

@@ -68,13 +68,20 @@ jobs:
             awk -F, "NR == 2 { if (\$2 < 0.999 || \$2 > 1.001) exit 1 }" target/parameter-baseline/Ball.csv &&
             awk -F, "NR == 2 { if (\$2 < 1.999 || \$2 > 2.001) exit 1 }" target/parameter-changed/Ball.csv &&
             cargo run -p omola -- project validate tests/project-root/project.toml &&
-            cargo run -p omola -- project simulate tests/project-root/project.toml --output "target/project root spaces/RootedModel"
+            cargo run -p omola -- project simulate tests/project-root/project.toml --output "target/project root spaces/RootedModel" &&
+            omc tests/compat/install-msl.mos &&
+            cargo run -p omola -- compat run --manifest tests/compat/manifest.toml --format json > target/compatibility.json &&
+            cargo run -p omola -- compat run --manifest tests/compat/manifest.toml --format markdown > target/compatibility.md &&
+            cargo run -p omola -- release verify --scorecard target/compatibility.json --manifest tests/compat/manifest.toml
           ' 2>&1 | tee target/omc-smoke-log/omc-integration.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: omola-omc-smoke-log
-          path: target/omc-smoke-log/omc-integration.log
+          path: |
+            target/omc-smoke-log/omc-integration.log
+            target/compatibility.json
+            target/compatibility.md
 
   omc-integration-windows:
     if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_omc)

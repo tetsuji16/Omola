@@ -6,6 +6,7 @@ mod compat;
 mod fmi;
 mod licenses;
 mod project;
+mod release;
 mod results;
 
 fn main() -> ExitCode {
@@ -76,6 +77,18 @@ fn main() -> ExitCode {
     }
     if args.first().map(String::as_str) == Some("licenses") {
         return match licenses::run(&args[1..]) {
+            Ok(text) => {
+                print!("{text}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("omola: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    if args.first().map(String::as_str) == Some("release") {
+        return match release::run(&args[1..]) {
             Ok(text) => {
                 print!("{text}");
                 ExitCode::SUCCESS
