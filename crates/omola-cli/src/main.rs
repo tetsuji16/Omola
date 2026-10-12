@@ -4,6 +4,7 @@ use std::{env, path::PathBuf, process::ExitCode};
 mod bridge;
 mod compat;
 mod fmi;
+mod licenses;
 mod project;
 mod results;
 
@@ -63,6 +64,18 @@ fn main() -> ExitCode {
     }
     if args.first().map(String::as_str) == Some("project") {
         return match project::run(&args[1..]) {
+            Ok(text) => {
+                print!("{text}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("omola: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    if args.first().map(String::as_str) == Some("licenses") {
+        return match licenses::run(&args[1..]) {
             Ok(text) => {
                 print!("{text}");
                 ExitCode::SUCCESS
@@ -193,7 +206,7 @@ fn required_with_values(
 }
 
 fn usage() {
-    eprintln!("Omola 0.1 — OpenModelica-backed Modelica workflow\n\nUsage:\n  omola doctor\n  omola check --model FILE.mo --class Modelica.Class\n  omola simulate --model FILE.mo --class Modelica.Class [--stop-time SECONDS] [--output PREFIX]\n  omola project validate MANIFEST.toml\n  omola project simulate MANIFEST.toml [--output PREFIX]\n  omola results inspect FILE.csv|FILE.mat\n  omola results export-csv FILE.mat --variables x,y --output FILE.csv\n  omola compat run --manifest FILE.toml --format json|markdown\n  omola bridge inventory [--format json|markdown]\n  omola bridge call --function Dymola.function [--model FILE.mo --class Modelica.Class --stop-time SECONDS]\n\nRequires OpenModelica `omc` on PATH or OMOLA_OMC set to its executable path.");
+    eprintln!("Omola 0.1 — OpenModelica-backed Modelica workflow\n\nUsage:\n  omola doctor\n  omola check --model FILE.mo --class Modelica.Class\n  omola simulate --model FILE.mo --class Modelica.Class [--stop-time SECONDS] [--output PREFIX]\n  omola project validate MANIFEST.toml\n  omola project simulate MANIFEST.toml [--output PREFIX]\n  omola licenses check [--output REPORT.md]\n  omola results inspect FILE.csv|FILE.mat\n  omola results export-csv FILE.mat --variables x,y --output FILE.csv\n  omola compat run --manifest FILE.toml --format json|markdown\n  omola bridge inventory [--format json|markdown]\n  omola bridge call --function Dymola.function [--model FILE.mo --class Modelica.Class --stop-time SECONDS]\n\nRequires OpenModelica `omc` on PATH or OMOLA_OMC set to its executable path.");
 }
 
 #[cfg(test)]

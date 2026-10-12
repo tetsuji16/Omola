@@ -13,6 +13,20 @@ on:
         default: false
 
 jobs:
+  license-inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify dependency provenance and generate inventory
+        run: cargo run -p omola -- licenses check --output target/license-inventory.md
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dependency-license-inventory
+          path: target/license-inventory.md
+          if-no-files-found: ignore
+
   checks:
     strategy:
       fail-fast: false

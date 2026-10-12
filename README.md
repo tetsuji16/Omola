@@ -14,6 +14,7 @@ The first slice deliberately delegates Modelica parsing, checking, translation, 
 - `omola fmi capabilities`, `omola fmi export`, `omola fmi import`, and `omola fmi validate` report the documented OMC profile, delegate FMU operations to OMC, and check basic archive/XML metadata.
 - `omola compat run --manifest tests/compat/manifest.toml --format json|markdown` runs the versioned sample corpus and reports measured pass/fail/skip counts.
 - `omola bridge inventory --format markdown|json` reports the small documented Dymola scripting subset; `omola bridge call --function Dymola.simulateModel ...` runs only its declared partial mapping. Unsupported Dymola functions and unmapped simulation parameters return a capability-specific error.
+- `omola licenses check [--output REPORT.md]` compares the locked Cargo dependency closure, CI action references, and development container image against the provenance inventory; it exits unsuccessfully on unrecorded or changed dependencies.
 - The core crate uses only the Rust standard library; the CLI uses Serde/TOML/JSON for versioned compatibility manifests and reports. OMC remains a separate process; no compiler code is embedded or copied.
 
 ## Install prerequisites and run the smoke model
@@ -104,6 +105,8 @@ cargo run -p omola -- compat run --manifest tests/compat/manifest.toml --format 
 The MSL fixture requires the exact 4.1.0 release and is not treated as passed if that library cannot be loaded. The negative syntax fixture demonstrates diagnostic behavior; it does not imply conformance coverage of the complete Modelica language or public conformance suite.
 
 The scripting bridge inventory, official documentation sources, mapped parameters, and unsupported capability diagnostics are documented in [docs/dymola-scripting-bridge.md](docs/dymola-scripting-bridge.md). `simulateModel` is only partially mapped to Omola's file-backed simulation command; translation, interactive plotting, and Dymola's persistent last-error state remain unsupported.
+
+The dependency provenance ledger and CI check are documented in [docs/provenance-licenses.md](docs/provenance-licenses.md) and [licenses/inventory.toml](licenses/inventory.toml). This repository does not bundle OMC, MSL, Dymola libraries/runtime, or an FMI runtime. The devcontainer is a development environment; review the exact upstream distribution and linked-component terms before redistribution. Generated FMUs need a separate package-content audit. Naming/trademark review remains a release gate.
 
 “Dymola compatible” is not a single property. We track separately: (1) standard Modelica language semantics, (2) Modelica Standard Library and third-party library behavior, (3) Dymola-specific annotations and extensions, (4) Dymola scripting functions and automation, (5) result file import/export and numerical equivalence, (6) graphical authoring and project workflows, and (7) vendor libraries, integrations, licensing, and hosted product features. A green result in one row never implies compatibility in the others.
 
