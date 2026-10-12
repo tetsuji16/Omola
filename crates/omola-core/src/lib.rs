@@ -115,12 +115,34 @@ impl Omc {
     }
 
     pub fn check_model(&self, source: &Path, class: &str) -> Result<CommandResult, BackendError> {
+        self.check_model_with_libraries(source, class, &[])
+    }
+
+    pub fn check_model_with_libraries(
+        &self,
+        source: &Path,
+        class: &str,
+        libraries: &[(String, String)],
+    ) -> Result<CommandResult, BackendError> {
+        self.check_project_model(source, class, libraries, &[])
+    }
+
+    pub fn check_project_model(
+        &self,
+        source: &Path,
+        class: &str,
+        libraries: &[(String, String)],
+        package_roots: &[PathBuf],
+    ) -> Result<CommandResult, BackendError> {
         validate_class(class)?;
         let source = readable_model(source)?;
-        let script = format!(
-            "clearMessages();\nloaded := loadFile(\"{}\");\nif not loaded then print(getErrorString()); end if;\nif loaded then result := checkModel({}); print(result); print(getErrorString()); end if;\n",
+        let mut script = self.package_path_script(package_roots)?;
+        script.push_str("clearMessages();\n");
+        script.push_str(&load_libraries_script(libraries)?);
+        script.push_str(&format!(
+            "loaded := loadFile(\"{}\");\nif not loaded then print(getErrorString()); end if;\nif loaded then result := checkModel({}); print(result); print(getErrorString()); end if;\n",
             modelica_string(&source.to_string_lossy()), class
-        );
+        ));
         let result = self.run_script(&script)?;
         if contains_false(&result.output) {
             return Err(BackendError::CompilerDiagnostic {
@@ -137,6 +159,29 @@ impl Omc {
         class: &str,
         stop_time: f64,
         result: Option<&Path>,
+    ) -> Result<CommandResult, BackendError> {
+        self.simulate_with_libraries(source, class, stop_time, result, &[])
+    }
+
+    pub fn simulate_with_libraries(
+        &self,
+        source: &Path,
+        class: &str,
+        stop_time: f64,
+        result: Option<&Path>,
+        libraries: &[(String, String)],
+    ) -> Result<CommandResult, BackendError> {
+        self.simulate_project_model(source, class, stop_time, result, libraries, &[])
+    }
+
+    pub fn simulate_project_model(
+        &self,
+        source: &Path,
+        class: &str,
+        stop_time: f64,
+        result: Option<&Path>,
+        libraries: &[(String, String)],
+        package_roots: &[PathBuf],
     ) -> Result<CommandResult, BackendError> {
         validate_class(class)?;
         let source = readable_model(source)?;
@@ -171,10 +216,13 @@ impl Omc {
             })?;
         }
         let output_prefix = unique_name("simulation");
-        let script = format!(
-            "clearMessages();\nloaded := loadFile(\"{}\");\nif not loaded then print(getErrorString()); end if;\nsimulationResult := simulate({}, stopTime={}, fileNamePrefix=\"{}\");\nprint(\"OMOLA_RESULT_FILE:\" + simulationResult.resultFile);\n",
+        let mut script = self.package_path_script(package_roots)?;
+        script.push_str("clearMessages();\n");
+        script.push_str(&load_libraries_script(libraries)?);
+        script.push_str(&format!(
+            "loaded := loadFile(\"{}\");\nif not loaded then print(getErrorString()); end if;\nsimulationResult := simulate({}, stopTime={}, fileNamePrefix=\"{}\");\nprint(\"OMOLA_RESULT_FILE:\" + simulationResult.resultFile);\n",
             modelica_string(&source.to_string_lossy()), class, stop_time, output_prefix
-        );
+        ));
         let (mut result, workspace, _cleanup) = self.run_script_in_temp(&script)?;
         let generated = match find_result_file(&result.output) {
             Some(path) if path.is_absolute() => path,
@@ -365,6 +413,31 @@ impl Omc {
         self.run_script_in_temp(script).map(|(result, _, _)| result)
     }
 
+    /// Return the current project-safe Modelica path, prepending validated roots while
+    /// retaining OpenModelica's installation defaults and user library directories.
+    fn package_path_script(&self, roots: &[PathBuf]) -> Result<String, BackendError> {
+        if roots.is_empty() {
+            return Ok(String::new());
+        }
+        let current = self.run_script("print(\"OMOLA_MODELICAPATH:\" + getModelicaPath());\n")?;
+        let current_path = current
+            .output
+            .lines()
+            .find_map(|line| line.strip_prefix("OMOLA_MODELICAPATH:"))
+            .ok_or_else(|| BackendError::InvalidCompilerResponse {
+                version: current.omc_version.clone(),
+                output: current.output.clone(),
+            })?;
+        let mut paths = roots.to_vec();
+        paths.extend(env::split_paths(std::ffi::OsStr::new(current_path)));
+        let joined = env::join_paths(paths).map_err(|error| BackendError::InvalidInput(format!("could not combine project package roots with OpenModelica's current library path: {error}")))?;
+        let joined = joined.to_string_lossy();
+        Ok(format!(
+            "if not setModelicaPath(\"{}\") then print(getErrorString()); end if;\n",
+            modelica_string(&joined)
+        ))
+    }
+
     fn run_script_in_temp(
         &self,
         script: &str,
@@ -472,6 +545,33 @@ fn validate_class(class: &str) -> Result<(), BackendError> {
         ))
     }
 }
+
+fn load_libraries_script(libraries: &[(String, String)]) -> Result<String, BackendError> {
+    let mut script = String::new();
+    for (name, version) in libraries {
+        validate_class(name)?;
+        if version.is_empty()
+            || !version
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+' | '_'))
+        {
+            return Err(BackendError::InvalidInput(format!(
+                "library {name} must use a non-empty, exact version identifier"
+            )));
+        }
+        script.push_str(&format!(
+            "packageLoaded := loadModel({}, {{\"{}\"}});\nif not packageLoaded then print(getErrorString()); end if;\n",
+            name,
+            modelica_string(version)
+        ));
+    }
+    Ok(script)
+}
+
+/// Validate exact dependency versions without needing to start OpenModelica.
+pub fn validate_library_pins(libraries: &[(String, String)]) -> Result<(), BackendError> {
+    load_libraries_script(libraries).map(|_| ())
+}
 fn absolute_output(path: &Path) -> Result<PathBuf, BackendError> {
     if path.is_absolute() {
         Ok(path.to_path_buf())
@@ -557,6 +657,15 @@ mod tests {
         assert!(BackendError::InvalidInput("stop".into())
             .to_string()
             .contains("Invalid request"));
+    }
+
+    #[test]
+    fn exact_library_pins_reject_injection_and_accept_literal_versions() {
+        assert!(validate_library_pins(&[("FixtureLib".into(), "1.0".into())]).is_ok());
+        assert!(
+            validate_library_pins(&[("FixtureLib".into(), "1.0\") ; print(1)".into())]).is_err()
+        );
+        assert!(validate_library_pins(&[("Bad;Name".into(), "1.0".into())]).is_err());
     }
 
     #[test]

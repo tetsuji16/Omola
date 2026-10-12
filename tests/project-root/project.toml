@@ -1,0 +1,9 @@
+schema_version = 1
+name = "project-root-smoke"
+model_file = "RootedModel.mo"
+entry_model = "RootedModel"
+package_roots = ["packages"]
+dependencies = [{ name = "FixtureLib", version = "1.0" }]
+
+[simulation]
+stop_time = 0.1

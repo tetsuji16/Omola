@@ -1,0 +1,10 @@
+# Omola project manifest schema version 1. Modelica source stays in its original file.
+schema_version = 1
+name = "bouncing-ball"
+model_file = "BouncingBall.mo"
+entry_model = "BouncingBall"
+package_roots = ["."]
+dependencies = []
+
+[simulation]
+stop_time = 3.0

@@ -43,10 +43,43 @@ jobs:
             cargo check --workspace &&
             cargo run -p omola -- doctor &&
             cargo run -p omola -- check --model examples/BouncingBall.mo --class BouncingBall &&
-            cargo run -p omola -- simulate --model examples/BouncingBall.mo --class BouncingBall --stop-time 3 --output "target/omola smoke spaces/BouncingBall"
+            cargo run -p omola -- simulate --model examples/BouncingBall.mo --class BouncingBall --stop-time 3 --output "target/omola smoke spaces/BouncingBall" &&
+            cargo run -p omola -- project validate examples/project.toml &&
+            cargo run -p omola -- project simulate examples/project.toml --output "target/project smoke spaces/BouncingBall" &&
+            cargo run -p omola -- project validate tests/project-root/project.toml &&
+            cargo run -p omola -- project simulate tests/project-root/project.toml --output "target/project root spaces/RootedModel"
           ' 2>&1 | tee target/omc-smoke-log/omc-integration.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: omola-omc-smoke-log
           path: target/omc-smoke-log/omc-integration.log
+
+  omc-integration-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_omc
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: OpenModelica/setup-openmodelica@v1.0
+        with:
+          version: '1.27.1'
+      - name: Check and simulate project manifests
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path target/omc-smoke-log | Out-Null
+          cargo run -p omola -- project validate examples/project.toml 2>&1 | Tee-Object target/omc-smoke-log/omc-project-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo run -p omola -- project simulate examples/project.toml --output 'target/project smoke spaces/BouncingBall' 2>&1 | Tee-Object -Append target/omc-smoke-log/omc-project-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo run -p omola -- project validate tests/project-root/project.toml 2>&1 | Tee-Object -Append target/omc-smoke-log/omc-project-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo run -p omola -- project simulate tests/project-root/project.toml --output 'target/project root spaces/RootedModel' 2>&1 | Tee-Object -Append target/omc-smoke-log/omc-project-windows.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: omola-omc-windows-smoke-log
+          path: target/omc-smoke-log/omc-project-windows.log

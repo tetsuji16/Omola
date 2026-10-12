@@ -9,6 +9,7 @@ The first slice deliberately delegates Modelica parsing, checking, translation, 
 - `omola doctor` locates OMC through `OMOLA_OMC` or `PATH` and reports its version. Missing OMC yields a setup diagnostic.
 - `omola check --model FILE.mo --class Qualified.Name` loads the file and calls OMC `checkModel`.
 - `omola simulate --model FILE.mo --class Qualified.Name [--stop-time SECONDS] [--output PREFIX]` calls OMC `simulate`.
+- `omola project validate|simulate examples/project.toml` opens the versioned schema-1 manifest, validates relative package/source paths and exact dependency pins, then delegates checking/simulation to OMC. Modelica files remain user-owned and unchanged.
 - `omola results inspect FILE.csv|FILE.mat` inspects strict CSV or OpenModelica-generated MAT results; `omola results export-csv FILE.mat --variables x,y --output FILE.csv` uses OMC's scripting API to export selected scalar variables.
 - `omola fmi capabilities`, `omola fmi export`, `omola fmi import`, and `omola fmi validate` report the documented OMC profile, delegate FMU operations to OMC, and check basic archive/XML metadata.
 - `omola compat run --manifest tests/compat/manifest.toml --format json|markdown` runs the versioned sample corpus and reports measured pass/fail/skip counts.
@@ -39,6 +40,8 @@ On Windows PowerShell with Rust and OMC installed, run:
 cargo run -p omola -- doctor
 cargo run -p omola -- check --model examples\BouncingBall.mo --class BouncingBall
 cargo run -p omola -- simulate --model examples\BouncingBall.mo --class BouncingBall --stop-time 3 --output "out\smoke results\BouncingBall"
+cargo run -p omola -- project validate examples\project.toml
+cargo run -p omola -- project simulate examples\project.toml --output "out\project results\BouncingBall"
 ```
 
 On macOS/Linux with native OMC installed, the equivalent commands are:
@@ -47,7 +50,11 @@ On macOS/Linux with native OMC installed, the equivalent commands are:
 cargo run -p omola -- doctor
 cargo run -p omola -- check --model examples/BouncingBall.mo --class BouncingBall
 cargo run -p omola -- simulate --model examples/BouncingBall.mo --class BouncingBall --stop-time 3 --output "out/smoke results/BouncingBall"
+cargo run -p omola -- project validate examples/project.toml
+cargo run -p omola -- project simulate examples/project.toml --output "out/project results/BouncingBall"
 ```
+
+The project schema, path/dependency policy, migration boundary, and unsupported editor workflows are described in [the project workflow proposal](docs/project-workflow.md). The sample manifest points to the existing `BouncingBall.mo`; it does not copy or modify the Modelica source. Windows CI checks the Rust workspace; OMC model execution on Windows still requires a Windows installation and is not claimed as verified by the Linux container run.
 
 The output prefix may contain spaces. To validate Rust without OMC, run `cargo check --workspace`; this is a build-only check and does not exercise the compiler backend. The OMC commands above are backend integration checks.
 
