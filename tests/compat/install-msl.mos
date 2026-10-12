@@ -1,0 +1,8 @@
+clearMessages();
+if not installPackage(Modelica, "4.1.0", exactMatch=true) then
+  print("OMOLA_MSL_INSTALL_FAILED\n");
+elseif not loadModel(Modelica, {"4.1.0"}) then
+  print("OMOLA_MSL_LOAD_FAILED_4.1.0\n");
+else
+  print("OMOLA_MSL_INSTALLED_4.1.0\n");
+end if;

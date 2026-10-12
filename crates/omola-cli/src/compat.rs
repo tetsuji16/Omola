@@ -12,6 +12,7 @@ use std::{
 struct Manifest {
     schema_version: u32,
     name: String,
+    modelica_spec_version: String,
     fixtures: Vec<Fixture>,
 }
 
@@ -47,10 +48,12 @@ struct Comparison {
 struct Report {
     schema_version: u32,
     manifest: String,
+    execution_label: &'static str,
     omola_version: &'static str,
     omc_version: Option<String>,
     operating_system: &'static str,
     libraries: Vec<String>,
+    libraries_measured: BTreeMap<String, Counts>,
     totals: Counts,
     compatibility_claim: &'static str,
     features: BTreeMap<String, Counts>,
@@ -69,6 +72,8 @@ struct Counts {
 struct FixtureResult {
     id: String,
     feature_tags: Vec<String>,
+    modelica_spec_version: String,
+    reproduction_command: String,
     expected: String,
     outcome: String,
     message: String,
@@ -119,7 +124,7 @@ pub fn run(args: &[String]) -> Result<(String, bool), BackendError> {
     let mut results = Vec::with_capacity(manifest.fixtures.len());
 
     for fixture in &manifest.fixtures {
-        let mut result = base_result(fixture);
+        let mut result = base_result(fixture, &manifest.modelica_spec_version, &manifest_path);
         if fixture.expected == "skip" {
             result.outcome = "skip".into();
             result.message = fixture.skip_reason.clone().unwrap_or_default();
@@ -214,20 +219,38 @@ pub fn run(args: &[String]) -> Result<(String, bool), BackendError> {
         .collect();
     libraries.sort();
     libraries.dedup();
+    let mut libraries_measured: BTreeMap<String, Counts> = BTreeMap::new();
     for result in &results {
         increment(&mut totals, &result.outcome);
         for tag in &result.feature_tags {
             increment(features.entry(tag.clone()).or_default(), &result.outcome);
         }
+        if result.libraries.is_empty() {
+            increment(
+                libraries_measured
+                    .entry("(no external library)".into())
+                    .or_default(),
+                &result.outcome,
+            );
+        } else {
+            for library in &result.libraries {
+                increment(
+                    libraries_measured.entry(library.clone()).or_default(),
+                    &result.outcome,
+                );
+            }
+        }
     }
     let has_failures = totals.fail > 0;
     let report = Report {
-        schema_version: 1,
+        schema_version: 2,
         manifest: manifest.name,
+        execution_label: "Omola via OpenModelica",
         omola_version: env!("CARGO_PKG_VERSION"),
         omc_version,
         operating_system: std::env::consts::OS,
         libraries,
+        libraries_measured,
         totals,
         compatibility_claim: "Only the listed fixtures were measured through OpenModelica; this subset does not establish Dymola compatibility.",
         features,
@@ -263,11 +286,17 @@ fn validate_manifest(manifest: &Manifest, path: &Path) -> Result<(), BackendErro
     let invalid = |field: &str, message: &str| {
         BackendError::InvalidInput(format!("{}: {field}: {message}", path.display()))
     };
-    if manifest.schema_version != 1 {
-        return Err(invalid("schema_version", "supported value is 1"));
+    if manifest.schema_version != 2 {
+        return Err(invalid("schema_version", "supported value is 2"));
     }
     if manifest.name.trim().is_empty() {
         return Err(invalid("name", "must not be empty"));
+    }
+    if manifest.modelica_spec_version.trim().is_empty() {
+        return Err(invalid(
+            "modelica_spec_version",
+            "must pin a Modelica specification release",
+        ));
     }
     if manifest.fixtures.is_empty() {
         return Err(invalid("fixtures", "must contain at least one entry"));
@@ -373,10 +402,15 @@ fn validate_manifest(manifest: &Manifest, path: &Path) -> Result<(), BackendErro
     Ok(())
 }
 
-fn base_result(fixture: &Fixture) -> FixtureResult {
+fn base_result(fixture: &Fixture, spec_version: &str, manifest_path: &Path) -> FixtureResult {
     FixtureResult {
         id: fixture.id.clone(),
         feature_tags: fixture.feature_tags.clone(),
+        modelica_spec_version: spec_version.to_owned(),
+        reproduction_command: format!(
+            "omola compat run --manifest {} --format markdown",
+            manifest_path.display()
+        ),
         expected: fixture.expected.clone(),
         outcome: String::new(),
         message: String::new(),
@@ -591,8 +625,9 @@ fn increment(counts: &mut Counts, outcome: &str) {
 
 fn render_markdown(report: &Report) -> String {
     let mut output = format!(
-        "# Compatibility report: {}\n\nSchema: {}  \nOmola: {}  \nOMC: {}  \nOS: {}  \nLibraries: {}  \nResults: {} pass, {} fail, {} skip\n\n",
+        "# Compatibility report: {}\n\nExecution: {}  \nSchema: {}  \nOmola: {}  \nOMC: {}  \nOS: {}  \nLibraries: {}  \nResults: {} pass, {} fail, {} skip\n\n",
         report.manifest,
+        report.execution_label,
         report.schema_version,
         report.omola_version,
         report.omc_version.as_deref().unwrap_or("not available"),
@@ -612,15 +647,25 @@ fn render_markdown(report: &Report) -> String {
             counts.pass, counts.fail, counts.skip
         ));
     }
-    output.push_str("\n## Fixtures\n\n| ID | Outcome | Expected | Message | OMC | Solver | Solver version | Libraries | Source/license |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n");
+    output.push_str(
+        "\n## Library counts\n\n| Library | Pass | Fail | Skip |\n| --- | ---: | ---: | ---: |\n",
+    );
+    for (library, counts) in &report.libraries_measured {
+        output.push_str(&format!(
+            "| {library} | {} | {} | {} |\n",
+            counts.pass, counts.fail, counts.skip
+        ));
+    }
+    output.push_str("\n## Fixtures\n\n| ID | Outcome | Expected | Message | OMC | Modelica spec | Solver | Solver version | Libraries | Source/license | Reproduction command |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n");
     for fixture in &report.fixtures {
         output.push_str(&format!(
-            "| {} | {} | {} | {} | {} | {} | {} | {} | {} / {} |\n",
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} / {} | {} |\n",
             fixture.id,
             fixture.outcome,
             fixture.expected,
             fixture.message,
             fixture.omc_version.as_deref().unwrap_or("not run"),
+            fixture.modelica_spec_version,
             fixture.solver.as_deref().unwrap_or("not set"),
             fixture.solver_version,
             if fixture.libraries.is_empty() {
@@ -629,7 +674,8 @@ fn render_markdown(report: &Report) -> String {
                 fixture.libraries.join(", ")
             },
             fixture.provenance,
-            fixture.license
+            fixture.license,
+            fixture.reproduction_command
         ));
     }
     output.push_str(&format!(
@@ -645,8 +691,9 @@ mod tests {
 
     #[test]
     fn validates_schema_and_fixture_diagnostics_include_file_and_field() {
-        let text = r#"schema_version = 2
+        let text = r#"schema_version = 1
 name = "bad"
+modelica_spec_version = "3.6"
 [[fixtures]]
 id = "fixture"
 expected = "pass"

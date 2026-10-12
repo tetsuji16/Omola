@@ -75,7 +75,17 @@ cargo run -p omola -- compat run --manifest tests/compat/manifest.toml --format 
 cargo run -p omola -- compat run --manifest tests/compat/manifest.toml --format json
 ```
 
-The current corpus contains an original bouncing-ball simulation, a first-order ODE with numerical CSV golden samples, a negative syntax diagnostic, and an explicitly skipped vendor-library case. Golden values are sampled through OMC `val()` at declared times and compared using absolute/relative tolerances; the report records variable names, time interpolation, and units. These are measured results for the listed fixtures only and never imply Dymola compatibility.
+The bounded corpus pins Modelica Specification 3.6 (the baseline used by MSL 4.1.0) and includes original Omola examples, a Modelica Standard Library 4.1.0 Blocks composition, a first-order ODE with numerical CSV golden samples, and a negative syntax diagnostic. It maps the Modelica Association Modelica-Compliance `Connections.Declarations` category at commit `9734eb101c1adf3bc59ee2ec999e53fffbc13f4b`; that upstream suite entry is explicitly skipped because its package/test harness is not yet integrated. An excluded vendor-library case is also reported as skipped. The report labels execution as “Omola via OpenModelica” and includes source/license/version metadata and pass/fail/skip counts by feature and library. Golden values are sampled through OMC `val()` at declared times and compared using absolute/relative tolerances; the report records variable names, time interpolation, and units. These are measured results for the listed fixtures only and never imply Dymola compatibility.
+
+The MSL model uses the official public library under its BSD 3-Clause license. The repository and development image do not redistribute MSL. With OMC installed and network access available, install the pinned release using OpenModelica's package manager, then run the corpus:
+
+```powershell
+omc tests/compat/install-msl.mos
+cargo run -p omola -- compat run --manifest tests/compat/manifest.toml --format markdown
+cargo run -p omola -- compat run --manifest tests/compat/manifest.toml --format json
+```
+
+The MSL fixture requires the exact 4.1.0 release and is not treated as passed if that library cannot be loaded. The negative syntax fixture demonstrates diagnostic behavior; it does not imply conformance coverage of the complete Modelica language or public conformance suite.
 
 “Dymola compatible” is not a single property. We track separately: (1) standard Modelica language semantics, (2) Modelica Standard Library and third-party library behavior, (3) Dymola-specific annotations and extensions, (4) Dymola scripting functions and automation, (5) result file import/export and numerical equivalence, (6) graphical authoring and project workflows, and (7) vendor libraries, integrations, licensing, and hosted product features. A green result in one row never implies compatibility in the others.
 
