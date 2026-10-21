@@ -190,13 +190,19 @@ pub fn run(args: &[String]) -> Result<String, String> {
     for action in expected_actions.difference(&actions) {
         problems.push(format!("stale workflow action record: {action}"));
     }
-    let docker = fs::read_to_string(root.join(".devcontainer/Dockerfile"))
-        .map_err(|e| format!("read devcontainer image: {e}"))?;
-    let images: std::collections::BTreeSet<_> = docker
-        .lines()
-        .filter_map(|line| line.strip_prefix("FROM "))
-        .map(str::to_owned)
-        .collect();
+    let mut images = std::collections::BTreeSet::new();
+    let mut installed_packages = std::collections::BTreeSet::new();
+    for dockerfile in [
+        ".devcontainer/Dockerfile",
+        ".devcontainer/Dockerfile.omedit",
+    ] {
+        let path = root.join(dockerfile);
+        let docker = fs::read_to_string(&path)
+            .map_err(|e| format!("read devcontainer image {}: {e}", path.display()))?;
+        let (file_images, file_packages) = parse_docker_inputs(&docker);
+        images.extend(file_images);
+        installed_packages.extend(file_packages);
+    }
     let expected_images: std::collections::BTreeSet<_> =
         inventory.container_images.iter().cloned().collect();
     for image in images.difference(&expected_images) {
@@ -205,13 +211,6 @@ pub fn run(args: &[String]) -> Result<String, String> {
     for image in expected_images.difference(&images) {
         problems.push(format!("stale container image record: {image}"));
     }
-    let installed_packages: std::collections::BTreeSet<_> = docker
-        .lines()
-        .filter_map(|line| line.split_once("apt-get install -y --no-install-recommends"))
-        .flat_map(|(_, rest)| rest.split_whitespace())
-        .filter(|word| *word != "\\" && !word.starts_with("&&"))
-        .map(str::to_owned)
-        .collect();
     let expected_packages: std::collections::BTreeSet<_> =
         inventory.container_packages.iter().cloned().collect();
     for package in installed_packages.difference(&expected_packages) {
@@ -237,6 +236,46 @@ pub fn run(args: &[String]) -> Result<String, String> {
             problems.join("\n")
         ))
     }
+}
+
+fn parse_docker_inputs(dockerfile: &str) -> (Vec<String>, Vec<String>) {
+    let mut images = Vec::new();
+    let mut packages = Vec::new();
+    let mut reading_packages = false;
+    for line in dockerfile.lines() {
+        if let Some(image) = line.strip_prefix("FROM ") {
+            if let Some(image) = image.split_whitespace().next() {
+                images.push(image.to_owned());
+            }
+        }
+        if let Some((_, rest)) = line.split_once("apt-get install -y --no-install-recommends") {
+            reading_packages = true;
+            packages.extend(package_tokens(rest));
+            continue;
+        }
+        if reading_packages {
+            if line.contains("&& rm -rf /var/lib/apt/lists") {
+                packages.extend(package_tokens(line));
+                reading_packages = false;
+            } else {
+                packages.extend(package_tokens(line));
+            }
+        }
+    }
+    (images, packages)
+}
+
+fn package_tokens(line: &str) -> impl Iterator<Item = String> + '_ {
+    line.split_once("&& rm -rf /var/lib/apt/lists")
+        .map_or(line, |(install, _)| install)
+        .split_whitespace()
+        .filter(|token| *token != "\\" && *token != "&&")
+        .filter(|token| {
+            token
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || "+._-=".contains(character))
+        })
+        .map(str::to_owned)
 }
 
 fn make_report(
@@ -297,5 +336,19 @@ mod tests {
         let report = make_report(&inv, &BTreeMap::new(), &[]);
         assert!(report.contains("PASS"));
         assert!(report.contains("External components"));
+    }
+
+    #[test]
+    fn docker_inventory_parser_includes_multiline_gui_image_packages() {
+        let dockerfile = r#"FROM example/base:1 AS build
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl build-essential \
+        omedit=1.2-3 \
+    && rm -rf /var/lib/apt/lists/*
+FROM example/runtime:1
+"#;
+        let (images, packages) = parse_docker_inputs(dockerfile);
+        assert_eq!(images, ["example/base:1", "example/runtime:1"]);
+        assert_eq!(packages, ["curl", "build-essential", "omedit=1.2-3"]);
     }
 }

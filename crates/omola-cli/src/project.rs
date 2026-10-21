@@ -1,3 +1,4 @@
+use crate::omedit;
 use omola_core::{BackendError, CommandResult, Omc, SimulationConfig};
 use serde::Deserialize;
 use std::{
@@ -54,13 +55,23 @@ struct LoadedProject {
 }
 
 pub(crate) fn run(args: &[String]) -> Result<String, BackendError> {
+    if let [command, path] = args {
+        if command == "open" {
+            return open_project(Path::new(path), None);
+        }
+    }
+    if let [command, path, flag, executable] = args {
+        if command == "open" && flag == "--omedit" {
+            return open_project(Path::new(path), Some(Path::new(executable)));
+        }
+    }
     let (command, path, output) = match args {
         [command, path] if command == "validate" => (command.as_str(), path.as_str(), None),
         [command, path] if command == "simulate" => (command.as_str(), path.as_str(), None),
         [command, path, flag, output] if command == "simulate" && flag == "--output" => {
             (command.as_str(), path.as_str(), Some(PathBuf::from(output)))
         }
-        _ => return Err(BackendError::InvalidInput("usage: omola project validate MANIFEST.toml | omola project simulate MANIFEST.toml [--output PREFIX]".into())),
+        _ => return Err(BackendError::InvalidInput("usage: omola project validate MANIFEST.toml | omola project simulate MANIFEST.toml [--output PREFIX] | omola project open MANIFEST.toml [--omedit PATH]".into())),
     };
     let project = load_project(Path::new(path))?;
     if command == "validate" {
@@ -110,6 +121,63 @@ pub(crate) fn run(args: &[String]) -> Result<String, BackendError> {
         "{}\nRun metadata: {}",
         format_project_result("simulated", &project, &result),
         metadata.display()
+    ))
+}
+
+fn open_project(
+    manifest_path: &Path,
+    configured_omedit: Option<&Path>,
+) -> Result<String, BackendError> {
+    let project = load_project(manifest_path)?;
+    let omc = Omc::discover()?;
+    let omc_version = omc.version()?;
+    let omedit_path = omedit::discover(configured_omedit)?;
+    let version_status = omedit::verify_version(&omedit_path, &omc_version);
+    if version_status.mismatch {
+        return Err(BackendError::InvalidInput(
+            version_status.warning.unwrap_or_else(|| {
+                "OMEdit and OpenModelica versions do not match; install a matching pair".into()
+            }),
+        ));
+    }
+    if let Some(message) = &version_status.warning {
+        eprintln!("omola: warning: {message}");
+    }
+    if !project.libraries.is_empty() {
+        eprintln!(
+            "omola: notice: manifest library pins passed a preflight in a separate OMC process; OMEdit loads libraries independently, so the versions actually selected by its GUI session are unverified. Check OMEdit's messages and library browser."
+        );
+    }
+
+    // Resolve exact manifest pins and project roots before opening the GUI so a
+    // missing or wrong library version is diagnosed before opening the GUI.
+    let check = omc.check_project_model(
+        &project.model_file,
+        &project.manifest.entry_model,
+        &project.libraries,
+        &project.package_roots,
+    )?;
+    let modelica_path = omedit::project_library_path(&omc, &project.package_roots)?;
+    let exit_code = omedit::launch(
+        &omedit_path,
+        &project.model_file,
+        &project.root,
+        &modelica_path,
+    )?;
+    if exit_code != 0 {
+        return Err(BackendError::InvalidInput(format!(
+            "OMEdit exited with status {exit_code}; check the OMEdit/OpenModelica installation and project diagnostics"
+        )));
+    }
+    Ok(format!(
+        "Project: {}\nModel: {} ({})\nOpenModelica: {}\nOMEdit: {}\nOMEdit exit code: {}\n{}",
+        project.manifest.name,
+        project.manifest.entry_model,
+        project.model_file.display(),
+        check.omc_version,
+        version_status.display,
+        exit_code,
+        check.output
     ))
 }
 

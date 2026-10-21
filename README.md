@@ -15,7 +15,7 @@ The first slice deliberately delegates Modelica parsing, checking, translation, 
 - `omola compat run --manifest tests/compat/manifest.toml --format json|markdown` runs the versioned sample corpus and reports measured pass/fail/skip counts.
 - `omola release verify --scorecard target/compatibility.json --manifest tests/compat/manifest.toml --gates docs/release-gates.toml` rejects stale, incomplete, failing, or below-threshold scorecards.
 - `omola bridge inventory --format markdown|json` reports the small documented Dymola scripting subset; `omola bridge call --function Dymola.simulateModel ...` runs only its declared partial mapping. Unsupported Dymola functions and unmapped simulation parameters return a capability-specific error.
-- `omola licenses check [--output REPORT.md]` compares the locked Cargo dependency closure, CI action references, and development container image against the provenance inventory; it exits unsuccessfully on unrecorded or changed dependencies.
+- `omola licenses check [--output REPORT.md]` compares the locked Cargo dependency closure, CI action references, and development/OMEdit container images and apt packages against the provenance inventory; it exits unsuccessfully on unrecorded or changed dependencies.
 - The core crate uses only the Rust standard library; the CLI uses Serde/TOML/JSON for versioned compatibility manifests and reports. OMC remains a separate process; no compiler code is embedded or copied.
 
 ## Install prerequisites and run the smoke model
@@ -58,7 +58,7 @@ cargo run -p omola -- project simulate examples/project.toml --output "out/proje
 
 The project schema, path/dependency policy, migration boundary, and unsupported editor workflows are described in [the project workflow proposal](docs/project-workflow.md). The sample manifest points to the existing `BouncingBall.mo`; it does not copy or modify the Modelica source. OMC integration jobs run on pull requests and can also be requested manually; Windows runs install the pinned OpenModelica version through its setup action.
 
-The planned graphical workflow reuses the official OpenModelica OMEdit application; OMEdit launch from an Omola project manifest is not implemented yet. See the [GUI roadmap](docs/gui-roadmap.md) and [OMEdit runtime record](docs/omedit-support.md) for the reuse plan, package/license findings, staged issues, and measured Dymola compatibility boundary.
+The graphical workflow reuses the official OpenModelica OMEdit application. `omola project open` validates a manifest and launches its entry model in OMEdit; the Docker desktop image includes the Rust CLI for this handoff. See the [project workflow](docs/project-workflow.md), [GUI roadmap](docs/gui-roadmap.md), and [OMEdit runtime record](docs/omedit-support.md) for setup, package/license findings, staged issues, and the measured Dymola compatibility boundary.
 
 ### OMEdit desktop preview in Docker (experimental)
 

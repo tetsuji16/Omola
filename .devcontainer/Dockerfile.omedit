@@ -1,3 +1,16 @@
+FROM openmodelica/openmodelica:v1.27.1-minimal@sha256:ac9a0223e69b8055d444b42f58ccb9680342b56848c68b81385bf83d7c0ba824 AS omola-builder
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl build-essential \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | sh -s -- -y --profile minimal --default-toolchain 1.88.0
+ENV PATH="/root/.cargo/bin:${PATH}"
+WORKDIR /build
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+RUN cargo build --locked --release -p omola
+
 FROM openmodelica/openmodelica:v1.27.1-minimal@sha256:ac9a0223e69b8055d444b42f58ccb9680342b56848c68b81385bf83d7c0ba824
 
 ARG OMOLA_UID=1000
@@ -15,9 +28,11 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY .devcontainer/omedit-entrypoint.sh /usr/local/bin/omedit-entrypoint.sh
+COPY --from=omola-builder /build/target/release/omola /usr/local/bin/omola
 RUN groupadd --gid "${OMOLA_GID}" omola \
     && useradd --uid "${OMOLA_UID}" --gid omola --create-home --shell /bin/bash omola \
     && chmod 0755 /usr/local/bin/omedit-entrypoint.sh \
+    && chmod 0755 /usr/local/bin/omola \
     && mkdir -p /workspace/data \
     && mkdir -p /tmp/.X11-unix \
     && chown root:root /tmp/.X11-unix \

@@ -23,7 +23,20 @@ From the repository root, with Rust and OpenModelica installed:
 cargo run -p omola -- project validate examples/project.toml
 cargo run -p omola -- project simulate examples/project.toml
 cargo run -p omola -- project simulate examples/project.toml --output "out/results with spaces/BouncingBall"
+cargo run -p omola -- project open examples/project.toml --omedit "/path/to/OMEdit"
 ```
+
+`project open` validates the manifest and exact library pins in a separate OMC preflight before launching the entry `.mo` file as one argument to OMEdit. The child process receives project package roots prepended to the current OMC Modelica path through `OPENMODELICALIBRARY`; the CLI process environment is unchanged. This path handoff does not prove which library versions OMEdit's own OMC session actually selected; when pins are declared, the CLI says so and asks the operator to check OMEdit's messages and library browser. On Debian, a known OMEdit package version mismatch is an error. On other hosts or non-package installs, the version is reported as unverified and must be checked by the operator. The command waits for OMEdit and reports a non-zero exit as failure. OMEdit remains the editor; this command does not expose or emulate a plugin API.
+
+The Docker desktop image builds and includes the Rust CLI. Copy a project into the writable workspace before editing so the checked-in sample stays unchanged:
+
+```powershell
+New-Item -ItemType Directory -Force .omedit-workspace/bouncing-ball | Out-Null
+Copy-Item examples/BouncingBall.mo,examples/project.toml .omedit-workspace/bouncing-ball/
+docker compose -f .devcontainer/docker-compose.omedit.yml exec omedit omola project open /workspace/data/bouncing-ball/project.toml --omedit /usr/bin/OMEdit
+```
+
+The Linux container's source mount remains read-only and `/workspace/data` maps to ignored `.omedit-workspace/`. This path exercises the actual OMC preflight and OMEdit executable; it does not establish visual GUI quality or Dymola parity.
 
 Simulation writes `<prefix>_res.mat` and an adjacent JSON run sidecar, and refuses to overwrite existing results. Numeric overrides are passed to OMC using its documented `simulate` runtime flags and recorded as requested values in that sidecar. The default is `examples/out/bouncing-ball_res.mat`; pass `--output` to choose another prefix. The manifest is currently a workflow input, not an editor database or complete package-manager lockfile. It does not rewrite, normalize, or copy Modelica source.
 
