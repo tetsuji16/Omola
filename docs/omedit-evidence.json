@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "hash_format": "utf-8-crlf-to-lf-v1",
+  "manifest": "Omola Modelica 3.6 / MSL 4.1.0 bounded corpus",
+  "manifest_sha256": "29ebbf2aab8ebd14dbee983d28f15350deeeade21e355fad9e4c19018b1b380c",
+  "environment": {
+    "os": "Ubuntu 22.04 amd64 OpenModelica container baseline (not the current CI runner)",
+    "omc_version": "1.27.1",
+    "omc_origin": "OpenModelica official 1.27.1 apt release channel; see docs/omedit-support.md",
+    "omedit_version": "1.27.1-1",
+    "omedit_origin": "OpenModelica official 1.27.1 apt release channel; see docs/omedit-support.md"
+  },
+  "fixtures": [
+    {
+      "id": "bouncing-ball-simulate",
+      "status": "UNVERIFIED",
+      "model": "../../examples/BouncingBall.mo",
+      "model_sha256": "cde4ea95978d555644967ccaacbde5903cd8cc553ff8fce3f165cb59a4d49522",
+      "evidence_kind": "manual",
+      "note": "OMEdit process launch was observed; visible project-open success and rendered editor content were not visually inspected."
+    },
+    {
+      "id": "msl-first-order-blocks",
+      "status": "UNVERIFIED",
+      "model": "fixtures/MSLFirstOrder.mo",
+      "model_sha256": "0bfe26da6773c17f8ad77dd92de218102f95d29f00456aa606692b3b2309c901",
+      "evidence_kind": "manual",
+      "note": "No OMEdit check, simulation, or plot was visually inspected for this fixture."
+    },
+    {
+      "id": "first-order-numerical-golden",
+      "status": "UNVERIFIED",
+      "model": "fixtures/FirstOrder.mo",
+      "model_sha256": "02dc218fd2504f68f2f69cd18ce5a77d6129f1b5da518f828a4ca1bbb1228667",
+      "evidence_kind": "manual",
+      "note": "No OMEdit result browsing or plot was visually inspected for this fixture."
+    },
+    {
+      "id": "invalid-syntax-diagnostic",
+      "status": "UNVERIFIED",
+      "model": "fixtures/InvalidSyntax.mo",
+      "model_sha256": "d0d63f74ec3424542f756201bffa1b3f9ef557b6c8e6c1db714161db5dd14690",
+      "evidence_kind": "manual",
+      "note": "The fixture is used by the headless compatibility corpus; OMEdit diagnostic display was not visually inspected."
+    },
+    {
+      "id": "modelica-compliance-connections-declarations",
+      "status": "UNVERIFIED",
+      "evidence_kind": "manual",
+      "note": "Pinned upstream case is not staged in this bounded runner and has no redistributed model file."
+    },
+    {
+      "id": "excluded-vendor-library-example",
+      "status": "UNVERIFIED",
+      "evidence_kind": "manual",
+      "note": "No vendor model is included or authorized for redistribution."
+    }
+  ]
+}
