@@ -3,8 +3,8 @@ schema_version = 1
 # Cargo registry packages in the locked workspace dependency closure.
 cargo_redistribution = "Not vendored. Builds fetch from crates.io; binary distributors must review and retain applicable notices."
 
-container_images = ["openmodelica/openmodelica:v1.27.1-minimal"]
-container_packages = ["ca-certificates", "curl", "build-essential", "git"]
+container_images = ["openmodelica/openmodelica:v1.27.1-minimal", "openmodelica/openmodelica:v1.27.1-minimal@sha256:ac9a0223e69b8055d444b42f58ccb9680342b56848c68b81385bf83d7c0ba824"]
+container_packages = ["ca-certificates", "curl", "build-essential", "git", "omedit=1.27.1-1", "xvfb", "x11-utils", "openbox", "x11vnc", "novnc", "websockify"]
 
 [[cargo_packages]]
 name = "zip"
@@ -326,11 +326,25 @@ license = "Apache-2.0 or MIT (Rust project components; see upstream notices)"
 distribution = "Development-only; not embedded in Omola binaries. Toolchain is intentionally not pinned to a dated release yet."
 
 [[external_components]]
+name = "Rust toolchain in OMEdit image builder"
+version = "rustup 1.88.0 toolchain"
+source = "https://rustup.rs/"
+license = "Apache-2.0 or MIT (Rust project components; see upstream notices)"
+distribution = "Build stage only; the multi-stage GUI image copies the Omola executable and does not include the toolchain."
+
+[[external_components]]
 name = "Debian development utilities in container"
 version = "ca-certificates, curl, build-essential, git (distribution versions from base image repositories)"
 source = "Debian package repositories configured by the base image"
 license = "Per-package upstream licenses and Debian copyright notices"
 distribution = "Development-only; not embedded in Omola binaries. Exact transitive OS package versions are supplied by the mutable base-image tag and must be reviewed before republishing the image."
+
+[[external_components]]
+name = "OMEdit GUI runtime packages"
+version = "omedit 1.27.1-1; xvfb, x11-utils, openbox, x11vnc, novnc, websockify from Ubuntu Jammy repositories"
+source = "https://build.openmodelica.org/omc/builds/linux/releases/1.27.1/ and Ubuntu Jammy package repositories"
+license = "Per-package upstream licenses and Debian copyright notices; see docs/omedit-support.md"
+distribution = "Present in the local development GUI image; no image or third-party GUI assets are redistributed by the repository."
 
 [[workflow_actions]]
 reference = "actions/checkout@v4"

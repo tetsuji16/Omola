@@ -1,6 +1,6 @@
 # Omola GUI roadmap: reuse OMEdit
 
-**Research checked:** 2026-10-13. Omola's GUI direction is to reuse the official OpenModelica GUI, OMEdit, wherever it already provides the workflow. Omola should add a small Rust companion/compatibility bridge around the existing CLI and OMC process boundary, not recreate an editor, annotation renderer, library browser, message pane, or plotting UI. No implementation of the previously prototyped browser GUI is adopted by this plan.
+**Research checked:** 2026-10-22. Omola's GUI direction is to reuse the official OpenModelica GUI, OMEdit, wherever it already provides the workflow. Omola should add a small Rust companion/compatibility bridge around the existing CLI and OMC process boundary, not recreate an editor, annotation renderer, library browser, message pane, or plotting UI. No implementation of the previously prototyped browser GUI is adopted by this plan.
 
 ## Product boundary
 
@@ -12,7 +12,7 @@ The project has **not** established an OMEdit plugin or stable embedding API. Is
 
 The official OpenModelica source checkout (`OpenModelica/OpenModelica`, commit `d446672047a2a1cfcdfe1e07081c696ba9d37da4`, inspected 2026-10-13) contains OMEdit source headers stating that the program is provided under **AGPL version 3 or OSMC Public License (OSMC-PL) version 1.8, at the recipient's choice**. The repository includes `OMCompiler/COPYING` and OMEdit source headers; the `common/LICENSE` file applies to that common component and is not OMEdit's license. OMEdit also links Qt and OpenModelica components with their own terms. Any redistribution or modified build must inventory the actual packaged components and comply with the chosen applicable terms; this plan does not redistribute or copy OMEdit source or assets.
 
-The existing Linux dev image is `openmodelica/openmodelica:v1.27.1-minimal` and has OMC but no OMEdit or Qt GUI stack. The official OpenModelica apt repository offers `omedit 1.27.1-1` for this image's Ubuntu 22.04 base. An ephemeral `docker run --rm` test successfully installed `omedit`, `xvfb`, `xauth`, and `x11vnc`; the package brought Qt WebEngine, OpenSceneGraph, OMPlot, OMSimulator, and other runtime dependencies. The OMEdit package reports 10,797 KiB installed size, which excludes its additional dependency footprint. The temporary container was removed at exit. **No OMEdit process launch, rendering, remote desktop, or browser access was tested.** A full upstream source build is substantially larger than installing the matching distribution package and is not justified before the packaged executable is tested.
+The Linux GUI development image uses the digest-pinned `openmodelica/openmodelica:v1.27.1-minimal` Ubuntu 22.04 base and installs the official `omedit 1.27.1-1` package. A multi-stage builder compiles the Rust CLI with Rust 1.88.0 on the same base and copies only the executable into the GUI image. OMEdit and `omola project open` were launched in the container against a copied project whose path contains spaces; its process argument was observed. noVNC HTTP readiness and loopback binding were checked. **Visible editor contents and visual rendering have not been reviewed in a browser.**
 
 ## Staged issues
 
@@ -20,25 +20,26 @@ The existing Linux dev image is `openmodelica/openmodelica:v1.27.1-minimal` and 
 |---|---|---|
 | [#13](https://github.com/tetsuji16/Omola/issues/13) | OMEdit reuse decision and license/runtime inventory | Versioned support matrix, pinned official package/source and license inventory, no copied assets, documented no-plugin boundary |
 | [#14](https://github.com/tetsuji16/Omola/issues/14) | Reproducible OMEdit development container and launch | Matching OMC/OMEdit installation, reproducible build, executable launch under X/Wayland or documented host display, smoke evidence |
-| [#15](https://github.com/tetsuji16/Omola/issues/15) | Open Omola projects in OMEdit | Resolve manifest to canonical entry model/library roots, open it in OMEdit, preserve project files, actionable missing-library/version diagnostics |
+| [#15](https://github.com/tetsuji16/Omola/issues/15) | Open Omola projects in OMEdit | Resolve manifest paths and preflight pins, launch the entry model through OMEdit, preserve project files; GUI-visible model and selected library versions still require verification |
 | [#16](https://github.com/tetsuji16/Omola/issues/16) | OMEdit/OMC workflow and Rust companion | Verified check/simulate and diagnostics through OMEdit or supported OMC CLI; Rust adds only safe, tested bridge behaviors |
 | [#17](https://github.com/tetsuji16/Omola/issues/17) | Reuse OMEdit result browser and plots | Run a real fixture and verify variable browsing/plots/result paths; document unsupported formats and units |
 | [#18](https://github.com/tetsuji16/Omola/issues/18) | Dymola workflow gaps and diagram/annotation compatibility | Build a gap matrix, preserve Modelica annotations, add only evidenced bridges; graphical editing parity is separately measured |
 | [#19](https://github.com/tetsuji16/Omola/issues/19) | GUI compatibility and release regression gates | Versioned test report for launched OMEdit, project-open/check/simulate/plot and explicit unsupported Dymola behaviors |
+| [#22](https://github.com/tetsuji16/Omola/issues/22) | Verify library versions selected by OMEdit against project pins | Reconcile manifest pins with `uses(...)` annotations and observe the version selected by OMEdit itself; a separate OMC preflight is insufficient |
 
-Dependency order: #13 → #14 → #15 → #16 → #17 → #19. Issue #18 depends on #13, #15, and #16 and may proceed independently of result plotting. An issue stays open until its own acceptance criteria are demonstrated; planning or package installation alone does not count as a functional GUI. No stage asserts complete Dymola compatibility.
+Dependency order: #13 → #14 → #15 → #16 → #17 → #19. Issue #18 depends on #13, #15, and #16 and may proceed independently of result plotting. Issue #22 depends on #15 and #16 and tracks verification of library versions actually selected in OMEdit. An issue stays open until its own acceptance criteria are demonstrated; planning or package installation alone does not count as a functional GUI. No stage asserts complete Dymola compatibility.
 
 ## Compatibility target matrix
 
 | Area | Reuse/plan | Current boundary |
 |---|---|---|
 | Modelica editor and diagram annotations | OMEdit text and diagram editors | OMEdit capabilities are OpenModelica behavior; no Omola UI or Dymola-equivalence claim |
-| Library/model browsing | OMEdit library browser plus manifest-to-model launch | CLI project manifest exists; GUI handoff is unimplemented |
-| Check, simulation, messages | OMEdit with distribution-matched OMC; Rust adapter only for measured gaps | CLI workflows exist; OMEdit invocation from Omola is unimplemented |
+| Library/model browsing | OMEdit library browser plus manifest-to-model launch | `project open` hands off canonical model paths and package roots; OMEdit-selected versions and visual browsing are unverified |
+| Check, simulation, messages | OMEdit with distribution-matched OMC; Rust adapter only for measured gaps | CLI workflows and OMEdit launch exist; GUI diagnostics and operation results need verification |
 | Results and plotting | Reuse OMEdit variable browser/plotting | Existing CLI result support is limited; Dymola `.mat`/`.dsres` compatibility is not established |
 | Dymola scripting/API | Rust bridge with explicit function-by-function mapping | Small documented subset only; no arbitrary script execution |
 | FMI, optimization, calibration, Monte Carlo and vendor services | Separate requirement and lawful test evidence per capability | Dymola-specific or commercial functions are unsupported unless measured individually |
-| Packaging, licensing and display | Use official matched distribution; document local desktop/container display modes | Current dev container lacks GUI stack; launch and VNC/noVNC path unverified |
+| Packaging, licensing and display | Use official matched distribution; document local desktop/container display modes | OMEdit runs in a non-root Linux container; noVNC readiness is checked, but browser-rendered quality remains unverified |
 
 Keep Modelica language/library support, OMC semantics, OMEdit behavior, Omola bridge behavior, Dymola-specific behavior, and commercial/vendor services as distinct scorecard dimensions. Passing OMC/OMEdit tests never implies Dymola parity.
 
