@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tetsuji16/Omola/blob/main/docs/omedit-evidence.schema.json",
+  "title": "Omola OMEdit workflow evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "manifest", "manifest_sha256", "environment", "fixtures"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "manifest": { "type": "string", "minLength": 1 },
+    "manifest_sha256": { "$ref": "#/$defs/sha256" },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "omc_version", "omc_origin", "omedit_version", "omedit_origin"],
+      "properties": {
+        "os": { "type": "string", "minLength": 1 },
+        "omc_version": { "type": "string", "minLength": 1 },
+        "omc_origin": { "type": "string", "minLength": 1 },
+        "omedit_version": { "type": "string", "minLength": 1 },
+        "omedit_origin": { "type": "string", "minLength": 1 }
+      }
+    },
+    "fixtures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status", "evidence_kind", "note"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "status": { "enum": ["PASS", "FAIL", "UNVERIFIED"] },
+          "model": { "type": ["string", "null"] },
+          "model_sha256": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+          "evidence_kind": { "enum": ["manual", "automated"] },
+          "note": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  }
+}

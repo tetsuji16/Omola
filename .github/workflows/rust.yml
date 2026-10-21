@@ -41,6 +41,17 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo test --workspace
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Verify OMEdit evidence baseline
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo run -p omola -- omedit evidence verify --evidence docs/omedit-evidence.json --manifest tests/compat/manifest.toml
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.os == 'ubuntu-latest'
+        with:
+          name: omedit-evidence-baseline
+          path: |
+            docs/omedit-evidence.json
+            docs/omedit-evidence.schema.json
+          if-no-files-found: error
 
   omc-integration:
     if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.run_omc)
