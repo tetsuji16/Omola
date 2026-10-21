@@ -1,0 +1,25 @@
+services:
+  omedit:
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile.omedit
+      args:
+        OMOLA_UID: "${OMOLA_UID:-1000}"
+        OMOLA_GID: "${OMOLA_GID:-1000}"
+    user: "${OMOLA_UID:-1000}:${OMOLA_GID:-1000}"
+    ports:
+      - "127.0.0.1:6080:6080"
+    environment:
+      DISPLAY: ":0"
+      OMOLA_START_FILE: /workspace/Omola/examples/BouncingBall.mo
+      OMOLA_DATA_DIR: /workspace/data
+    volumes:
+      - type: bind
+        source: ..
+        target: /workspace/Omola
+        read_only: true
+      - type: bind
+        source: ../.omedit-workspace
+        target: /workspace/data
+    init: true
+    stop_grace_period: 10s

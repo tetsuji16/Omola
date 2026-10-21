@@ -1,0 +1,37 @@
+FROM openmodelica/openmodelica:v1.27.1-minimal@sha256:ac9a0223e69b8055d444b42f58ccb9680342b56848c68b81385bf83d7c0ba824
+
+ARG OMOLA_UID=1000
+ARG OMOLA_GID=1000
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        omedit=1.27.1-1 \
+        xvfb \
+        x11-utils \
+        openbox \
+        x11vnc \
+        novnc \
+        websockify \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY .devcontainer/omedit-entrypoint.sh /usr/local/bin/omedit-entrypoint.sh
+RUN groupadd --gid "${OMOLA_GID}" omola \
+    && useradd --uid "${OMOLA_UID}" --gid omola --create-home --shell /bin/bash omola \
+    && chmod 0755 /usr/local/bin/omedit-entrypoint.sh \
+    && mkdir -p /workspace/data \
+    && mkdir -p /tmp/.X11-unix \
+    && chown root:root /tmp/.X11-unix \
+    && chmod 1777 /tmp/.X11-unix \
+    && mkdir -p /tmp/runtime-omola \
+    && chown omola:omola /tmp/runtime-omola \
+    && chmod 0700 /tmp/runtime-omola \
+    && chown -R omola:omola /workspace/data /home/omola
+
+ENV DISPLAY=:0 \
+    HOME=/home/omola \
+    XDG_RUNTIME_DIR=/tmp/runtime-omola \
+    OMOLA_START_FILE=/workspace/Omola/examples/BouncingBall.mo
+
+EXPOSE 6080
+USER omola:omola
+ENTRYPOINT ["/usr/local/bin/omedit-entrypoint.sh"]

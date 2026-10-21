@@ -2,7 +2,7 @@
 
 **Omola** is an independent, Rust-first orchestration layer for Modelica workflows, with OpenModelica Compiler (OMC) as an external backend. “Open Dymola” is the project aspiration: compatible workflows are added and measured incrementally. Omola is not affiliated with or endorsed by Dassault Systèmes, and this repository does not claim Dymola compatibility today.
 
-The first slice deliberately delegates Modelica parsing, checking, translation, and solving to an installed `omc`. Omola owns the process boundary, stable user-facing commands, diagnostics, later workflow adapters, and eventually its own UI. This avoids duplicating a mature compiler before there is a conformance corpus. It also means Omola's behavior is limited by the selected OMC version, its library support, and external tools used by the model.
+The first slice deliberately delegates Modelica parsing, checking, translation, and solving to an installed `omc`. Omola owns the process boundary, stable user-facing commands, diagnostics, and later workflow adapters. For graphical modeling, the project plans to reuse upstream OMEdit instead of recreating its editor and diagram UI. This avoids duplicating a mature compiler before there is a conformance corpus. It also means Omola's behavior is limited by the selected OMC/OMEdit version, its library support, and external tools used by the model.
 
 ## Current skeleton
 
@@ -58,7 +58,19 @@ cargo run -p omola -- project simulate examples/project.toml --output "out/proje
 
 The project schema, path/dependency policy, migration boundary, and unsupported editor workflows are described in [the project workflow proposal](docs/project-workflow.md). The sample manifest points to the existing `BouncingBall.mo`; it does not copy or modify the Modelica source. OMC integration jobs run on pull requests and can also be requested manually; Windows runs install the pinned OpenModelica version through its setup action.
 
-The planned graphical workflow reuses the official OpenModelica OMEdit application; OMEdit launch from an Omola project manifest is not implemented yet. See the [GUI roadmap](docs/gui-roadmap.md) for the OMEdit reuse plan, license/package findings, staged issues, and measured Dymola compatibility boundary.
+The planned graphical workflow reuses the official OpenModelica OMEdit application; OMEdit launch from an Omola project manifest is not implemented yet. See the [GUI roadmap](docs/gui-roadmap.md) and [OMEdit runtime record](docs/omedit-support.md) for the reuse plan, package/license findings, staged issues, and measured Dymola compatibility boundary.
+
+### OMEdit desktop preview in Docker (experimental)
+
+On Windows, from PowerShell at the repository root, build and start the upstream OMEdit desktop in a Linux container:
+
+```powershell
+docker compose -f .devcontainer/docker-compose.omedit.yml up --build
+```
+
+Open [http://127.0.0.1:6080/vnc.html?autoconnect=true](http://127.0.0.1:6080/vnc.html?autoconnect=true). The container starts the official OMEdit 1.27.1 process with the checked-in `examples/BouncingBall.mo` path as its launch argument; this smoke test has not confirmed the model appears in the visible editor. Stop it with Ctrl-C or `docker compose -f .devcontainer/docker-compose.omedit.yml down`.
+
+The repository is mounted read-only at `/workspace/Omola`; OMEdit cannot save changes to the checked-in examples. Writable work/results go to the ignored `.omedit-workspace/` folder mounted at `/workspace/data`. The container runs OMEdit as non-root UID/GID 1000 by default. On Linux, set `OMOLA_UID` and `OMOLA_GID` before building to match your account, so files in `.omedit-workspace/` remain editable by you. On Windows Docker Desktop, the bind mount is mediated by Docker Desktop. The Qt WebEngine sandbox stays enabled because the desktop process is non-root. The VNC server is reachable only through noVNC on host loopback port 6080; do not change the published address to a wildcard interface. This preview reuses upstream OMEdit and does not claim Dymola compatibility. Container/process and HTTP readiness passed; visual browser and model-open behavior are not yet verified.
 
 The output prefix may contain spaces. To validate Rust without OMC, run `cargo check --workspace`; this is a build-only check and does not exercise the compiler backend. The OMC commands above are backend integration checks.
 
