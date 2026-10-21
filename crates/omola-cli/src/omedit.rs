@@ -1,13 +1,13 @@
 use omola_core::{BackendError, Omc};
+#[cfg(target_os = "linux")]
+use std::process::Stdio;
 use std::{
     env,
-    ffi::OsString,
+    ffi::{OsStr, OsString},
     fs,
     path::{Path, PathBuf},
     process::Command,
 };
-#[cfg(target_os = "linux")]
-use std::{ffi::OsStr, process::Stdio};
 
 pub(crate) struct VersionStatus {
     pub(crate) display: String,
