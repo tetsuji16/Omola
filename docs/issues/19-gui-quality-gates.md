@@ -18,6 +18,6 @@ Run release verifier, confirm changed manifest hash rejected, run available UI/b
 
 ## Implemented headless foundation
 
-`docs/omedit-evidence.json` is a schema-versioned baseline. `omola omedit evidence verify` checks the exact manifest SHA-256, each in-workspace fixture model SHA-256, environment provenance fields, and a complete unique fixture set. Normal mode accepts honest `UNVERIFIED` cases; `--require-verified` requires measured environment provenance and every non-skipped fixture to be `PASS`. The Ubuntu CI job validates this baseline and publishes the JSON and schema as an artifact.
+`docs/omedit-evidence.json` is a schema-versioned baseline. Its declared `utf-8-crlf-to-lf-v1` SHA-256 format makes text hashes stable across Windows and Linux checkouts. `omola omedit evidence verify` checks the manifest digest, each in-workspace fixture model digest, environment provenance fields, and a complete unique fixture set. Normal mode accepts honest `UNVERIFIED` cases; `--require-verified` requires measured environment provenance and every non-skipped fixture to be `PASS`. The Ubuntu CI job validates this baseline and publishes the JSON and schema as an artifact.
 
 This is partial progress only. The current report marks all OMEdit GUI cases `UNVERIFIED`: process launch and container readiness were observed, but visible editor contents, check/simulate actions, plots, accessibility, latency, and Dymola parity were not verified. Issues #16–#18 still need their real workflow evidence before this release gate can claim the GUI work complete.

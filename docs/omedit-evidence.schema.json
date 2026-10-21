@@ -2,13 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/tetsuji16/Omola/blob/main/docs/omedit-evidence.schema.json",
   "title": "Omola OMEdit workflow evidence",
+  "description": "SHA-256 values hash UTF-8 text after converting CRLF pairs to LF; lone CR characters remain unchanged.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "manifest", "manifest_sha256", "environment", "fixtures"],
+  "required": ["schema_version", "hash_format", "manifest", "manifest_sha256", "environment", "fixtures"],
   "properties": {
     "schema_version": { "const": 1 },
+    "hash_format": { "const": "utf-8-crlf-to-lf-v1" },
     "manifest": { "type": "string", "minLength": 1 },
-    "manifest_sha256": { "$ref": "#/$defs/sha256" },
+    "manifest_sha256": { "$ref": "#/$defs/sha256", "description": "SHA-256 of UTF-8 manifest text after CRLF-to-LF normalization." },
     "environment": {
       "type": "object",
       "additionalProperties": false,
@@ -31,7 +33,7 @@
           "id": { "type": "string", "minLength": 1 },
           "status": { "enum": ["PASS", "FAIL", "UNVERIFIED"] },
           "model": { "type": ["string", "null"] },
-          "model_sha256": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+          "model_sha256": { "oneOf": [{ "$ref": "#/$defs/sha256", "description": "SHA-256 of UTF-8 model text after CRLF-to-LF normalization." }, { "type": "null" }] },
           "evidence_kind": { "enum": ["manual", "automated"] },
           "note": { "type": "string", "minLength": 1 }
         }

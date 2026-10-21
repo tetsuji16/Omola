@@ -25,6 +25,7 @@ struct ManifestFixture {
 #[serde(deny_unknown_fields)]
 struct Evidence {
     schema_version: u32,
+    hash_format: String,
     manifest: String,
     manifest_sha256: String,
     environment: Environment,
@@ -90,7 +91,10 @@ pub fn run(args: &[String]) -> Result<String, BackendError> {
             manifest.name, evidence.manifest
         )));
     }
-    let current_manifest_hash = sha256(manifest_text.as_bytes());
+    if evidence.hash_format != "utf-8-crlf-to-lf-v1" {
+        return Err(invalid("evidence hash_format must be utf-8-crlf-to-lf-v1"));
+    }
+    let current_manifest_hash = sha256_text(&manifest_text);
     if evidence.manifest_sha256 != current_manifest_hash {
         return Err(invalid(
             "stale OMEdit evidence: manifest SHA-256 does not match",
@@ -164,12 +168,13 @@ pub fn run(args: &[String]) -> Result<String, BackendError> {
                     )));
                 }
                 let model_path = confined_model_path(&root, &manifest_path, model)?;
-                let model_hash = sha256(&fs::read(&model_path).map_err(|error| {
+                let model_text = fs::read_to_string(&model_path).map_err(|error| {
                     invalid(format!(
                         "could not read fixture model {}: {error}",
                         model_path.display()
                     ))
-                })?);
+                })?;
+                let model_hash = sha256_text(&model_text);
                 if result.model_sha256.as_deref() != Some(model_hash.as_str()) {
                     return Err(invalid(format!(
                         "stale OMEdit evidence: fixture '{}' model SHA-256 does not match",
@@ -317,8 +322,11 @@ fn confined_model_path(root: &Path, manifest: &Path, model: &str) -> Result<Path
     Ok(resolved)
 }
 
-fn sha256(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+fn sha256_text(text: &str) -> String {
+    // Modelica/TOML fixtures are text. Hash their canonical LF representation
+    // so evidence generated on Windows matches a GitHub Linux checkout.
+    let normalized = text.replace("\r\n", "\n");
+    format!("{:x}", Sha256::digest(normalized.as_bytes()))
 }
 
 fn usage_error() -> BackendError {
@@ -348,14 +356,14 @@ mod tests {
         let manifest = root.join("tests/manifest.toml");
         fs::write(&manifest, "schema_version=2\nname=\"test corpus\"\n[[fixtures]]\nid=\"modeled\"\nexpected=\"pass\"\nmodel=\"model.mo\"\n[[fixtures]]\nid=\"excluded\"\nexpected=\"skip\"\n").unwrap();
         let manifest_text = fs::read_to_string(&manifest).unwrap();
-        let manifest_hash = sha256(manifest_text.as_bytes());
-        let model_hash = sha256(&fs::read(root.join("tests/model.mo")).unwrap());
+        let manifest_hash = sha256_text(&manifest_text);
+        let model_hash = sha256_text(&fs::read_to_string(root.join("tests/model.mo")).unwrap());
         (root, manifest, manifest_hash, model_hash)
     }
 
     fn write_evidence(root: &Path, manifest_hash: &str, model_hash: &str) -> PathBuf {
         let evidence = root.join("evidence.json");
-        fs::write(&evidence, format!(r#"{{"schema_version":1,"manifest":"test corpus","manifest_sha256":"{manifest_hash}","environment":{{"os":"unverified","omc_version":"unverified","omc_origin":"unverified","omedit_version":"unverified","omedit_origin":"unverified"}},"fixtures":[{{"id":"modeled","status":"UNVERIFIED","model":"model.mo","model_sha256":"{model_hash}","evidence_kind":"manual","note":"GUI display interaction not yet measured"}},{{"id":"excluded","status":"UNVERIFIED","evidence_kind":"manual","note":"excluded vendor fixture"}}]}}"#)).unwrap();
+        fs::write(&evidence, format!(r#"{{"schema_version":1,"hash_format":"utf-8-crlf-to-lf-v1","manifest":"test corpus","manifest_sha256":"{manifest_hash}","environment":{{"os":"unverified","omc_version":"unverified","omc_origin":"unverified","omedit_version":"unverified","omedit_origin":"unverified"}},"fixtures":[{{"id":"modeled","status":"UNVERIFIED","model":"model.mo","model_sha256":"{model_hash}","evidence_kind":"manual","note":"GUI display interaction not yet measured"}},{{"id":"excluded","status":"UNVERIFIED","evidence_kind":"manual","note":"excluded vendor fixture"}}]}}"#)).unwrap();
         evidence
     }
 
@@ -402,6 +410,19 @@ mod tests {
     }
 
     #[test]
+    fn canonical_text_hash_is_stable_across_crlf_and_lf_checkouts() {
+        let (root, manifest, manifest_hash, model_hash) = fixture_files();
+        let evidence = write_evidence(&root, &manifest_hash, &model_hash);
+        let manifest_text = fs::read_to_string(&manifest).unwrap();
+        let model_path = root.join("tests/model.mo");
+        let model_text = fs::read_to_string(&model_path).unwrap();
+        fs::write(&manifest, manifest_text.replace('\n', "\r\n")).unwrap();
+        fs::write(&model_path, model_text.replace('\n', "\r\n")).unwrap();
+        assert!(run(&args(&evidence, &manifest, false)).is_ok());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn rejects_stale_manifest_and_model_hashes() {
         let (root, manifest, manifest_hash, model_hash) = fixture_files();
         let evidence = write_evidence(&root, &manifest_hash, &model_hash);
@@ -417,7 +438,7 @@ mod tests {
             .contains("manifest name"));
         fs::write(&manifest, &original_manifest).unwrap();
         fs::write(root.join("tests/model.mo"), "model Changed end Changed;\n").unwrap();
-        let changed_hash = sha256(original_manifest.as_bytes());
+        let changed_hash = sha256_text(&original_manifest);
         let evidence = write_evidence(&root, &changed_hash, &model_hash);
         assert!(run(&args(&evidence, &manifest, false))
             .unwrap_err()
@@ -464,7 +485,7 @@ mod tests {
             "[[fixtures]]\nid=\"modeled\"\nexpected=\"skip\"",
         );
         fs::write(&manifest, duplicated_manifest).unwrap();
-        let changed_manifest_hash = sha256(fs::read(&manifest).unwrap().as_slice());
+        let changed_manifest_hash = sha256_text(&fs::read_to_string(&manifest).unwrap());
         let evidence_text = fs::read_to_string(&evidence)
             .unwrap()
             .replace(&manifest_hash, &changed_manifest_hash);
@@ -495,8 +516,8 @@ mod tests {
         fs::write(&manifest, &escaped_manifest).unwrap();
         let outside = root.parent().unwrap().join(&outside_name);
         fs::write(&outside, "model Outside end Outside;\n").unwrap();
-        let escaped_hash = sha256(escaped_manifest.as_bytes());
-        let outside_hash = sha256(&fs::read(&outside).unwrap());
+        let escaped_hash = sha256_text(&escaped_manifest);
+        let outside_hash = sha256_text(&fs::read_to_string(&outside).unwrap());
         let fresh_evidence = write_evidence(&root, &manifest_hash, &model_hash);
         let text = fs::read_to_string(&fresh_evidence)
             .unwrap()

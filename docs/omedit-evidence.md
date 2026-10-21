@@ -1,6 +1,6 @@
 # OMEdit workflow evidence
 
-`omedit-evidence.json` is the versioned baseline for the bounded compatibility corpus. It binds the report to the exact manifest bytes and, where a fixture has a model, to that model's SHA-256. The verifier also confines resolved model paths to this repository workspace and rejects duplicate, missing, or unknown fixture IDs.
+`omedit-evidence.json` is the versioned baseline for the bounded compatibility corpus. Its `utf-8-crlf-to-lf-v1` hash format computes SHA-256 over UTF-8 text after replacing CRLF pairs with LF; lone CR characters stay unchanged. This makes manifest and model digests stable across Windows and Linux checkouts without claiming to hash the raw working-tree bytes. The verifier also confines resolved model paths to this repository workspace and rejects duplicate, missing, or unknown fixture IDs.
 
 Run the normal verification from the repository root:
 
