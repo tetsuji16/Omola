@@ -27,6 +27,31 @@ cargo run -p omola -- project simulate examples/project.toml --output "out/resul
 cargo run -p omola -- project open examples/project.toml --omedit "/path/to/OMEdit"
 ```
 
+### Windows native launch
+
+In PowerShell from the repository root, set the compiler and GUI paths to the matching `bin` directory of one OpenModelica installation, then build the CLI and open a writable copy of the sample:
+
+```powershell
+$omBin = Join-Path $env:ProgramFiles 'OpenModelica1.27.1-64bit\bin' # adjust to the installed folder
+$env:OMOLA_OMC = Join-Path $omBin 'omc.exe'
+$env:OMOLA_OMEDIT = Join-Path $omBin 'OMEdit.exe'
+$env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH" # rustup's default Windows cargo location
+# Run from the Omola repository root.
+cargo build --locked --release -p omola
+& .\target\release\omola.exe doctor
+
+$projectDir = Join-Path (Get-Location) ('.omedit-workspace\bouncing-ball-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+if (Test-Path $projectDir) { throw "Project copy already exists: $projectDir. Choose another directory to preserve its contents." }
+New-Item -ItemType Directory -Force $projectDir | Out-Null
+Copy-Item -LiteralPath @('examples\BouncingBall.mo', 'examples\project.toml') -Destination $projectDir
+& .\target\release\omola.exe project validate (Join-Path $projectDir 'project.toml')
+& .\target\release\omola.exe project open (Join-Path $projectDir 'project.toml') --omedit "$env:OMOLA_OMEDIT"
+```
+
+Change `$omBin` to the actual versioned OpenModelica installation folder. `OMOLA_OMC` and `OMOLA_OMEDIT` are read from the current process environment; explicit `--omedit PATH` overrides the latter, and each falls back to `PATH` when unset. Keep OMC and OMEdit from the same installation. `project open` validates the manifest with OMC and launches the model in OMEdit, passing project package roots to that child process. It waits until the GUI exits. On Windows, the launcher reports the OMEdit version as unverified; check that the selected GUI matches the compiler.
+
+This is a file-open and process-launch handoff only. Manifest stop-time and parameter defaults are used by `project simulate`; `project open` does not populate OMEdit's simulation controls. Use the GUI to set its simulation options, or run `project simulate` to apply the manifest settings through the CLI. The source-built Windows OMEdit smoke check passed model checking but failed to run a generated simulator; a complete source install is not yet verified. The official packaged OpenModelica installation is the supported starting point for this workflow.
+
 `project open` validates the manifest and exact library pins in a separate OMC preflight before launching the entry `.mo` file as one argument to OMEdit. The child process receives project package roots prepended to the current OMC Modelica path through `OPENMODELICALIBRARY`; the CLI process environment is unchanged. This path handoff does not prove which library versions OMEdit's own OMC session actually selected; when pins are declared, the CLI says so and asks the operator to check OMEdit's messages and library browser. On Debian, a known OMEdit package version mismatch is an error. On other hosts or non-package installs, the version is reported as unverified and must be checked by the operator. The command waits for OMEdit and reports a non-zero exit as failure. OMEdit remains the editor; this command does not expose or emulate a plugin API.
 
 `project inspect --format json` is the machine-readable boundary planned for the native OMEdit extension. It runs the same strict manifest and path validation as other project commands, then writes JSON format version 1 with absolute canonical manifest/model/package-root paths, the entry class, exact dependency pins, stop time, and numeric parameter overrides. The contract is defined in [`omedit-project-bridge.schema.json`](omedit-project-bridge.schema.json). It does not contact OMC or start a process. The modified OMEdit must launch this command with a process API and argument list (never shell text), reject unsupported bridge versions, and show errors in its own message pane. The bridge does not prove which library versions OMEdit's OMC session actually loads; that remains tracked by issue #22.
