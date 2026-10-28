@@ -21,12 +21,15 @@ From the repository root, with Rust and OpenModelica installed:
 
 ```sh
 cargo run -p omola -- project validate examples/project.toml
+cargo run -p omola -- project inspect examples/project.toml --format json
 cargo run -p omola -- project simulate examples/project.toml
 cargo run -p omola -- project simulate examples/project.toml --output "out/results with spaces/BouncingBall"
 cargo run -p omola -- project open examples/project.toml --omedit "/path/to/OMEdit"
 ```
 
 `project open` validates the manifest and exact library pins in a separate OMC preflight before launching the entry `.mo` file as one argument to OMEdit. The child process receives project package roots prepended to the current OMC Modelica path through `OPENMODELICALIBRARY`; the CLI process environment is unchanged. This path handoff does not prove which library versions OMEdit's own OMC session actually selected; when pins are declared, the CLI says so and asks the operator to check OMEdit's messages and library browser. On Debian, a known OMEdit package version mismatch is an error. On other hosts or non-package installs, the version is reported as unverified and must be checked by the operator. The command waits for OMEdit and reports a non-zero exit as failure. OMEdit remains the editor; this command does not expose or emulate a plugin API.
+
+`project inspect --format json` is the machine-readable boundary planned for the native OMEdit extension. It runs the same strict manifest and path validation as other project commands, then writes JSON format version 1 with absolute canonical manifest/model/package-root paths, the entry class, exact dependency pins, stop time, and numeric parameter overrides. The contract is defined in [`omedit-project-bridge.schema.json`](omedit-project-bridge.schema.json). It does not contact OMC or start a process. The modified OMEdit must launch this command with a process API and argument list (never shell text), reject unsupported bridge versions, and show errors in its own message pane. The bridge does not prove which library versions OMEdit's OMC session actually loads; that remains tracked by issue #22.
 
 The Docker desktop image builds and includes the Rust CLI. Copy a project into the writable workspace before editing so the checked-in sample stays unchanged:
 
@@ -44,6 +47,6 @@ Simulation writes `<prefix>_res.mat` and an adjacent JSON run sidecar, and refus
 
 ## Editor and GUI roadmap
 
-The first editing workflow is text-first: preserve user-owned `.mo` files, use a project manifest for navigation/configuration, validate with OMC, and keep result artifacts separate. Diagram editing, graphical annotations editing, parameter dialogs, plotting/interactive post-processing, model search, project dependency download/update, and Dymola `.dymx`/project import are unsupported.
+The current launcher has no manifest-aware GUI. The implementation target is a pinned upstream OMEdit source build with a native “Open Omola Project” action, manifest-derived simulation settings, and results shown in OMEdit's existing editors and plots. Until this patched build passes the GUI workflow checks, model views, simulation defaults, and results are capabilities of standalone upstream OMEdit only; no Omola GUI completion or Dymola parity is claimed. Diagram/annotation gaps, project dependency download/update, and Dymola `.dymx`/project import remain separately scoped.
 
 A future GUI should be accepted only when it can (1) reopen a project without changing source bytes, (2) browse package roots and identify missing pinned dependencies, (3) edit and save a Modelica file with an explicit diff, (4) run OMC validation/simulation and display diagnostics, and (5) open a result and plot named variables. Diagram authoring and Dymola project import require separate fixture-backed issues and may not be inferred from text editing or OMC support.

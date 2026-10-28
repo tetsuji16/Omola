@@ -2,7 +2,7 @@
 
 **Omola** is an independent, Rust-first orchestration layer for Modelica workflows, with OpenModelica Compiler (OMC) as an external backend. “Open Dymola” is the project aspiration: compatible workflows are added and measured incrementally. Omola is not affiliated with or endorsed by Dassault Systèmes, and this repository does not claim Dymola compatibility today.
 
-The first slice deliberately delegates Modelica parsing, checking, translation, and solving to an installed `omc`. Omola owns the process boundary, stable user-facing commands, diagnostics, and later workflow adapters. For graphical modeling, the project plans to reuse upstream OMEdit instead of recreating its editor and diagram UI. This avoids duplicating a mature compiler before there is a conformance corpus. It also means Omola's behavior is limited by the selected OMC/OMEdit version, its library support, and external tools used by the model.
+The first slice delegates Modelica parsing, checking, translation, and solving to an installed `omc`. Omola is intended to build on the upstream OMEdit C++/Qt application and add Omola project workflows to its existing modeling UI; a native OMEdit source build and in-application project integration are in progress. Until those changes are built and tested, the existing `omola project open` command remains only an external launcher. Omola's backend behavior remains limited by the selected OMC version, its library support, and external tools used by each model.
 
 ## Current skeleton
 
@@ -10,6 +10,7 @@ The first slice deliberately delegates Modelica parsing, checking, translation, 
 - `omola check --model FILE.mo --class Qualified.Name` loads the file and calls OMC `checkModel`.
 - `omola simulate --model FILE.mo --class Qualified.Name [--stop-time SECONDS] [--parameters name=value,name=value] [--output PREFIX]` calls OMC `simulate`; numeric parameter overrides are validated and recorded in the run sidecar.
 - `omola project validate|simulate examples/project.toml` opens the versioned schema-1 manifest, validates relative package/source paths and exact dependency pins, then delegates checking/simulation to OMC. Modelica files remain user-owned and unchanged.
+- `omola project inspect MANIFEST.toml --format json` emits validated, canonical project paths and simulation settings in bridge format version 1 for the native OMEdit integration. It does not invoke OMC, launch a GUI, or change project files.
 - `omola results inspect FILE.csv|FILE.mat` inspects strict CSV or OpenModelica-generated MAT results; `omola results export-csv FILE.mat --variables x,y --output FILE.csv` uses OMC's scripting API to export selected scalar variables.
 - `omola fmi capabilities`, `omola fmi export`, `omola fmi import`, and `omola fmi validate` report the documented OMC profile, delegate FMU operations to OMC, and check basic archive/XML metadata.
 - `omola compat run --manifest tests/compat/manifest.toml --format json|markdown` runs the versioned sample corpus and reports measured pass/fail/skip counts.
