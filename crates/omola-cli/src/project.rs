@@ -1,13 +1,13 @@
 use crate::omedit;
 use omola_core::{BackendError, CommandResult, Omc, SimulationConfig};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     fs,
     path::{Component, Path, PathBuf},
 };
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Project {
     schema_version: u32,
@@ -22,14 +22,14 @@ struct Project {
     simulation: Simulation,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct LibraryPin {
     name: String,
     version: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Simulation {
     stop_time: f64,
@@ -48,6 +48,7 @@ impl Default for Simulation {
 
 struct LoadedProject {
     manifest: Project,
+    manifest_path: PathBuf,
     root: PathBuf,
     model_file: PathBuf,
     libraries: Vec<(String, String)>,
@@ -55,6 +56,11 @@ struct LoadedProject {
 }
 
 pub(crate) fn run(args: &[String]) -> Result<String, BackendError> {
+    if let [command, path, flag, format] = args {
+        if command == "inspect" && flag == "--format" && format == "json" {
+            return inspect_project(Path::new(path));
+        }
+    }
     if let [command, path] = args {
         if command == "open" {
             return open_project(Path::new(path), None);
@@ -71,7 +77,7 @@ pub(crate) fn run(args: &[String]) -> Result<String, BackendError> {
         [command, path, flag, output] if command == "simulate" && flag == "--output" => {
             (command.as_str(), path.as_str(), Some(PathBuf::from(output)))
         }
-        _ => return Err(BackendError::InvalidInput("usage: omola project validate MANIFEST.toml | omola project simulate MANIFEST.toml [--output PREFIX] | omola project open MANIFEST.toml [--omedit PATH]".into())),
+        _ => return Err(BackendError::InvalidInput("usage: omola project inspect MANIFEST.toml --format json | validate MANIFEST.toml | simulate MANIFEST.toml [--output PREFIX] | open MANIFEST.toml [--omedit PATH]".into())),
     };
     let project = load_project(Path::new(path))?;
     if command == "validate" {
@@ -122,6 +128,39 @@ pub(crate) fn run(args: &[String]) -> Result<String, BackendError> {
         format_project_result("simulated", &project, &result),
         metadata.display()
     ))
+}
+
+fn inspect_project(manifest_path: &Path) -> Result<String, BackendError> {
+    let project = load_project(manifest_path)?;
+    let inspection = ProjectInspection {
+        format_version: 1,
+        manifest_path: &project.manifest_path,
+        project_root: &project.root,
+        schema_version: project.manifest.schema_version,
+        name: &project.manifest.name,
+        model_file: &project.model_file,
+        entry_model: &project.manifest.entry_model,
+        package_roots: &project.package_roots,
+        dependencies: &project.manifest.dependencies,
+        simulation: &project.manifest.simulation,
+    };
+    serde_json::to_string_pretty(&inspection).map_err(|error| {
+        BackendError::InvalidInput(format!("cannot encode project inspection: {error}"))
+    })
+}
+
+#[derive(Serialize)]
+struct ProjectInspection<'a> {
+    format_version: u32,
+    manifest_path: &'a Path,
+    project_root: &'a Path,
+    schema_version: u32,
+    name: &'a str,
+    model_file: &'a Path,
+    entry_model: &'a str,
+    package_roots: &'a [PathBuf],
+    dependencies: &'a [LibraryPin],
+    simulation: &'a Simulation,
 }
 
 fn open_project(
@@ -261,6 +300,7 @@ fn load_project(path: &Path) -> Result<LoadedProject, BackendError> {
     omola_core::validate_library_pins(&libraries)?;
     Ok(LoadedProject {
         manifest,
+        manifest_path,
         root,
         model_file,
         libraries,
@@ -393,5 +433,23 @@ parameters = { "gain;print(1)" = 2.5 }
             .map(|(name, value)| (name.clone(), value.to_string()))
             .collect();
         assert!(omola_core::validate_parameter_overrides(&overrides).is_err());
+    }
+
+    #[test]
+    fn inspect_json_exposes_canonical_manifest_model_and_simulation_settings() {
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/project.toml");
+        let json = inspect_project(&manifest).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(value["format_version"], 1);
+        assert_eq!(value["schema_version"], 1);
+        assert_eq!(value["name"], "bouncing-ball");
+        assert_eq!(value["entry_model"], "BouncingBall");
+        assert!(Path::new(value["manifest_path"].as_str().unwrap()).is_absolute());
+        assert!(Path::new(value["project_root"].as_str().unwrap()).is_absolute());
+        assert!(Path::new(value["model_file"].as_str().unwrap()).is_absolute());
+        assert_eq!(value["simulation"]["stop_time"], 3.0);
+        assert_eq!(value["simulation"]["parameters"]["initialHeight"], 2.0);
+        assert_eq!(value["simulation"]["parameters"]["restitution"], 0.65);
     }
 }
