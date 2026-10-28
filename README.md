@@ -47,6 +47,38 @@ cargo run -p omola -- project validate examples\project.toml
 cargo run -p omola -- project simulate examples\project.toml --output "out\project results\BouncingBall"
 ```
 
+### Windows native: open an Omola project in OMEdit
+
+Install the Windows Rust toolchain with [rustup](https://www.rust-lang.org/tools/install) and install OpenModelica using its [official Windows installer](https://openmodelica.org/download/download-windows/). Use `omc.exe` and `OMEdit.exe` from the same OpenModelica installation. The install folder name varies by version; set `$omBin` below to that installation's `bin` directory. These settings apply only to the current PowerShell session:
+
+```powershell
+$omBin = Join-Path $env:ProgramFiles 'OpenModelica1.27.1-64bit\bin' # adjust to the installed folder
+$env:OMOLA_OMC = Join-Path $omBin 'omc.exe'
+$env:OMOLA_OMEDIT = Join-Path $omBin 'OMEdit.exe'
+$env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH" # rustup's default Windows cargo location
+Test-Path $env:OMOLA_OMC
+Test-Path $env:OMOLA_OMEDIT
+
+# Run from the Omola repository root.
+cargo build --locked --release -p omola
+& .\target\release\omola.exe doctor
+
+# Work on an ignored copy so the checked-in example remains unchanged.
+$projectDir = Join-Path (Get-Location) ('.omedit-workspace\bouncing-ball-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+if (Test-Path $projectDir) { throw "Project copy already exists: $projectDir. Choose another directory to preserve its contents." }
+New-Item -ItemType Directory -Force $projectDir | Out-Null
+Copy-Item -LiteralPath @('examples\BouncingBall.mo', 'examples\project.toml') -Destination $projectDir
+
+& .\target\release\omola.exe project validate (Join-Path $projectDir 'project.toml')
+& .\target\release\omola.exe project open (Join-Path $projectDir 'project.toml') --omedit "$env:OMOLA_OMEDIT"
+```
+
+`OMOLA_OMC` selects the compiler before `PATH`; `OMOLA_OMEDIT` selects the GUI before `PATH`, and the explicit `--omedit` argument takes precedence over `OMOLA_OMEDIT`. `project open` checks the project with OMC, then launches OMEdit with the entry `.mo` file and project package roots in the child process environment. It waits for OMEdit to exit, so the command prompt does not return until the GUI closes. On Windows, Omola cannot verify the OMEdit package version; keep `omc.exe` and `OMEdit.exe` from the same install and check the warning before using pinned libraries.
+
+The manifest's stop time and numeric parameters apply to `project simulate`; `project open` does not transfer those settings into OMEdit's simulation dialog. Set GUI simulation options there yourself. You can run the manifest-based CLI simulation separately with `& .\target\release\omola.exe project simulate (Join-Path $projectDir 'project.toml') --output (Join-Path $projectDir 'out\BouncingBall')`.
+
+**Native source-build status (2026-10-29):** the available source-built OMEdit opened a model and passed Check Model, but its simulation did not produce a runnable model executable. A complete source install has not been verified on Windows; do not treat that source build as a working simulator yet. The official packaged installation is the recommended starting point for the commands above. This is a measured setup limitation, not a claim of Dymola compatibility.
+
 On macOS/Linux with native OMC installed, the equivalent commands are:
 
 ```sh
