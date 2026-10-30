@@ -209,15 +209,41 @@ fn open_project(
         )));
     }
     Ok(format!(
-        "Project: {}\nModel: {} ({})\nOpenModelica: {}\nOMEdit: {}\nOMEdit exit code: {}\n{}",
+        "Project: {}\nModel: {} ({})\nOpenModelica: {}\nOMEdit: {}\nOMEdit exit code: {}\n{}\n{}\n{}",
         project.manifest.name,
         project.manifest.entry_model,
-        project.model_file.display(),
+        normalize_display_path(&project.model_file),
         check.omc_version,
         version_status.display,
         exit_code,
-        check.output
+        check.output,
+        simulation_handoff(&project.manifest.simulation),
+        SIMULATION_HANDOFF_NOTICE
     ))
+}
+
+const SIMULATION_HANDOFF_NOTICE: &str =
+    "Simulation settings: NOT transferred to OMEdit's simulation dialog. Stock OMEdit keeps its own defaults; run `omola project simulate MANIFEST.toml` to apply these settings through OMC, or use the patched OMEdit build once #16 lands.";
+
+fn simulation_handoff(simulation: &Simulation) -> String {
+    let parameters: Vec<String> = simulation
+        .parameters
+        .iter()
+        .map(|(name, value)| format!("{name}={value}"))
+        .collect();
+    let parameters = if parameters.is_empty() {
+        "<none>".to_string()
+    } else {
+        parameters.join(", ")
+    };
+    format!(
+        "Manifest simulation (for the CLI, not the stock GUI): stop_time={}, parameters={}",
+        simulation.stop_time, parameters
+    )
+}
+
+fn normalize_display_path(path: &Path) -> String {
+    path.display().to_string().replace(r"\\?\", "")
 }
 
 fn format_project_result(action: &str, project: &LoadedProject, result: &CommandResult) -> String {
@@ -433,6 +459,30 @@ parameters = { "gain;print(1)" = 2.5 }
             .map(|(name, value)| (name.clone(), value.to_string()))
             .collect();
         assert!(omola_core::validate_parameter_overrides(&overrides).is_err());
+    }
+
+    #[test]
+    fn simulation_handoff_reports_settings_for_the_cli_not_the_stock_gui() {
+        let simulation = Simulation {
+            stop_time: 3.0,
+            parameters: {
+                let mut map = std::collections::BTreeMap::new();
+                map.insert("restitution".to_string(), 0.65);
+                map.insert("initialHeight".to_string(), 2.0);
+                map
+            },
+        };
+        let line = simulation_handoff(&simulation);
+        assert!(line.contains("stop_time=3"));
+        assert!(line.contains("restitution=0.65"));
+        assert!(line.contains("not the stock GUI"));
+        assert!(SIMULATION_HANDOFF_NOTICE.contains("NOT transferred"));
+
+        let empty = Simulation {
+            stop_time: 1.0,
+            parameters: Default::default(),
+        };
+        assert!(simulation_handoff(&empty).contains("<none>"));
     }
 
     #[test]

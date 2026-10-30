@@ -16,11 +16,26 @@ pub(crate) struct VersionStatus {
 }
 
 pub(crate) fn discover(configured: Option<&Path>) -> Result<PathBuf, BackendError> {
-    if let Some(path) = configured {
-        return validate_executable(path, "--omedit");
-    }
+    probe().ok_or_else(|| {
+        BackendError::InvalidInput(
+            "OMEdit was not found on PATH; install the OMEdit build matching OpenModelica or set OMOLA_OMEDIT to its executable".into(),
+        )
+    })
+    .and_then(|path| match configured {
+        Some(configured) => validate_executable(configured, "--omedit"),
+        None => Ok(path),
+    })
+}
+
+/// Locate an OMEdit executable without failing when it is absent, so status
+/// reporting can degrade to "not installed" instead of erroring.
+pub(crate) fn probe() -> Option<PathBuf> {
     if let Some(path) = env::var_os("OMOLA_OMEDIT").filter(|path| !path.is_empty()) {
-        return validate_executable(Path::new(&path), "OMOLA_OMEDIT");
+        let path = Path::new(&path);
+        return path
+            .is_file()
+            .then(|| fs::canonicalize(path).ok())
+            .flatten();
     }
 
     let names: &[&str] = if cfg!(windows) {
@@ -32,13 +47,11 @@ pub(crate) fn discover(configured: Option<&Path>) -> Result<PathBuf, BackendErro
         for name in names {
             let candidate = directory.join(name);
             if candidate.is_file() {
-                return fs::canonicalize(&candidate).map_err(BackendError::Io);
+                return fs::canonicalize(&candidate).ok();
             }
         }
     }
-    Err(BackendError::InvalidInput(
-        "OMEdit was not found on PATH; install the OMEdit build matching OpenModelica or set OMOLA_OMEDIT to its executable".into(),
-    ))
+    None
 }
 
 fn validate_executable(path: &Path, source: &str) -> Result<PathBuf, BackendError> {
@@ -127,11 +140,12 @@ fn debian_omedit_version(executable: &Path) -> Option<String> {
 }
 
 fn unverified_version(executable: &Path) -> VersionStatus {
+    let display_path = executable.display().to_string().replace(r"\\?\", "");
     VersionStatus {
-        display: format!("{} (unverified)", executable.display()),
+        display: format!("{} (unverified)", display_path),
         warning: Some(format!(
             "could not verify the selected OMEdit version at {}; confirm that it matches the OMC version before using this project",
-            executable.display()
+            display_path
         )),
         mismatch: false,
     }

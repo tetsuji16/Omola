@@ -35,6 +35,10 @@ No Dymola code, manuals, models, icons, or proprietary UI assets may be copied. 
 
 Keep Modelica language and library coverage, OMC semantics, OMEdit behavior, Omola project features, Dymola-specific APIs/formats, and vendor/commercial services as separate scorecard dimensions. Passing an OpenModelica test is not evidence of Dymola parity.
 
+## Measured GUI status command
+
+`omola gui status [--format json|markdown]` reports the current measured state of the GUI/editor dimension against the Dymola compatibility matrix. It probes the installed OMC (presence and version) and OMEdit (presence, resolved path, and version-match status where the host supports it), then prints the eight GUI/editor dimensions with per-row status (`reused`, `partial`, `not-measured`, `unsupported`) and the known blockers. The command degrades gracefully when OMC or OMEdit is absent instead of failing, and it never claims Dymola parity. This advances the scorecard's "GUI/editor" row from "No GUI" toward a reproducible, runnable status check; the underlying integration gaps (#15/#16/#18/#19/#22/#25) remain open until each has measured evidence.
+
 ## Staged GitHub work
 
 | Issue | Scope | Completion evidence |
