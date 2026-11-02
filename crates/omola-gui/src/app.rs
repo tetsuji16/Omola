@@ -204,7 +204,17 @@ pub struct OmolaApp {
     pub title_sent: String,
     /// A link to open in the system browser at the end of the frame.
     pub pending_url: Option<String>,
+    pub omc_hint_shown: bool,
 }
+
+/// Shown once when no OpenModelica compiler is found.
+pub const OMC_SETUP_HINT: &str =
+    "OpenModelica (omc) is required for checking, simulation and libraries.\n\
+Install it together with the Modelica Standard Library:\n\
+  Windows:        powershell -ExecutionPolicy Bypass -File scripts\\setup-windows.ps1\n\
+  Debian/Ubuntu:  scripts/setup-linux.sh\n\
+  macOS / Docker: scripts/setup-docker.sh\n\
+or set OMOLA_OMC to an existing omc executable, then use Tools > Locate OMC. See docs/install.md.";
 
 impl OmolaApp {
     pub fn new(cc: &eframe::CreationContext<'_>, initial_file: Option<PathBuf>) -> Self {
@@ -272,6 +282,7 @@ impl OmolaApp {
             worker,
             title_sent: String::new(),
             pending_url: None,
+            omc_hint_shown: false,
         }
     }
 
@@ -714,7 +725,18 @@ impl OmolaApp {
                     self.logs.push(LogEntry { tab, level, text });
                 }
                 Event::Command(text) => self.command_history.push(text),
-                Event::OmcVersion(version) => self.omc_version = version,
+                Event::OmcVersion(version) => {
+                    if version.is_none() && self.omc_version.is_none() && !self.omc_hint_shown {
+                        self.omc_hint_shown = true;
+                        self.log_tab = LogTab::Version;
+                        self.logs.push(LogEntry {
+                            tab: LogTab::Version,
+                            level: LogLevel::Warning,
+                            text: OMC_SETUP_HINT.into(),
+                        });
+                    }
+                    self.omc_version = version;
+                }
                 Event::Busy(busy) => self.busy = busy,
                 Event::LibraryLoaded(spec, result) => {
                     let state = match result {
@@ -765,6 +787,14 @@ impl OmolaApp {
                     );
                 }
                 Event::SimulationFinished(outcome) => self.add_run(*outcome),
+                Event::LibrariesInstalled(ok) => {
+                    if ok {
+                        self.docs.clear();
+                        for spec in library::default_libraries() {
+                            self.load_library(spec);
+                        }
+                    }
+                }
             }
         }
     }

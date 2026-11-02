@@ -1,0 +1,17 @@
+// Install the Modelica libraries Omola loads at start-up, using OpenModelica's package
+// manager (downloads from the official OpenModelica library index).
+// Usage: omc scripts/install-libraries.mos
+clearMessages();
+if not installPackage(Modelica, "4.1.0", exactMatch=true) then
+  print("OMOLA_INSTALL_FAILED Modelica 4.1.0\n" + getErrorString() + "\n");
+elseif not loadModel(Modelica, {"4.1.0"}) then
+  print("OMOLA_INSTALL_FAILED Modelica 4.1.0 (installed but not loadable)\n" + getErrorString() + "\n");
+else
+  print("OMOLA_INSTALLED Modelica 4.1.0\n");
+end if;
+clearMessages();
+if installPackage(ModelicaReference) then
+  print("OMOLA_INSTALLED ModelicaReference\n");
+else
+  print("OMOLA_INSTALL_WARNING ModelicaReference is optional and could not be installed\n" + getErrorString() + "\n");
+end if;

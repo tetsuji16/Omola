@@ -1,0 +1,38 @@
+name: Setup scripts
+
+# End-to-end check of the one-command setup scripts: install OpenModelica and the Modelica
+# Standard Library from their official sources, build Omola, and run a smoke simulation.
+on:
+  pull_request:
+    paths:
+      - "scripts/setup-*"
+      - "scripts/omc-docker.sh"
+      - "scripts/install-libraries.mos"
+      - ".github/workflows/setup-scripts.yml"
+  workflow_dispatch:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: scripts/setup-linux.sh
+        run: scripts/setup-linux.sh
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: scripts/setup-windows.ps1
+        shell: pwsh
+        run: ./scripts/setup-windows.ps1
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: scripts/setup-docker.sh
+        run: scripts/setup-docker.sh

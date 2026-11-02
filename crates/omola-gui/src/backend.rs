@@ -69,6 +69,9 @@ pub enum Job {
         context: ClassContext,
         setup: SimulationSetup,
     },
+    /// Install the start-up libraries with OpenModelica's package manager
+    /// (`scripts/install-libraries.mos`).
+    InstallLibraries,
     /// A line typed into the command window, run as an OMC script with libraries loaded.
     Command {
         text: String,
@@ -129,6 +132,8 @@ pub enum Event {
     ClassDoc(String, Result<ClassDoc, String>),
     ClassText(String, Result<String, String>),
     SimulationFinished(Box<SimulationOutcome>),
+    /// `InstallLibraries` finished (`true` when the Modelica Standard Library is installed).
+    LibrariesInstalled(bool),
 }
 
 pub struct Worker {
@@ -311,6 +316,34 @@ fn run_job(job: Job, run_dir: &Path, send: &dyn Fn(Event)) {
             context,
             setup,
         } => simulate(&omc, run_dir, class, context, setup, send),
+        Job::InstallLibraries => {
+            send(Event::Log(
+                LogTab::Version,
+                LogLevel::Info,
+                "Installing Modelica Standard Library 4.1.0 and ModelicaReference with the OpenModelica package manager (this downloads from the OpenModelica library index)...".into(),
+            ));
+            let script = include_str!("../../../scripts/install-libraries.mos");
+            match omc.run_query_script(script) {
+                Ok(out) => {
+                    let ok = out.output.contains("OMOLA_INSTALLED Modelica 4.1.0");
+                    let summary: Vec<&str> = out
+                        .output
+                        .lines()
+                        .filter(|l| l.starts_with("OMOLA_") || l.contains("Error"))
+                        .collect();
+                    send(Event::Log(
+                        LogTab::Version,
+                        if ok { LogLevel::Info } else { LogLevel::Error },
+                        summary.join("\n"),
+                    ));
+                    send(Event::LibrariesInstalled(ok));
+                }
+                Err(e) => {
+                    send(Event::Log(LogTab::Version, LogLevel::Error, e.to_string()));
+                    send(Event::LibrariesInstalled(false));
+                }
+            }
+        }
         Job::Command { text, libraries } => {
             let mut script = String::new();
             let pins = pinned(&libraries);
@@ -352,6 +385,7 @@ fn fail_job(job: Job, message: String, send: &dyn Fn(Event)) {
         Job::LoadClassDoc { class, .. } => send(Event::ClassDoc(class, Err(message))),
         Job::LoadClassText { class, .. } => send(Event::ClassText(class, Err(message))),
         Job::Command { text, .. } => send(Event::Command(format!("{text}\n  {message}"))),
+        Job::InstallLibraries => send(Event::LibrariesInstalled(false)),
         Job::Doctor | Job::Check { .. } | Job::Simulate { .. } => {}
     }
 }

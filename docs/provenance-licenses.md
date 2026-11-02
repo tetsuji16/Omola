@@ -16,6 +16,10 @@ The `omola-gui` crate (added 2026-11-02) depends on `eframe`/`egui` 0.37 and `eg
 
 Since 2026-11-02 the GUI also uses `egui_extras` with the `image` (PNG/JPEG/GIF) and `resvg` (SVG) loaders to show images in Modelica documentation, and `egui_material_icons` (crate MIT; it embeds the Material Symbols font under Apache-2.0, whose notice a binary distribution must retain). `egui_plot` was removed; the plot is drawn by Omola. User-interface fonts (Segoe UI, Courier New, Liberation, DejaVu, Noto CJK) are read from the operating system at run time and are not bundled. Documentation images are read from the installed library (for example MSL under its BSD-3-Clause license) and are never copied into this repository.
 
+### Setup scripts and release archives
+
+`scripts/setup-windows.ps1`, `scripts/setup-linux.sh` and `scripts/setup-docker.sh` download OpenModelica directly from `build.openmodelica.org` (official Windows installer, official apt repository, or the pinned `openmodelica/openmodelica:v1.27.1-minimal` image) and install the Modelica Standard Library 4.1.0 through OpenModelica's package manager. The user accepts those upstream licenses (OSMC-PL/AGPLv3 for OpenModelica, BSD-3-Clause for MSL) on their own machine; nothing from OpenModelica or MSL is committed or redistributed. Rust is installed from `rustup.rs` only when missing. The release workflow packages Omola binaries, scripts, examples, `licenses/` and a generated `THIRD_PARTY_LICENSES.md`; it does not include OpenModelica or MSL.
+
 This is a technical inventory, not legal advice. Check exact versions and terms with qualified counsel where needed.
 
 ## Primary sources
