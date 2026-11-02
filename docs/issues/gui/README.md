@@ -5,7 +5,7 @@
 
 ## 0. 方針(2026-11-02 決定)
 
-- Omola の GUI は **Rust + egui(eframe 0.37, egui_plot 0.38)のネイティブアプリ**として作ります。
+- Omola の GUI は **Rust + egui(eframe 0.37, egui_extras 0.37)のネイティブアプリ**として作ります。
   以前の「OMEdit を改造する」方針(`docs/gui-roadmap.md`)は、この決定で置き換えました。OMEdit 連携の CLI コマンドは残しますが、新規 GUI 機能は `omola-gui` に実装します。
 - **計算(構文チェック・翻訳・シミュレーション)は OpenModelica の `omc` に委譲**します。Rust でソルバや Modelica コンパイラを書いてはいけません(README の Architecture 節)。
 - 画面構成は `docs/reference/dymola-gui.md` を参照。**Dymola の画像・アイコン・文言はコピー禁止。**
@@ -20,9 +20,16 @@ crates/omola-gui/src/main.rs     起動(eframe::run_native)
 crates/omola-gui/src/app.rs      OmolaApp の状態、毎フレームのレイアウト、結果の保持(add_run)
 crates/omola-gui/src/backend.rs  ワーカースレッド。Job を受けて OMC を呼び、Event を返す
 crates/omola-gui/src/model.rs    Document(開いた .mo)と、クラス一覧の簡易スキャナ(表示用。パーサではない)
-crates/omola-gui/src/ui/chrome.rs    メニュー、リボン、ステータスバー、Messages
+crates/omola-gui/src/library.rs  OMC へのライブラリ/クラス照会スクリプトと出力の解析、modelica:// の解決
+crates/omola-gui/src/html.rs     Documentation の HTML を Block/Inline に変換(描画は ui/doc_view.rs)
+crates/omola-gui/src/theme.rs    配色・フォント(OS から実行時に読む)・アイコンフォント
+crates/omola-gui/src/ui/mod.rs       全体レイアウト(パネル配置)、枠なしウィンドウのリサイズ
+crates/omola-gui/src/ui/chrome.rs    タイトル行(クイックアクセス)、リボンタブ、各リボン
 crates/omola-gui/src/ui/browsers.rs  Package/Component Browser、Variable Browser
-crates/omola-gui/src/ui/views.rs     編集ウィンドウ(各層)、プロット
+crates/omola-gui/src/ui/views.rs     モデルタブ、編集ウィンドウ(各層)、プロット
+crates/omola-gui/src/ui/doc_view.rs  Documentation 層
+crates/omola-gui/src/ui/bottom.rs    Logs/Commands 窓、最下段バー
+crates/omola-gui/src/ui/widgets.rs   リボン部品
 crates/omola-gui/src/ui/dialogs.rs   Simulation Setup、パス入力ダイアログ
 crates/omola-gui/examples/demo_mat.rs  OMC なしで GUI を試すためのデモ結果生成
 scripts/fake-omc.sh              開発用の偽 omc(.mat をコピーするだけ)
@@ -75,7 +82,8 @@ UI の見た目を変える issue では、**変更後のスクリーンショ�
 - 中央は `egui::CentralPanel::default().show(ui, |ui| ...)`。**パネルはすべて CentralPanel より前に出す。**
 - ウィンドウ(ダイアログ)は `egui::Window::new("title").open(&mut bool).show(ui.ctx(), |ui| ...)`。
 - メニューは `egui::MenuBar::new().ui(ui, |ui| { ui.menu_button("File", |ui| { ... }); })`。
-- プロット: `egui_plot::Plot::new("id").legend(Legend::default()).show(ui, |p| p.line(Line::new("name", PlotPoints::from(vec_of_[x, y]))))`。
+- プロット: `egui_plot` は使いません。`src/ui/views.rs` の `plot_window()` が `Painter` で直接描きます(目盛りは `nice_step` / `minor_step` / `nice_range`)。
+- アイコン: `egui_material_icons::icons::ICON_*`。ボタンは `src/ui/widgets.rs` の `big_button` / `small_button` / `icon_button` を使う。座標を合わせる必要があるリボンは `fixed_group` + `place`。
 - 既定フォントには絵文字/記号が一部しかありません。ボタン文字に絵文字(▶ ✔ 💾 等)を使うと豆腐(□)になるので、**ASCII の文字だけ**を使ってください。
 - API が分からないときは `~/.cargo/registry/src/*/egui-0.37.0/src/` を grep して確認する。推測で書かない。
 
@@ -87,6 +95,16 @@ UI の見た目を変える issue では、**変更後のスクリーンショ�
    `cargo metadata --format-version 1 --locked` の `packages[].license` を使う。手で推測しない。
 3. GPL/AGPL/LGPL **のみ**のライセンスのクレートは追加禁止(`MIT OR ...` のように選択肢があれば可)。迷ったら追加せず PR で質問。
 4. `docs/provenance-licenses.md` の「Native GUI」節に 1 行追記。
+
+## 5.5 進捗メモ(2026-11-02)
+
+Dymola 風レイアウト(タイトル行・リボン・ブラウザ・モデルタブ・ログ・下段バー)と、MSL の閲覧 → Documentation → ライブラリ例題のシミュレーション → 変数ブラウザ → プロットは実装済みです(`docs/reference/dymola-gui.md` 3.2)。そのため、以下の issue は前提が変わっています。着手前に現在のコードを確認してください。
+
+- G04: ライブラリ読み込み・木表示・検索・読み取り専用テキストは実装済み。残りは遅延読み込み・キャッシュ・アイコン描画。
+- G08: HTML 描画は `src/html.rs` + `src/ui/doc_view.rs` で実装済み。残りは編集(Info Editor)。
+- G09: 宣言順・Value/Unit 列・値の編集は実装済み。残りは木構造・時刻指定・Advanced。
+- G10: プロットは `egui_plot` ではなく `src/ui/views.rs` の自前描画。複数ダイアグラム・カーソル・CSV 出力はこの描画に足す。
+- G05: Stop time は experiment 注釈から反映済み。他の Setup 項目は未。
 
 ## 6. issue 一覧(依存順)
 

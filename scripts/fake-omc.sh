@@ -20,7 +20,11 @@ if [ "${OMOLA_FAKE_FAIL:-}" = "1" ]; then
   exit 0
 fi
 if grep -q "checkModel" "$script"; then
-  echo "Check of model completed successfully (fake)."
+  printf 'OMOLA_BEGIN check\nCheck of model completed successfully (fake).\nOMOLA_END check\n'
+  exit 0
+fi
+if ! grep -q "simulate(" "$script"; then
+  # Library and documentation queries: report nothing (libraries show as unavailable).
   exit 0
 fi
 : "${OMOLA_FAKE_MAT:?set OMOLA_FAKE_MAT to a MAT file (see header)}"

@@ -1,18 +1,20 @@
 //! Top-level application state and the per-frame layout.
 //!
-//! Layout follows the familiar Modelica-workbench arrangement (see
-//! `docs/reference/dymola-gui.md`): menu bar, ribbon tabs with a context toolbar,
-//! browsers on the left, the edit/plot window in the centre, messages at the bottom.
+//! The window follows the classic Modelica-workbench arrangement documented in
+//! `docs/reference/dymola-gui.md`: quick access toolbar and title, ribbon tabs with
+//! grouped commands, docked browsers on the left, model tabs and the edit window in the
+//! centre, the command/log window at the bottom, and a browser bar with the layer toolbar.
 
-use crate::backend::{Event, Job, LogLevel, SimulationOutcome, SimulationSetup, Worker};
-use crate::model::{default_class, scan_classes, ClassEntry, Document};
+use crate::backend::{
+    ClassContext, Event, Job, LogLevel, LogTab, SimulationOutcome, SimulationSetup, Worker,
+};
+use crate::html::{self, Block};
+use crate::library::{self, ClassDoc, LibrarySpec, LoadedLibrary};
+use crate::model::{default_class, scan_classes, ClassEntry as UserClass, Document};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-/// Built-in sample shown when the GUI starts without a file argument.
-pub const SAMPLE_MODEL: &str = include_str!("../../../examples/BouncingBall.mo");
-
-/// Ribbon tabs. Graphics/Documentation/Text are the modeling layers; Simulation shows
-/// the variable browser and plot window.
+/// Ribbon tabs (File is a menu button left of the tabs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RibbonTab {
     Graphics,
@@ -40,23 +42,93 @@ impl RibbonTab {
             RibbonTab::Tools => "Tools",
         }
     }
+}
 
-    pub fn is_modeling(self) -> bool {
-        !matches!(self, RibbonTab::Simulation)
+/// Model layers shown in the edit window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Layer {
+    Icon,
+    Diagram,
+    Documentation,
+    Text,
+}
+
+impl Layer {
+    pub fn label(self) -> &'static str {
+        match self {
+            Layer::Icon => "Icon",
+            Layer::Diagram => "Diagram",
+            Layer::Documentation => "Documentation",
+            Layer::Text => "Modelica Text",
+        }
     }
 }
 
-/// Diagram or Icon layer inside the Graphics tab.
+/// What the Documentation layer shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GraphicsLayer {
-    Diagram,
-    Icon,
+pub enum DocView {
+    Formatted,
+    InfoSource,
+    RevisionSource,
+}
+
+/// Bottom window: command line or logs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BottomPane {
+    Commands,
+    Logs,
+}
+
+/// Visibility of docked browsers and windows (toggled from the bottom bar).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Docks {
+    pub package_browser: bool,
+    pub component_browser: bool,
+    pub variable_browser: bool,
+    pub bottom: bool,
+}
+
+impl Default for Docks {
+    fn default() -> Self {
+        Self {
+            package_browser: true,
+            component_browser: true,
+            variable_browser: true,
+            bottom: true,
+        }
+    }
+}
+
+pub enum LibraryState {
+    Loading(LibrarySpec),
+    Loaded(LoadedLibrary),
+    Failed(LibrarySpec, String),
+}
+
+impl LibraryState {
+    pub fn spec(&self) -> &LibrarySpec {
+        match self {
+            LibraryState::Loading(spec) | LibraryState::Failed(spec, _) => spec,
+            LibraryState::Loaded(lib) => &lib.spec,
+        }
+    }
+}
+
+pub enum Loadable<T> {
+    Loading,
+    Ready(T),
+    Failed(String),
+}
+
+/// Parsed documentation, cached per class.
+pub struct DocPage {
+    pub doc: ClassDoc,
+    pub info: Vec<Block>,
 }
 
 /// One kept simulation result, shown as a top-level node in the variable browser.
 pub struct ResultRun {
     pub id: u64,
-    /// e.g. `BouncingBall 1`, `BouncingBall 2` (newest has the highest number).
     pub label: String,
     pub outcome: SimulationOutcome,
 }
@@ -73,56 +145,112 @@ pub struct PlotSignal {
 pub enum PathDialog {
     Open(String),
     SaveAs(String),
+    RunScript(String),
+}
+
+pub struct LogEntry {
+    pub tab: LogTab,
+    pub level: LogLevel,
+    pub text: String,
 }
 
 pub struct OmolaApp {
     pub tab: RibbonTab,
-    pub graphics_layer: GraphicsLayer,
-    pub document: Document,
-    pub classes: Vec<ClassEntry>,
-    pub selected_class: Option<String>,
+    pub graphics_layer: Layer,
+    /// User files being edited (their classes appear in the package browser).
+    pub documents: Vec<Document>,
+    pub user_classes: Vec<UserClass>,
+    /// For each entry of `user_classes`, the index of its document.
+    pub user_class_doc: Vec<usize>,
+    pub libraries: Vec<LibraryState>,
+    pub expanded: BTreeSet<String>,
+    pub package_filter: String,
+    /// Open model tabs (qualified class names) and the active one.
+    pub model_tabs: Vec<String>,
+    pub active: Option<String>,
+    pub history: Vec<String>,
+    pub history_pos: usize,
+    pub docs: BTreeMap<String, Loadable<DocPage>>,
+    pub texts: BTreeMap<String, Loadable<String>>,
+    pub doc_view: DocView,
+    pub find_open: bool,
+    pub find_query: String,
     pub setup: SimulationSetup,
+    /// Classes whose experiment annotation has already been applied to `setup`.
+    pub setup_from: Option<String>,
     pub show_setup: bool,
     pub path_dialog: Option<PathDialog>,
     pub runs: Vec<ResultRun>,
     pub next_run_id: u64,
-    /// How many results the variable browser keeps (Dymola keeps the last two by default).
     pub keep_results: usize,
     pub variable_filter: String,
     pub plotted: Vec<PlotSignal>,
-    pub log: Vec<(LogLevel, String)>,
+    /// Values edited in the variable browser, applied as overrides on the next simulation.
+    pub pending_overrides: BTreeMap<String, String>,
+    /// Zoomed plot range (x0, x1, y0, y1); `None` = fit to data.
+    pub plot_view: Option<(f64, f64, f64, f64)>,
+    pub logs: Vec<LogEntry>,
+    pub log_tab: LogTab,
+    pub bottom_pane: BottomPane,
+    pub command_input: String,
+    pub command_history: Vec<String>,
+    pub docks: Docks,
+    /// Height of the command/log window (drag its top edge to change).
+    pub bottom_height: f32,
     pub busy: bool,
     pub omc_version: Option<String>,
     pub worker: Worker,
+    /// Last window title sent to the OS.
+    pub title_sent: String,
+    /// A link to open in the system browser at the end of the frame.
+    pub pending_url: Option<String>,
 }
 
 impl OmolaApp {
     pub fn new(cc: &eframe::CreationContext<'_>, initial_file: Option<PathBuf>) -> Self {
+        crate::theme::apply(&cc.egui_ctx);
+        egui_extras::install_image_loaders(&cc.egui_ctx);
         let ctx = cc.egui_ctx.clone();
         let worker = Worker::spawn(crate::backend::default_work_root(), move || {
             ctx.request_repaint()
         });
         let mut app = Self::with_worker(worker);
-        if let Some(path) = initial_file {
-            app.open_file(path);
-        }
         app.worker.submit(Job::Doctor);
+        for spec in library::default_libraries() {
+            app.load_library(spec);
+        }
+        // Like a fresh workbench session: an empty model "Unnamed" is always available.
+        let unnamed = app.add_unnamed();
+        app.model_tabs.push(unnamed);
+        match initial_file {
+            Some(path) => app.open_file(path),
+            None => app.open_class("Modelica"),
+        }
         app
     }
 
-    /// Construct without a window (used by tests and `new`).
+    /// Construct without a window (tests and `new`).
     pub fn with_worker(worker: Worker) -> Self {
-        let document = Document::new_untitled(SAMPLE_MODEL);
-        let mut app = Self {
-            tab: RibbonTab::Text,
-            graphics_layer: GraphicsLayer::Diagram,
-            document,
-            classes: Vec::new(),
-            selected_class: None,
-            setup: SimulationSetup {
-                stop_time: 3.0,
-                ..SimulationSetup::default()
-            },
+        Self {
+            tab: RibbonTab::Documentation,
+            graphics_layer: Layer::Diagram,
+            documents: Vec::new(),
+            user_classes: Vec::new(),
+            user_class_doc: Vec::new(),
+            libraries: Vec::new(),
+            expanded: BTreeSet::new(),
+            package_filter: String::new(),
+            model_tabs: Vec::new(),
+            active: None,
+            history: Vec::new(),
+            history_pos: 0,
+            docs: BTreeMap::new(),
+            texts: BTreeMap::new(),
+            doc_view: DocView::Formatted,
+            find_open: false,
+            find_query: String::new(),
+            setup: SimulationSetup::default(),
+            setup_from: None,
             show_setup: false,
             path_dialog: None,
             runs: Vec::new(),
@@ -130,108 +258,539 @@ impl OmolaApp {
             keep_results: 2,
             variable_filter: String::new(),
             plotted: Vec::new(),
-            log: vec![(
-                LogLevel::Info,
-                "Omola GUI started. Calculations are delegated to OpenModelica (omc).".into(),
-            )],
+            pending_overrides: BTreeMap::new(),
+            plot_view: None,
+            logs: Vec::new(),
+            log_tab: LogTab::Version,
+            bottom_pane: BottomPane::Logs,
+            command_input: String::new(),
+            command_history: Vec::new(),
+            docks: Docks::default(),
+            bottom_height: 135.0,
             busy: false,
             omc_version: None,
             worker,
-        };
-        app.refresh_outline();
-        app
+            title_sent: String::new(),
+            pending_url: None,
+        }
+    }
+
+    // ---------------------------------------------------------------- libraries & classes
+
+    pub fn load_library(&mut self, spec: LibrarySpec) {
+        self.libraries.retain(|l| l.spec().name != spec.name);
+        self.libraries.push(LibraryState::Loading(spec.clone()));
+        self.worker.submit(Job::LoadLibrary(spec));
+    }
+
+    pub fn loaded_specs(&self) -> Vec<LibrarySpec> {
+        self.libraries
+            .iter()
+            .filter_map(|l| match l {
+                LibraryState::Loaded(lib) => Some(lib.spec.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub fn is_user_class(&self, class: &str) -> bool {
+        self.user_classes.iter().any(|c| c.qualified_name == class)
+    }
+
+    /// Index of the document that defines a user class.
+    pub fn doc_of(&self, class: &str) -> Option<usize> {
+        self.user_classes
+            .iter()
+            .position(|c| c.qualified_name == class)
+            .map(|i| self.user_class_doc[i])
+    }
+
+    /// The document of the active class, if it is a user class.
+    pub fn active_doc(&self) -> Option<usize> {
+        self.active.as_deref().and_then(|c| self.doc_of(c))
+    }
+
+    /// Context for OMC queries about `class`: loaded libraries plus the user buffer if needed.
+    pub fn context_for(&self, class: &str) -> ClassContext {
+        let top = class.split('.').next().unwrap_or(class);
+        let user = self.is_user_class(class);
+        let mut libraries = self.loaded_specs();
+        if !user {
+            // Load only the library that owns the class (faster), plus its dependencies
+            // which OMC resolves through `uses` annotations.
+            libraries.retain(|l| l.name == top);
+            if libraries.is_empty() {
+                libraries.push(LibrarySpec::new(top, None));
+            }
+        }
+        ClassContext {
+            libraries,
+            user_source: user
+                .then(|| self.doc_of(class).map(|i| self.documents[i].text.clone()))
+                .flatten(),
+        }
+    }
+
+    /// Restriction (`model`, `package`, ...) if known from an index.
+    pub fn restriction_of(&self, class: &str) -> Option<String> {
+        if let Some(c) = self.user_classes.iter().find(|c| c.qualified_name == class) {
+            return Some(c.kind.clone());
+        }
+        self.libraries.iter().find_map(|l| match l {
+            LibraryState::Loaded(lib) => lib.class(class).map(|c| c.restriction.clone()),
+            _ => None,
+        })
+    }
+
+    /// Children of a library or user class, as (qualified, restriction, comment).
+    pub fn children_of(&self, class: &str) -> Vec<(String, String, String)> {
+        if self.is_user_class(class) {
+            return self
+                .user_classes
+                .iter()
+                .filter(|c| library::parent_name(&c.qualified_name) == Some(class))
+                .map(|c| {
+                    (
+                        c.qualified_name.clone(),
+                        c.kind.clone(),
+                        c.description.clone().unwrap_or_default(),
+                    )
+                })
+                .collect();
+        }
+        self.libraries
+            .iter()
+            .find_map(|l| match l {
+                LibraryState::Loaded(lib)
+                    if class.split('.').next() == Some(lib.spec.name.as_str()) =>
+                {
+                    Some(
+                        lib.children(class)
+                            .into_iter()
+                            .map(|c| {
+                                (
+                                    c.qualified_name.clone(),
+                                    c.restriction.clone(),
+                                    c.comment.clone(),
+                                )
+                            })
+                            .collect(),
+                    )
+                }
+                _ => None,
+            })
+            .unwrap_or_default()
+    }
+
+    /// Show a class in the edit window (new tab if needed) and record history.
+    pub fn open_class(&mut self, class: &str) {
+        self.navigate(class);
+        if self
+            .history
+            .get(self.history_pos.wrapping_sub(1))
+            .map(String::as_str)
+            != Some(class)
+            || self.history.is_empty()
+        {
+            self.history.truncate(self.history_pos);
+            self.history.push(class.to_owned());
+            self.history_pos = self.history.len();
+        }
+    }
+
+    fn navigate(&mut self, class: &str) {
+        if !self.model_tabs.iter().any(|t| t == class) {
+            // Replace the active tab (like single-clicking in the package browser),
+            // unless it is a user model, which keeps its own tab.
+            match self
+                .active
+                .as_ref()
+                .and_then(|a| self.model_tabs.iter().position(|t| t == a))
+            {
+                Some(i) if !self.is_user_class(&self.model_tabs[i]) => {
+                    self.model_tabs[i] = class.to_owned()
+                }
+                _ => self.model_tabs.push(class.to_owned()),
+            }
+        }
+        self.active = Some(class.to_owned());
+        // Expand the package browser down to the class.
+        let mut prefix = String::new();
+        for part in class.split('.') {
+            if !prefix.is_empty() {
+                self.expanded.insert(prefix.clone());
+                prefix.push('.');
+            }
+            prefix.push_str(part);
+        }
+        self.request_doc(class);
+        if self.tab == RibbonTab::Text {
+            self.request_text(class);
+        }
+    }
+
+    pub fn open_in_new_tab(&mut self, class: &str) {
+        if !self.model_tabs.iter().any(|t| t == class) {
+            self.model_tabs.push(class.to_owned());
+        }
+        self.open_class(class);
+    }
+
+    pub fn close_tab(&mut self, class: &str) {
+        self.model_tabs.retain(|t| t != class);
+        if self.active.as_deref() == Some(class) {
+            self.active = self.model_tabs.last().cloned();
+        }
+    }
+
+    pub fn can_go_back(&self) -> bool {
+        self.history_pos > 1
+    }
+
+    pub fn can_go_forward(&self) -> bool {
+        self.history_pos < self.history.len()
+    }
+
+    pub fn go_back(&mut self) {
+        if self.can_go_back() {
+            self.history_pos -= 1;
+            let class = self.history[self.history_pos - 1].clone();
+            self.navigate(&class);
+        }
+    }
+
+    pub fn go_forward(&mut self) {
+        if self.can_go_forward() {
+            self.history_pos += 1;
+            let class = self.history[self.history_pos - 1].clone();
+            self.navigate(&class);
+        }
+    }
+
+    pub fn request_doc(&mut self, class: &str) {
+        let stale = matches!(self.docs.get(class), Some(Loadable::Failed(_)))
+            || self.doc_of(class).is_some_and(|i| self.documents[i].dirty);
+        if self.docs.contains_key(class) && !stale {
+            return;
+        }
+        if self
+            .libraries
+            .iter()
+            .any(|l| matches!(l, LibraryState::Loading(_)))
+            && !self.is_user_class(class)
+            && self.restriction_of(class).is_none()
+        {
+            // Wait for the library index; re-requested when it arrives.
+            return;
+        }
+        self.docs.insert(class.to_owned(), Loadable::Loading);
+        self.worker.submit(Job::LoadClassDoc {
+            class: class.to_owned(),
+            context: self.context_for(class),
+        });
+    }
+
+    pub fn request_text(&mut self, class: &str) {
+        if self.is_user_class(class) || self.texts.contains_key(class) {
+            return;
+        }
+        if self.restriction_of(class).as_deref() == Some("package") {
+            self.texts.insert(
+                class.to_owned(),
+                Loadable::Failed(
+                    "The Modelica text of a whole package is not shown; open one of its classes."
+                        .into(),
+                ),
+            );
+            return;
+        }
+        self.texts.insert(class.to_owned(), Loadable::Loading);
+        self.worker.submit(Job::LoadClassText {
+            class: class.to_owned(),
+            context: self.context_for(class),
+        });
+    }
+
+    // ---------------------------------------------------------------- user files
+
+    /// Create an empty model `Unnamed`, `Unnamed2`, ... in its own (unsaved) document.
+    pub fn new_model(&mut self) {
+        let name = self.add_unnamed();
+        self.open_in_new_tab(&name);
+        self.tab = RibbonTab::Graphics;
+    }
+
+    /// Add an empty `Unnamed` model without opening it (start-up state).
+    pub fn add_unnamed(&mut self) -> String {
+        let name = (1..)
+            .map(|i| {
+                if i == 1 {
+                    "Unnamed".to_owned()
+                } else {
+                    format!("Unnamed{i}")
+                }
+            })
+            .find(|n| !self.user_classes.iter().any(|c| &c.qualified_name == n))
+            .unwrap_or_else(|| "Unnamed".into());
+        self.documents.push(Document::new_untitled(format!(
+            "model {name}\nend {name};\n"
+        )));
+        self.refresh_outline();
+        name
     }
 
     pub fn open_file(&mut self, path: PathBuf) {
+        if let Some(i) = self
+            .documents
+            .iter()
+            .position(|d| d.path.as_deref() == Some(path.as_path()))
+        {
+            let first = self.first_class_of(i);
+            if let Some(class) = first {
+                self.open_in_new_tab(&class);
+            }
+            return;
+        }
         match Document::open(path.clone()) {
             Ok(doc) => {
-                self.document = doc;
-                self.selected_class = None;
+                self.documents.push(doc);
                 self.refresh_outline();
-                self.info(format!("Opened {}", path.display()));
+                self.info(LogTab::Syntax, format!("Opened {}", path.display()));
+                if let Some(class) = self.first_class_of(self.documents.len() - 1) {
+                    self.open_in_new_tab(&class);
+                }
             }
-            Err(e) => self.error(format!("Could not open {}: {e}", path.display())),
+            Err(e) => self.error(
+                LogTab::Syntax,
+                format!("Could not open {}: {e}", path.display()),
+            ),
         }
     }
 
+    fn first_class_of(&self, doc: usize) -> Option<String> {
+        let classes: Vec<UserClass> = self
+            .user_classes
+            .iter()
+            .zip(&self.user_class_doc)
+            .filter(|(_, d)| **d == doc)
+            .map(|(c, _)| c.clone())
+            .collect();
+        default_class(&classes)
+    }
+
+    /// Save the document of the active class (asks for a path if it was never saved).
     pub fn save(&mut self) {
-        if self.document.path.is_none() {
+        let Some(i) = self.active_doc() else {
+            return;
+        };
+        if self.documents[i].path.is_none() {
             self.path_dialog = Some(PathDialog::SaveAs(String::new()));
             return;
         }
-        match self.document.save() {
-            Ok(()) => self.info(format!("Saved {}", self.document.title())),
-            Err(e) => self.error(format!("Save failed: {e}")),
+        match self.documents[i].save() {
+            Ok(()) => {
+                let title = self.documents[i].title();
+                self.info(LogTab::Syntax, format!("Saved {title}"))
+            }
+            Err(e) => self.error(LogTab::Syntax, format!("Save failed: {e}")),
         }
     }
 
-    /// Re-scan the class outline after the text changed.
     pub fn refresh_outline(&mut self) {
-        self.classes = scan_classes(&self.document.text);
-        let still_valid = self
-            .selected_class
-            .as_ref()
-            .is_some_and(|c| self.classes.iter().any(|e| &e.qualified_name == c));
-        if !still_valid {
-            self.selected_class = default_class(&self.classes);
+        self.user_classes.clear();
+        self.user_class_doc.clear();
+        for (i, doc) in self.documents.iter().enumerate() {
+            for class in scan_classes(&doc.text) {
+                self.user_classes.push(class);
+                self.user_class_doc.push(i);
+            }
         }
     }
+
+    /// Text of document `doc` was edited in the Text layer.
+    pub fn user_text_changed(&mut self, doc: usize) {
+        if let Some(d) = self.documents.get_mut(doc) {
+            d.dirty = true;
+        }
+        let before: Vec<String> = self
+            .user_classes
+            .iter()
+            .map(|c| c.qualified_name.clone())
+            .collect();
+        self.refresh_outline();
+        // Drop cached documentation of user classes; it is re-queried when shown.
+        for name in before {
+            self.docs.remove(&name);
+        }
+        if let Some(active) = self.active.clone() {
+            if !self.is_user_class(&active) && self.restriction_of(&active).is_none() {
+                // The class was renamed in the editor: follow the document's first class.
+                if let Some(first) = self.first_class_of(doc) {
+                    self.model_tabs.retain(|t| t != &active);
+                    self.open_in_new_tab(&first);
+                }
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- check & simulate
 
     pub fn check(&mut self) {
-        let Some(class) = self.selected_class.clone() else {
-            return self.error("No model class found in the edit window.".into());
+        let Some(class) = self.active.clone() else {
+            return self.error(LogTab::Syntax, "No model is open.".into());
         };
+        self.log_tab = LogTab::Syntax;
         self.worker.submit(Job::Check {
-            source_text: self.document.text.clone(),
+            context: self.context_for(&class),
             class,
         });
     }
 
     pub fn simulate(&mut self) {
-        let Some(class) = self.selected_class.clone() else {
-            return self.error("No model class found in the edit window.".into());
+        let Some(class) = self.active.clone() else {
+            return self.error(LogTab::Translation, "No model is open.".into());
         };
+        if self.restriction_of(&class).as_deref() == Some("package") {
+            return self.error(
+                LogTab::Translation,
+                format!("{class} is a package and cannot be simulated. Open a model, for example an Examples model."),
+            );
+        }
+        let mut setup = self.setup.clone();
+        setup.parameters = merge_overrides(&setup.parameters, &self.pending_overrides);
+        if let Err(e) = omola_core::validate_parameter_overrides(&setup.parameters) {
+            return self.error(LogTab::Translation, e.to_string());
+        }
+        self.log_tab = LogTab::Translation;
+        self.bottom_pane = BottomPane::Logs;
         self.worker.submit(Job::Simulate {
-            source_text: self.document.text.clone(),
+            context: self.context_for(&class),
             class,
-            setup: self.setup.clone(),
+            setup,
         });
     }
 
-    pub fn info(&mut self, message: String) {
-        self.log.push((LogLevel::Info, message));
+    pub fn run_command(&mut self) {
+        let text = self.command_input.trim().to_owned();
+        if text.is_empty() {
+            return;
+        }
+        self.command_input.clear();
+        self.command_history.push(text.clone());
+        self.worker.submit(Job::Command {
+            text,
+            libraries: self.loaded_specs(),
+        });
     }
 
-    pub fn error(&mut self, message: String) {
-        self.log.push((LogLevel::Error, message));
+    pub fn info(&mut self, tab: LogTab, text: String) {
+        self.logs.push(LogEntry {
+            tab,
+            level: LogLevel::Info,
+            text,
+        });
+    }
+
+    pub fn error(&mut self, tab: LogTab, text: String) {
+        self.log_tab = tab;
+        self.logs.push(LogEntry {
+            tab,
+            level: LogLevel::Error,
+            text,
+        });
     }
 
     /// Apply worker events. Called once per frame.
     pub fn handle_events(&mut self) {
         for event in self.worker.poll() {
             match event {
-                Event::Log(level, message) => self.log.push((level, message)),
+                Event::Log(tab, level, text) => {
+                    if level == LogLevel::Error {
+                        self.log_tab = tab;
+                        self.bottom_pane = BottomPane::Logs;
+                    } else if matches!(tab, LogTab::Translation | LogTab::Simulation) {
+                        self.log_tab = tab;
+                    }
+                    self.logs.push(LogEntry { tab, level, text });
+                }
+                Event::Command(text) => self.command_history.push(text),
                 Event::OmcVersion(version) => self.omc_version = version,
                 Event::Busy(busy) => self.busy = busy,
+                Event::LibraryLoaded(spec, result) => {
+                    let state = match result {
+                        Ok(lib) => LibraryState::Loaded(lib),
+                        Err(message) => LibraryState::Failed(spec.clone(), message),
+                    };
+                    match self
+                        .libraries
+                        .iter_mut()
+                        .find(|l| l.spec().name == spec.name)
+                    {
+                        Some(slot) => *slot = state,
+                        None => self.libraries.push(state),
+                    }
+                    // Re-request documentation that waited for this index.
+                    if let Some(active) = self.active.clone() {
+                        if !self.docs.contains_key(&active) {
+                            self.request_doc(&active);
+                        }
+                    }
+                }
+                Event::ClassDoc(class, result) => {
+                    let page = match result {
+                        Ok(doc) => {
+                            if let Some(exp) = doc.experiment {
+                                if doc.restriction != "package"
+                                    && self.setup_from.as_deref() != Some(class.as_str())
+                                {
+                                    self.setup.start_time = exp.start_time;
+                                    self.setup.stop_time = exp.stop_time;
+                                    self.setup_from = Some(class.clone());
+                                }
+                            }
+                            let info = html::parse(&doc.info_html);
+                            Loadable::Ready(DocPage { doc, info })
+                        }
+                        Err(message) => Loadable::Failed(message),
+                    };
+                    self.docs.insert(class, page);
+                }
+                Event::ClassText(class, result) => {
+                    self.texts.insert(
+                        class,
+                        match result {
+                            Ok(text) => Loadable::Ready(text),
+                            Err(e) => Loadable::Failed(e),
+                        },
+                    );
+                }
                 Event::SimulationFinished(outcome) => self.add_run(*outcome),
             }
         }
     }
 
-    /// Store a new result, drop the oldest beyond `keep_results`, and plot like Dymola does
-    /// on first run (the first state-like variable) when nothing is plotted yet.
+    /// Store a new result, drop the oldest beyond `keep_results`, and keep curves on the
+    /// newest result of the same model (as a re-simulation replots the same variables).
     pub fn add_run(&mut self, outcome: SimulationOutcome) {
         let id = self.next_run_id;
         self.next_run_id += 1;
-        let label = format!("{} {}", outcome.class, id);
-        // Re-point existing curves of the same class to the new run (Dymola replots).
-        let previous: Vec<u64> = self
+        let short = library::short_name(&outcome.class).to_owned();
+        let same = self
+            .runs
+            .iter()
+            .filter(|r| r.outcome.class == outcome.class)
+            .count();
+        let label = if same == 0 {
+            short
+        } else {
+            format!("{short} {}", same + 1)
+        };
+        let latest_previous = self
             .runs
             .iter()
             .filter(|r| r.outcome.class == outcome.class)
             .map(|r| r.id)
-            .collect();
-        let latest_previous = previous.iter().max().copied();
+            .max();
         let mut replot: Vec<PlotSignal> = self
             .plotted
             .iter()
@@ -262,39 +821,96 @@ impl OmolaApp {
             self.plotted.retain(|s| s.run_id != removed.id);
         }
         self.tab = RibbonTab::Simulation;
+        self.log_tab = LogTab::Simulation;
     }
 
     pub fn run(&self, id: u64) -> Option<&ResultRun> {
         self.runs.iter().find(|r| r.id == id)
     }
+
+    /// The edit-window layer for the current ribbon tab.
+    pub fn layer(&self) -> Layer {
+        match self.tab {
+            RibbonTab::Graphics | RibbonTab::Tools | RibbonTab::Simulation => self.graphics_layer,
+            RibbonTab::Documentation => Layer::Documentation,
+            RibbonTab::Text => Layer::Text,
+        }
+    }
+
+    pub fn set_layer(&mut self, layer: Layer) {
+        match layer {
+            Layer::Icon | Layer::Diagram => {
+                self.graphics_layer = layer;
+                self.tab = RibbonTab::Graphics;
+            }
+            Layer::Documentation => self.tab = RibbonTab::Documentation,
+            Layer::Text => {
+                self.tab = RibbonTab::Text;
+                if let Some(active) = self.active.clone() {
+                    self.request_text(&active);
+                }
+            }
+        }
+    }
+
+    /// Window title, e.g. `Modelica - Modelica (Read-Only) - [Documentation]`.
+    pub fn window_title(&self) -> String {
+        let layer = if self.tab == RibbonTab::Simulation {
+            "Plot [1*]".to_owned()
+        } else {
+            self.layer().label().to_owned()
+        };
+        match &self.active {
+            None => format!("Omola - Modelica Workbench - [{layer}]"),
+            Some(class) => {
+                let read_only = if self.is_user_class(class) {
+                    ""
+                } else {
+                    " (Read-Only)"
+                };
+                format!(
+                    "{} - {class}{read_only} - [{layer}]",
+                    library::short_name(class)
+                )
+            }
+        }
+    }
+}
+
+/// Setup overrides plus values edited in the variable browser (edited values win).
+pub fn merge_overrides(
+    setup: &[(String, String)],
+    edited: &BTreeMap<String, String>,
+) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = setup
+        .iter()
+        .filter(|(n, _)| !edited.contains_key(n))
+        .cloned()
+        .collect();
+    out.extend(
+        edited
+            .iter()
+            .filter(|(_, v)| v.trim().parse::<f64>().is_ok())
+            .map(|(n, v)| (n.clone(), v.trim().to_owned())),
+    );
+    out
 }
 
 impl eframe::App for OmolaApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.handle_events();
         self.handle_shortcuts(ui);
-
-        egui::Panel::top("menu_bar").show(ui, |ui| self.menu_bar(ui));
-        egui::Panel::top("ribbon").show(ui, |ui| self.ribbon(ui));
-        egui::Panel::bottom("status_bar").show(ui, |ui| self.status_bar(ui));
-        egui::Panel::bottom("messages")
-            .resizable(true)
-            .default_size(150.0)
-            .show(ui, |ui| self.messages_window(ui));
-        if self.tab.is_modeling() {
-            egui::Panel::left("browsers")
-                .resizable(true)
-                .default_size(260.0)
-                .show(ui, |ui| self.modeling_browsers(ui));
-            egui::CentralPanel::default().show(ui, |ui| self.edit_window(ui));
-        } else {
-            egui::Panel::left("variable_browser")
-                .resizable(true)
-                .default_size(320.0)
-                .show(ui, |ui| self.variable_browser(ui));
-            egui::CentralPanel::default().show(ui, |ui| self.plot_window(ui));
+        let title = self.window_title();
+        if title != self.title_sent {
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Title(format!("{title} - Omola")));
+            self.title_sent = title;
         }
+        self.layout(ui);
         self.dialogs(ui);
+        if let Some(url) = self.pending_url.take() {
+            ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+        }
     }
 }
 
@@ -303,11 +919,15 @@ impl OmolaApp {
         use egui::{Key, KeyboardShortcut, Modifiers};
         let save = KeyboardShortcut::new(Modifiers::COMMAND, Key::S);
         let simulate = KeyboardShortcut::new(Modifiers::NONE, Key::F9);
+        let find = KeyboardShortcut::new(Modifiers::COMMAND, Key::F);
         if ui.input_mut(|i| i.consume_shortcut(&save)) {
             self.save();
         }
         if !self.busy && ui.input_mut(|i| i.consume_shortcut(&simulate)) {
             self.simulate();
+        }
+        if ui.input_mut(|i| i.consume_shortcut(&find)) {
+            self.find_open = true;
         }
     }
 }
@@ -343,11 +963,6 @@ mod tests {
     }
 
     #[test]
-    fn sample_model_selects_bouncing_ball() {
-        assert_eq!(app().selected_class.as_deref(), Some("BouncingBall"));
-    }
-
-    #[test]
     fn first_run_autoplots_and_old_runs_are_dropped() {
         let mut app = app();
         app.add_run(outcome("BouncingBall"));
@@ -363,9 +978,92 @@ mod tests {
         app.add_run(outcome("BouncingBall"));
         let ids: Vec<_> = app.runs.iter().map(|r| r.id).collect();
         assert_eq!(ids, vec![2, 3]);
-        assert_eq!(app.runs[1].label, "BouncingBall 3");
-        // Curves follow the newest run of the same class.
         assert!(app.plotted.iter().all(|s| s.run_id == 3));
         assert_eq!(app.plotted.len(), 1);
+    }
+
+    #[test]
+    fn edited_values_override_setup() {
+        let mut edited = BTreeMap::new();
+        edited.insert("L".to_owned(), "2".to_owned());
+        edited.insert("bad".to_owned(), "x".to_owned());
+        let merged = merge_overrides(
+            &[("L".into(), "1".into()), ("m".into(), "3".into())],
+            &edited,
+        );
+        assert_eq!(
+            merged,
+            vec![
+                ("m".to_owned(), "3".to_owned()),
+                ("L".to_owned(), "2".to_owned())
+            ]
+        );
+    }
+
+    #[test]
+    fn library_class_title_and_history() {
+        let mut app = app();
+        app.open_class("Modelica");
+        app.open_class("Modelica.Blocks");
+        assert_eq!(
+            app.window_title(),
+            "Blocks - Modelica.Blocks (Read-Only) - [Documentation]"
+        );
+        assert_eq!(app.model_tabs, vec!["Modelica.Blocks".to_owned()]);
+        assert!(app.expanded.contains("Modelica"));
+        app.go_back();
+        assert_eq!(app.active.as_deref(), Some("Modelica"));
+        assert!(app.can_go_forward());
+        app.go_forward();
+        assert_eq!(app.active.as_deref(), Some("Modelica.Blocks"));
+    }
+
+    #[test]
+    fn several_user_documents_and_library_classes() {
+        let mut app = app();
+        let dir = std::env::temp_dir().join(format!("omola-app-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("Pendulum.mo");
+        std::fs::write(
+            &file,
+            "model Pendulum\n  Real x;\nequation\n  x = 1;\nend Pendulum;\n",
+        )
+        .unwrap();
+        app.new_model();
+        app.open_file(file.clone());
+        assert_eq!(
+            app.model_tabs,
+            vec!["Unnamed".to_owned(), "Pendulum".to_owned()]
+        );
+        assert_eq!(app.active.as_deref(), Some("Pendulum"));
+        assert_eq!(app.doc_of("Pendulum"), Some(1));
+        assert!(app
+            .context_for("Pendulum")
+            .user_source
+            .unwrap()
+            .contains("model Pendulum"));
+        // Opening the same file again only activates it.
+        app.open_class("Unnamed");
+        app.open_file(file);
+        assert_eq!(app.documents.len(), 2);
+        assert_eq!(app.active.as_deref(), Some("Pendulum"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn user_model_gets_its_own_tab_and_context() {
+        let mut app = app();
+        app.open_class("Modelica");
+        app.new_model();
+        assert_eq!(
+            app.model_tabs,
+            vec!["Modelica".to_owned(), "Unnamed".to_owned()]
+        );
+        let ctx = app.context_for("Unnamed");
+        assert!(ctx.user_source.unwrap().contains("model Unnamed"));
+        assert_eq!(app.window_title(), "Unnamed - Unnamed - [Diagram]");
+        let lib_ctx = app.context_for("Modelica.Blocks");
+        assert!(lib_ctx.user_source.is_none());
+        assert_eq!(lib_ctx.libraries[0].name, "Modelica");
     }
 }

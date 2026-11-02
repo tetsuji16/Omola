@@ -212,6 +212,17 @@ impl Omc {
         class: &str,
         config: SimulationConfig<'_>,
     ) -> Result<CommandResult, BackendError> {
+        self.simulate_class(Some(source), class, config)
+    }
+
+    /// Simulate `class`. With `source: None` the class must come from `config.libraries`
+    /// (for example `Modelica.Blocks.Examples.PID_Controller`); no user file is loaded.
+    pub fn simulate_class(
+        &self,
+        source: Option<&Path>,
+        class: &str,
+        config: SimulationConfig<'_>,
+    ) -> Result<CommandResult, BackendError> {
         let SimulationConfig {
             stop_time,
             result,
@@ -221,7 +232,12 @@ impl Omc {
         } = config;
         validate_class(class)?;
         validate_parameter_overrides(parameters)?;
-        let source = readable_model(source)?;
+        let source = source.map(readable_model).transpose()?;
+        if source.is_none() && libraries.is_empty() {
+            return Err(BackendError::InvalidInput(
+                "a model file or at least one library is required to simulate".into(),
+            ));
+        }
         if !stop_time.is_finite() || stop_time < 0.0 {
             return Err(BackendError::InvalidInput(
                 "stop time must be finite and non-negative".into(),
@@ -268,9 +284,15 @@ impl Omc {
                     .join(",")
             )
         };
+        if let Some(source) = &source {
+            script.push_str(&format!(
+                "loaded := loadFile(\"{}\");\nif not loaded then print(getErrorString()); end if;\n",
+                modelica_string(&source.to_string_lossy())
+            ));
+        }
         script.push_str(&format!(
-            "loaded := loadFile(\"{}\");\nif not loaded then print(getErrorString()); end if;\nsimulationResult := simulate({}, stopTime={}, fileNamePrefix=\"{}\", simflags=\"{}\");\nprint(\"OMOLA_RESULT_FILE:\" + simulationResult.resultFile);\n",
-            modelica_string(&source.to_string_lossy()), class, stop_time, output_prefix, modelica_string(&simflags)
+            "simulationResult := simulate({}, stopTime={}, fileNamePrefix=\"{}\", simflags=\"{}\");\nprint(\"OMOLA_RESULT_FILE:\" + simulationResult.resultFile);\n",
+            class, stop_time, output_prefix, modelica_string(&simflags)
         ));
         let (mut result, workspace, _cleanup) = self.run_script_in_temp(&script)?;
         let generated = match find_result_file(&result.output) {
@@ -462,6 +484,30 @@ impl Omc {
         self.run_script_in_temp(script).map(|(result, _, _)| result)
     }
 
+    /// Run a read-only query script whose output may legitimately contain the text `Error:`
+    /// (for example documentation HTML). Only a failed process is an error; the caller must
+    /// interpret the output itself, typically through explicit markers it printed.
+    pub fn run_query_script(&self, script: &str) -> Result<CommandResult, BackendError> {
+        let version = self.version()?;
+        let cleanup = TempDir::new("query")?;
+        let path = cleanup.path.join("query.mos");
+        let script = format!(
+            "cd(\"{}\");\n{script}",
+            modelica_string(&cleanup.path.to_string_lossy())
+        );
+        fs::write(&path, script)?;
+        let out = self.invoke_in([path.as_os_str().to_owned()], Some(&cleanup.path))?;
+        let text = output_text(&out);
+        if !out.status.success() {
+            return Err(failed(&version, out));
+        }
+        Ok(CommandResult {
+            omc_version: version,
+            output: text,
+            result_file: None,
+        })
+    }
+
     /// Return the current project-safe Modelica path, prepending validated roots while
     /// retaining OpenModelica's installation defaults and user library directories.
     fn package_path_script(&self, roots: &[PathBuf]) -> Result<String, BackendError> {
@@ -579,6 +625,16 @@ fn readable_model(path: &Path) -> Result<PathBuf, BackendError> {
     }
     Ok(canonical)
 }
+/// Validate a qualified Modelica class name (`A.B.C`) before embedding it in a script.
+pub fn validate_class_name(class: &str) -> Result<(), BackendError> {
+    validate_class(class)
+}
+
+/// Escape text for use inside a Modelica string literal in an OMC script.
+pub fn escape_modelica_string(s: &str) -> String {
+    modelica_string(s)
+}
+
 fn validate_class(class: &str) -> Result<(), BackendError> {
     let valid = !class.is_empty()
         && class.split('.').all(|part| {

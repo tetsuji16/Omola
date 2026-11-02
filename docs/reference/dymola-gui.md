@@ -35,6 +35,8 @@
 
 文章のみ(画像はページ内で表示):
 
+- Getting Started with Dymola 2026(PDF, 画面各部の名称つき図): https://discover.3ds.com/sites/default/files/2025-12/getting-started-with-dymola-2026.pdf
+
 - モデルの「層」(Icon / Diagram / Documentation / Text): https://blog.technia.com/en/mbse/dymola-basics-2-layers-of-a-model-within-dymola
 - Simulation ウィンドウ内に Diagram 層を出して変数を探す: https://blog.technia.com/en/mbse/dymola-basics-4-diagram-layer-in-the-simulator-window
 - 実行とプロットの基本手順: https://blog.technia.com/en/mbse/getting-started-running-and-plotting-results
@@ -86,27 +88,47 @@
 - **プロットウィンドウ**(中央): 時間が既定の X 軸。凡例、複数サブプロット、測定カーソル、Plot Setup(凡例名・色・範囲)、曲線ごとの右クリックメニュー(色・線種・表示単位)。
 - **Logs / Commands**(下): 翻訳・シミュレーションのログ、スクリプトコマンド入力欄。
 
-## 3. Omola GUI での対応(現在の骨格)
+## 3. Omola GUI での対応(2026-11-02 時点)
 
-`cargo run -p omola-gui -- examples/BouncingBall.mo` で起動します。計算(チェック・シミュレーション)は OpenModelica の `omc` に委譲し、結果の `.mat` は `omola_core::mat` で直接読みます。
+`cargo run -p omola-gui` で起動すると、MSL 4.1.0 と ModelicaReference を OMC に読み込み、空の `Unnamed` モデルと `Modelica` パッケージの Documentation を開きます。`cargo run -p omola-gui -- examples/Pendulum.mo` でファイルを開けます。チェック・シミュレーション・ライブラリ照会はすべて OpenModelica の `omc` に委譲し、結果の `.mat` は `omola_core::mat` で直接読みます。
+
+### 3.1 レイアウトの計測値(Simulation / Plot 画面、クライアント領域 884x705)
+
+参考にした公開スクリーンショット(Dymola 2026 の Pendulum の Plot 画面)から測った値です。`crates/omola-gui/src/ui/` の定数はこれに合わせています。
+
+| 要素 | 位置・寸法 (px) |
+|---|---|
+| タイトル行(クイックアクセス) | y 0–30、白。アイコン間隔 22.5 |
+| リボンタブ行 | y 30–56。File は 54x26 の青 (25,121,202)。タブ幅 = 文字幅 + 30 |
+| 文脈タブ「Plot」 | タイトル行に緑 (113,190,89) の 96 px 幅の見出し、下に「Plot Options」 |
+| リボン本体 | y 56–158、背景 (240,240,240)。小ボタン行の上端 6/31/56、高さ 22、ピッチ 25。グループ見出しの中心 y=92 |
+| Simulation リボンのグループ幅 | Scripting 113、Simulation 382、Tools 95、Animation Control 294 |
+| Variable Browser | x 0–248。見出し 18、列見出し 24、行 19。列幅 Variable 88 / Value 66 / Unit 50。Value 欄は白地+灰枠 (189) で右寄せ |
+| プロット | 凡例は枠の上 (y≈16)。枠は左 53・上 31・右 24・下 29 の余白、枠線は濃灰色。補助グリッド (≈234) と目盛ラベル |
+| 目盛り | ステップは 1/2/2.5/4/5×10^k。x はラベル約 130 px ごと、y は 50 px ごと。補助線は 2.5・5・1 の 1/5、2・4 の 1/2 |
+| ログ窓 | 高さ 135、左 20 px に閉じる/フロート/縦書き「Logs」、下にタブ Syntax/Translation/Simulation/Version |
+| 最下段 | 高さ 25。Simulation 中はモデルタブ(幅 112、名前 +25、× +92)、右端にレイヤーツールバー(5 アイコン) |
+
+フォントは実行時に OS から読みます(同梱しません)。Windows は Segoe UI / Courier New、Linux は寸法互換の Liberation Sans / Liberation Mono を優先します。アイコンは Dymola の画像ではなく Material Symbols(Apache-2.0)で、同じ位置・大きさに置いています。
+
+### 3.2 実装状況
 
 | Dymola 側の要素 | Omola の実装場所 | 状態 |
 |---|---|---|
-| リボンのタブ + ボタン | `ui/chrome.rs` `ribbon()` | 骨格あり |
-| Package Browser | `ui/browsers.rs` `modeling_browsers()` | 開いたファイル内のクラスのみ(MSL 読み込みは G04) |
-| Component Browser | 同上 | 未実装(G06) |
-| Text 層 | `ui/views.rs` `edit_window()` | 編集可(ハイライトは G11) |
-| Diagram / Icon 層 | 同上 `placeholder_canvas()` | プレースホルダ(G07) |
-| Documentation 層 | 同上 | 説明文字列のみ(G08) |
-| Simulation Setup | `ui/dialogs.rs` | Stop time とパラメータ上書きのみ OMC に渡る(G05) |
-| Variable Browser | `ui/browsers.rs` `variable_browser()` | 平坦リスト・保持数・フィルタ(木構造は G09) |
-| プロット | `ui/views.rs` `plot_window()` | 単一プロット(複数図・カーソルは G10) |
-| Messages | `ui/chrome.rs` `messages_window()` | あり |
-| モード切替(右下) | `ui/chrome.rs` `status_bar()` | あり |
+| クイックアクセス・タイトル・ウィンドウボタン | `ui/chrome.rs` `title_bar()` | あり(OS の枠を使う場合は `OMOLA_NATIVE_TITLEBAR=1`) |
+| リボン(File/Graphics/Documentation/Text/Simulation/Tools) | `ui/chrome.rs` | あり。未実装の機能は無効表示、または押すと「not implemented」をログに出す |
+| Package Browser | `ui/browsers.rs` | MSL・ModelicaReference・開いたファイルの木、検索、戻る/進む |
+| Component Browser | 同上 | 選択クラスのみ(部品階層は G06) |
+| Documentation 層 | `ui/doc_view.rs` + `html.rs` | HTML 描画(見出し・太字・リンク・リスト・表・画像 SVG/PNG)、Info Source / Revision Source、検索ハイライト、Package Content 表、`modelica://` リンク移動 |
+| Text 層 | `ui/views.rs` | ユーザーモデルは編集可、ライブラリのクラスは `list()` を読み取り専用表示 |
+| Diagram / Icon 層 | 同上 | 座標系グリッドのみ(G07 / G12) |
+| Simulation | `backend.rs` | ライブラリのクラス(例: `Modelica.Blocks.Examples.PID_Controller`)とユーザーモデルを OMC で実行。experiment 注釈の StopTime を反映 |
+| Variable Browser | `ui/browsers.rs` | 宣言順の並び、Value/Unit/Description、パラメータと状態の初期値を編集して次の実行に反映 |
+| プロット | `ui/views.rs` | 自前描画(ドラッグでズーム、ダブルクリックで戻す、ホバーで値) |
+| Logs / Commands | `ui/bottom.rs` | ログのタブ分け、Commands 窓から OMC スクリプト実行、Run Script |
 
-現在の画面(フェイク omc + OpenModelica 形式の実 BouncingBall 結果ファイルで撮影。ステータスバーの "FAKE" 表示はそのため):
+現在の画面。開発専用の偽 omc で撮影しています(MSL 4.1.0 の実テキストを返し、Pendulum の結果は事前計算値)。実 OMC での動作は CI の `msl_browse_document_and_simulate_with_real_omc` で検証しています。
 
-- Text 層: ![Text layer](../images/omola-gui/01-text-layer.png)
-- Simulation(Variable Browser + プロット): ![Simulation](../images/omola-gui/02-simulation-plot.png)
-- Graphics(Diagram 層プレースホルダ): ![Graphics](../images/omola-gui/03-graphics-placeholder.png)
-- Simulation Setup: ![Setup](../images/omola-gui/04-simulation-setup.png)
+- Documentation 層: ![Documentation](../images/omola-gui/01-documentation.png)
+- Graphics(Diagram 層): ![Graphics](../images/omola-gui/02-graphics.png)
+- Simulation / Plot(884x705。参考画像と同寸): ![Simulation](../images/omola-gui/03-simulation-plot.png)

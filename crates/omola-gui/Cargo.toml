@@ -13,4 +13,6 @@ path = "src/main.rs"
 omola-core = { path = "../omola-core" }
 eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
 egui = "0.37"
-egui_plot = "0.38"
+egui_material_icons = "0.9"
+egui_extras = { version = "0.37", default-features = false, features = ["file", "image", "svg"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif"] }

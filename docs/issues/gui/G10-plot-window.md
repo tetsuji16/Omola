@@ -21,11 +21,8 @@
    既存の `plotted: Vec<PlotSignal>` を `diagrams[active_diagram].signals` に置き換える。`add_run` の「同じクラスの最新結果へ曲線を付け替える」処理は**全ダイアグラム**に対して行う。既存テスト `first_run_autoplots_and_old_runs_are_dropped` を新構造に合わせて修正し、意味(自動プロット・付け替え・古い結果の削除)は変えない。
 2. Variable Browser のチェックボックスは**アクティブなダイアグラム**の曲線を ON/OFF する。
 3. Simulation リボン: 「New diagram」「Remove diagram」(1 個のときは無効)「Cursor」(トグル)「Export CSV…」を追加。既存の「Erase curves」はアクティブなダイアグラムだけを消す。
-4. 描画(`views.rs` `plot_window`):
-   - 利用可能な高さをダイアグラム数で等分し、`Plot::new(("plot", i))` を縦に並べる。
-   - X 軸の連動: egui_plot 0.38 の `link_axis` を使う。**API 名と引数は `~/.cargo/registry/src/*/egui_plot-0.38.0/src/plot.rs` を grep して確認**(`link_axis(group_id, [true, false])` のような形のはず)。カーソルも連動させる `link_cursor` があれば使う。
-   - ダイアグラムをクリックしたらアクティブにする(`PlotResponse.response.clicked()`)。アクティブなものは枠を強調(`egui::Frame::new().stroke(...)` で囲む)。
-5. カーソル: `cursor_enabled` のとき、`plot_ui.pointer_coordinate()` の x を時刻 t とし、`egui_plot::VLine::new("cursor", t)` を描く。プロットの右上(または下部ラベル)に、各曲線の `series::value_at(time, values, t)` を `name = value` の形で列挙。
+4. 描画(`views.rs` `plot_window`): プロットは egui_plot ではなく自前描画です。`plot_window()` の枠計算(余白 左53・上31・右24・下29)と目盛り関数(`nice_step` / `minor_step` / `nice_range` / `ticks`)を関数に切り出し、ダイアグラムごとに縦に等分した矩形へ同じ描画を行う。x 範囲(`plot_view` の x0/x1)は全ダイアグラムで共有し、ドラッグズームの x はすべてのダイアグラムに反映する。
+5. カーソル: `cursor_enabled` のとき、ホバー位置の x を時刻 t として各枠に縦線を描き、枠の右上に各曲線の `series::value_at(time, values, t)` を `name = value` で列挙する。
 6. CSV 出力:
    - G03 が済んでいればファイルダイアログ、未了なら既存の `PathDialog` に `ExportCsv(String)` を追加して使う。
    - 出力対象はアクティブなダイアグラムの曲線のうち**同じ結果(run)**のもの。複数 run が混ざっている場合は最新 run の曲線だけを出し、Messages に Warning。

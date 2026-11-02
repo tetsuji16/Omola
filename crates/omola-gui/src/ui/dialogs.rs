@@ -19,7 +19,7 @@ impl OmolaApp {
             .show(ctx, |ui| {
                 ui.label(format!(
                     "Model: {}",
-                    self.selected_class.clone().unwrap_or_else(|| "—".into())
+                    self.active.clone().unwrap_or_else(|| "-".into())
                 ));
                 ui.separator();
                 ui.strong("General");
@@ -125,10 +125,14 @@ impl OmolaApp {
         let Some(dialog) = self.path_dialog.clone() else {
             return;
         };
-        let is_open = matches!(dialog, PathDialog::Open(_));
-        let (title, mut text) = match dialog {
-            PathDialog::Open(t) => ("Open Modelica file", t),
-            PathDialog::SaveAs(t) => ("Save as", t),
+        let (title, prompt, mut text) = match &dialog {
+            PathDialog::Open(t) => ("Open Modelica file", "Path to a .mo file", t.clone()),
+            PathDialog::SaveAs(t) => ("Save as", "Path to a .mo file", t.clone()),
+            PathDialog::RunScript(t) => (
+                "Run Script",
+                "Path to an OpenModelica script (.mos)",
+                t.clone(),
+            ),
         };
         let mut keep_open = true;
         let mut submitted = false;
@@ -137,7 +141,7 @@ impl OmolaApp {
             .resizable(false)
             .open(&mut keep_open)
             .show(ctx, |ui| {
-                ui.label("Path to a .mo file (native file dialog: issue G03):");
+                ui.label(format!("{prompt} (native file dialog: issue G03):"));
                 let response = ui.add(egui::TextEdit::singleline(&mut text).desired_width(420.0));
                 let enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 if ui.button("OK").clicked() || enter {
@@ -147,19 +151,31 @@ impl OmolaApp {
         if submitted && !text.trim().is_empty() {
             self.path_dialog = None;
             let path = PathBuf::from(text.trim());
-            if is_open {
-                self.open_file(path);
-            } else {
-                self.document.path = Some(path);
-                self.save();
+            match dialog {
+                PathDialog::Open(_) => self.open_file(path),
+                PathDialog::SaveAs(_) => {
+                    if let Some(i) = self.active_doc() {
+                        self.documents[i].path = Some(path);
+                    }
+                    self.save();
+                }
+                PathDialog::RunScript(_) => {
+                    self.command_input = format!(
+                        "runScript(\"{}\")",
+                        omola_core::escape_modelica_string(&path.to_string_lossy())
+                    );
+                    self.bottom_pane = crate::app::BottomPane::Commands;
+                    self.docks.bottom = true;
+                    self.run_command();
+                }
             }
         } else if !keep_open {
             self.path_dialog = None;
         } else {
-            self.path_dialog = Some(if is_open {
-                PathDialog::Open(text)
-            } else {
-                PathDialog::SaveAs(text)
+            self.path_dialog = Some(match dialog {
+                PathDialog::Open(_) => PathDialog::Open(text),
+                PathDialog::SaveAs(_) => PathDialog::SaveAs(text),
+                PathDialog::RunScript(_) => PathDialog::RunScript(text),
             });
         }
     }

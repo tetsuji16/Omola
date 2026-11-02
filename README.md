@@ -198,11 +198,15 @@ Release gates progress from a reproducible OMC-backed CLI, through a published o
 
 ## Native GUI (egui, experimental)
 
-`crates/omola-gui` is a native desktop workbench built with [egui](https://github.com/emilk/egui). Its layout follows familiar Modelica tools (ribbon tabs, package/variable browsers, edit and plot windows, messages); see [the layout reference](docs/reference/dymola-gui.md). Checking and simulation are delegated to OMC exactly like the CLI, and OpenModelica `.mat` results are read in-process by `omola_core::mat`.
+`crates/omola-gui` is a native desktop workbench built with [egui](https://github.com/emilk/egui). Its window follows the familiar Modelica-tool arrangement (quick access toolbar, ribbon tabs, package/component/variable browsers, model tabs, edit and plot windows, logs); layout measurements and references are in [the layout reference](docs/reference/dymola-gui.md). This is a layout modelled on a commercial tool for familiarity, not a claim of Dymola compatibility; icons are Material Symbols and no Dymola assets are used.
 
 ```sh
-cargo run -p omola-gui -- examples/BouncingBall.mo     # needs omc on PATH or OMOLA_OMC
+omc tests/compat/install-msl.mos                       # once: Modelica Standard Library 4.1.0
+cargo run -p omola-gui                                 # MSL documentation, browse, simulate examples
+cargo run -p omola-gui -- examples/Pendulum.mo         # open a model file
 ```
+
+Checking, simulation and library queries are delegated to OMC (`omc` on PATH or `OMOLA_OMC`), and OpenModelica `.mat` results are read in-process by `omola_core::mat`. Library classes such as `Modelica.Blocks.Examples.PID_Controller` simulate directly; the `experiment` annotation sets the stop time. The real-OMC path (MSL index, documentation with images, simulation of a library example) is checked in CI.
 
 Without OpenModelica you can exercise the UI with a demo result and a stand-in compiler (not a simulation; no compatibility evidence):
 
@@ -211,7 +215,7 @@ cargo run -p omola-gui --example demo_mat -- target/demo_res.mat
 OMOLA_FAKE_MAT="$PWD/target/demo_res.mat" OMOLA_OMC="$PWD/scripts/fake-omc.sh" cargo run -p omola-gui -- examples/BouncingBall.mo
 ```
 
-Currently implemented: Modelica text editing (the user's file is never modified by a run; each run writes a private copy), class outline, Check, Simulate with stop time and numeric parameter overrides, result retention, variable browser with filter, time plot, Simulation Setup dialog. Graphical diagram/icon editing, library browsing, component browser, documentation rendering and the remaining setup fields are tracked as issues G01–G14 in [`docs/issues/gui`](docs/issues/gui/README.md). Screenshots: [`docs/images/omola-gui`](docs/images/omola-gui).
+Not implemented yet: graphical diagram/icon rendering and editing, component hierarchy, animation, sweeps, and the remaining Simulation Setup fields; see issues G01–G14 in [`docs/issues/gui`](docs/issues/gui/README.md). Screenshots: [`docs/images/omola-gui`](docs/images/omola-gui).
 
 ## Plan and issue queue
 
