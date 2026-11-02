@@ -1,7 +1,7 @@
 //! Central views: the edit window (per modeling layer) and the plot window.
 
 use crate::app::{GraphicsLayer, OmolaApp, RibbonTab};
-use egui::{Color32, RichText, Stroke};
+use egui::{RichText, Stroke};
 use egui_plot::{Legend, Line, Plot, PlotPoints};
 
 impl OmolaApp {
@@ -112,10 +112,11 @@ impl OmolaApp {
 }
 
 fn placeholder_canvas(ui: &mut egui::Ui, title: &str, note: &str) {
+    let visuals = ui.visuals().clone();
     let (rect, _) = ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 0.0, Color32::from_gray(250));
-    let grid = Stroke::new(1.0, Color32::from_gray(225));
+    painter.rect_filled(rect, 0.0, visuals.extreme_bg_color);
+    let grid = Stroke::new(1.0, visuals.faint_bg_color);
     let step = 20.0;
     let mut x = rect.left();
     while x < rect.right() {
@@ -133,7 +134,7 @@ fn placeholder_canvas(ui: &mut egui::Ui, title: &str, note: &str) {
     painter.rect_stroke(
         frame,
         0.0,
-        Stroke::new(1.0, Color32::from_gray(160)),
+        Stroke::new(1.0, visuals.widgets.noninteractive.bg_stroke.color),
         egui::StrokeKind::Inside,
     );
     painter.text(
@@ -141,13 +142,13 @@ fn placeholder_canvas(ui: &mut egui::Ui, title: &str, note: &str) {
         egui::Align2::CENTER_CENTER,
         title,
         egui::FontId::proportional(18.0),
-        Color32::from_gray(90),
+        visuals.weak_text_color(),
     );
     painter.text(
         rect.center() + egui::vec2(0.0, 12.0),
         egui::Align2::CENTER_CENTER,
         note,
         egui::FontId::proportional(13.0),
-        Color32::from_gray(120),
+        visuals.weak_text_color(),
     );
 }

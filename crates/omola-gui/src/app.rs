@@ -98,6 +98,7 @@ pub struct OmolaApp {
 
 impl OmolaApp {
     pub fn new(cc: &eframe::CreationContext<'_>, initial_file: Option<PathBuf>) -> Self {
+        crate::theme::install(&cc.egui_ctx);
         let ctx = cc.egui_ctx.clone();
         let worker = Worker::spawn(crate::backend::default_work_root(), move || {
             ctx.request_repaint()
@@ -140,6 +141,14 @@ impl OmolaApp {
         };
         app.refresh_outline();
         app
+    }
+
+    /// Start a blank model in the text layer.
+    pub fn new_model(&mut self) {
+        self.document = Document::new_untitled("model Unnamed\nequation\nend Unnamed;\n");
+        self.selected_class = None;
+        self.refresh_outline();
+        self.tab = RibbonTab::Text;
     }
 
     pub fn open_file(&mut self, path: PathBuf) {
@@ -274,9 +283,27 @@ impl eframe::App for OmolaApp {
         self.handle_events();
         self.handle_shortcuts(ui);
 
-        egui::Panel::top("menu_bar").show(ui, |ui| self.menu_bar(ui));
-        egui::Panel::top("ribbon").show(ui, |ui| self.ribbon(ui));
-        egui::Panel::bottom("status_bar").show(ui, |ui| self.status_bar(ui));
+        egui::Panel::top("menu_bar")
+            .frame(
+                egui::Frame::NONE
+                    .fill(ui.visuals().panel_fill)
+                    .inner_margin(egui::Margin::symmetric(6, 2)),
+            )
+            .show(ui, |ui| self.menu_bar(ui));
+        egui::Panel::top("ribbon")
+            .frame(
+                egui::Frame::NONE
+                    .fill(ui.visuals().panel_fill)
+                    .inner_margin(egui::Margin::symmetric(6, 4)),
+            )
+            .show(ui, |ui| self.ribbon(ui));
+        egui::Panel::bottom("status_bar")
+            .frame(
+                egui::Frame::NONE
+                    .fill(ui.visuals().panel_fill)
+                    .inner_margin(egui::Margin::symmetric(6, 2)),
+            )
+            .show(ui, |ui| self.status_bar(ui));
         egui::Panel::bottom("messages")
             .resizable(true)
             .default_size(150.0)
@@ -301,8 +328,16 @@ impl eframe::App for OmolaApp {
 impl OmolaApp {
     fn handle_shortcuts(&mut self, ui: &egui::Ui) {
         use egui::{Key, KeyboardShortcut, Modifiers};
+        let new = KeyboardShortcut::new(Modifiers::COMMAND, Key::N);
+        let open = KeyboardShortcut::new(Modifiers::COMMAND, Key::O);
         let save = KeyboardShortcut::new(Modifiers::COMMAND, Key::S);
         let simulate = KeyboardShortcut::new(Modifiers::NONE, Key::F9);
+        if ui.input_mut(|i| i.consume_shortcut(&new)) {
+            self.new_model();
+        }
+        if ui.input_mut(|i| i.consume_shortcut(&open)) {
+            self.path_dialog = Some(PathDialog::Open(String::new()));
+        }
         if ui.input_mut(|i| i.consume_shortcut(&save)) {
             self.save();
         }

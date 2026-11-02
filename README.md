@@ -211,6 +211,8 @@ cargo run -p omola-gui --example demo_mat -- target/demo_res.mat
 OMOLA_FAKE_MAT="$PWD/target/demo_res.mat" OMOLA_OMC="$PWD/scripts/fake-omc.sh" cargo run -p omola-gui -- examples/BouncingBall.mo
 ```
 
+On Windows the workbench adopts the system look: Segoe UI and Consolas, the Windows accent colour, an OS-drawn title bar and taskbar icon, and the current light/dark app theme (other platforms keep egui's bundled fonts and a Fluent-style palette).
+
 Currently implemented: Modelica text editing (the user's file is never modified by a run; each run writes a private copy), class outline, Check, Simulate with stop time and numeric parameter overrides, result retention, variable browser with filter, time plot, Simulation Setup dialog. Graphical diagram/icon editing, library browsing, component browser, documentation rendering and the remaining setup fields are tracked as issues G01–G14 in [`docs/issues/gui`](docs/issues/gui/README.md). Screenshots: [`docs/images/omola-gui`](docs/images/omola-gui).
 
 ## Plan and issue queue
