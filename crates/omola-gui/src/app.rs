@@ -215,6 +215,9 @@ pub struct OmolaApp {
     pub setup: SimulationSetup,
     /// Classes whose experiment annotation has already been applied to `setup`.
     pub setup_from: Option<String>,
+    /// Set once the user changes the general setup fields by hand; the `experiment`
+    /// annotation of a later class must then not overwrite their values.
+    pub setup_edited_by_user: bool,
     pub show_setup: bool,
     pub path_dialog: Option<PathDialog>,
     /// Channel for async results from native file dialogs.
@@ -310,6 +313,7 @@ impl OmolaApp {
             find_query: String::new(),
             setup: SimulationSetup::default(),
             setup_from: None,
+            setup_edited_by_user: false,
             show_setup: false,
             path_dialog: None,
             dialog_rx: None,
@@ -794,6 +798,40 @@ impl OmolaApp {
         });
     }
 
+    /// Seed the Simulation Setup dialog from a class's `experiment` annotation.
+    ///
+    /// The annotation only provides the initial values: once the user has changed the
+    /// general fields by hand (`setup_edited_by_user`) their numbers are kept, and the
+    /// annotation of the class already applied (`setup_from`) is not applied twice.
+    pub fn apply_experiment(
+        &mut self,
+        class: &str,
+        restriction: &str,
+        experiment: Option<library::Experiment>,
+    ) {
+        let Some(exp) = experiment else {
+            return;
+        };
+        if restriction == "package"
+            || self.setup_edited_by_user
+            || self.setup_from.as_deref() == Some(class)
+        {
+            return;
+        }
+        self.setup.start_time = exp.start_time;
+        self.setup.stop_time = exp.stop_time;
+        self.setup.tolerance = exp.tolerance;
+        self.setup.number_of_intervals = exp.intervals;
+        self.setup_from = Some(class.to_owned());
+        self.info(
+            LogTab::Translation,
+            format!(
+                "Experiment annotation of {class}: start {} s, stop {} s, {} intervals, tolerance {}",
+                exp.start_time, exp.stop_time, exp.intervals, exp.tolerance
+            ),
+        );
+    }
+
     /// Apply worker events. Called once per frame.
     pub fn handle_events(&mut self) {
         for event in self.worker.poll() {
@@ -844,15 +882,7 @@ impl OmolaApp {
                 Event::ClassDoc(class, result) => {
                     let page = match result {
                         Ok(doc) => {
-                            if let Some(exp) = doc.experiment {
-                                if doc.restriction != "package"
-                                    && self.setup_from.as_deref() != Some(class.as_str())
-                                {
-                                    self.setup.start_time = exp.start_time;
-                                    self.setup.stop_time = exp.stop_time;
-                                    self.setup_from = Some(class.clone());
-                                }
-                            }
+                            self.apply_experiment(&class, &doc.restriction, doc.experiment);
                             let info = html::parse(&doc.info_html);
                             Loadable::Ready(DocPage { doc, info })
                         }
@@ -1221,6 +1251,53 @@ mod tests {
         assert_eq!(ids, vec![2, 3]);
         assert!(app.plotted.iter().all(|s| s.run_id == 3));
         assert_eq!(app.plotted.len(), 1);
+    }
+
+    fn experiment() -> library::Experiment {
+        library::Experiment {
+            start_time: 0.5,
+            stop_time: 5.0,
+            tolerance: 1e-5,
+            intervals: 450,
+        }
+    }
+
+    #[test]
+    fn experiment_annotation_seeds_the_setup_once() {
+        let mut app = app();
+        app.apply_experiment("Annotated", "model", Some(experiment()));
+        assert_eq!(app.setup.start_time, 0.5);
+        assert_eq!(app.setup.stop_time, 5.0);
+        assert_eq!(app.setup.tolerance, 1e-5);
+        assert_eq!(app.setup.number_of_intervals, 450);
+        assert_eq!(app.setup_from.as_deref(), Some("Annotated"));
+
+        // Another model's annotation replaces the seeded values ...
+        app.apply_experiment(
+            "Other",
+            "model",
+            Some(library::Experiment {
+                stop_time: 2.0,
+                ..experiment()
+            }),
+        );
+        assert_eq!(app.setup.stop_time, 2.0);
+
+        // ... but a package never does, and the same class is not applied twice.
+        app.apply_experiment("Modelica.Blocks", "package", Some(experiment()));
+        assert_eq!(app.setup.stop_time, 2.0);
+        app.apply_experiment("Other", "model", Some(experiment()));
+        assert_eq!(app.setup.stop_time, 2.0);
+    }
+
+    #[test]
+    fn manual_setup_edits_survive_a_later_annotation() {
+        let mut app = app();
+        app.setup.stop_time = 7.0;
+        app.setup_edited_by_user = true;
+        app.apply_experiment("Annotated", "model", Some(experiment()));
+        assert_eq!(app.setup.stop_time, 7.0);
+        assert!(app.setup_from.is_none());
     }
 
     #[test]

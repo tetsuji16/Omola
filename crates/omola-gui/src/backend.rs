@@ -426,23 +426,12 @@ fn simulate(
         },
         None => None,
     };
-    if setup.start_time != 0.0
-        || setup.number_of_intervals != SimulationSetup::default().number_of_intervals
-        || setup.tolerance != SimulationSetup::default().tolerance
-        || setup.method != SimulationSetup::default().method
-    {
-        send(Event::Log(
-            LogTab::Translation,
-            LogLevel::Warning,
-            "Start time, intervals, tolerance and method are not yet passed to OMC (see issue G05); OMC defaults are used.".into(),
-        ));
-    }
     send(Event::Log(
         LogTab::Translation,
         LogLevel::Info,
         format!(
-            "Translating and simulating {class} (stop time {} s) ...",
-            setup.stop_time
+            "Translating and simulating {class} (start {} s, stop {} s, {} intervals, tolerance {}, method {}) ...",
+            setup.start_time, setup.stop_time, setup.number_of_intervals, setup.tolerance, setup.method
         ),
     ));
     let started = Instant::now();
@@ -460,6 +449,10 @@ fn simulate(
         &class,
         SimulationConfig {
             stop_time: setup.stop_time,
+            start_time: Some(setup.start_time),
+            number_of_intervals: Some(setup.number_of_intervals),
+            tolerance: Some(setup.tolerance),
+            method: Some(setup.method.as_str()),
             result: Some(&prefix),
             libraries: &libraries,
             package_roots: &[],
