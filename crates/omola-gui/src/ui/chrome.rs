@@ -76,7 +76,7 @@ impl OmolaApp {
                 .on_hover_text("Open...")
                 .clicked()
             {
-                self.path_dialog = Some(PathDialog::Open(String::new()));
+                self.request_open_dialog();
             }
             let can_save = self.active_doc().is_some();
             if icon_button(ui, ICON_SAVE, BLUE, 16.0, can_save, false)
@@ -206,7 +206,7 @@ impl OmolaApp {
             self.new_model();
         }
         if ui.button("Open...").clicked() {
-            self.path_dialog = Some(PathDialog::Open(String::new()));
+            self.request_open_dialog();
         }
         if ui
             .add_enabled(
@@ -221,7 +221,30 @@ impl OmolaApp {
             .add_enabled(self.active_doc().is_some(), egui::Button::new("Save As..."))
             .clicked()
         {
-            self.path_dialog = Some(PathDialog::SaveAs(String::new()));
+            self.request_save_as_dialog();
+        }
+        // Recent files submenu.
+        if !self.recent_files.is_empty() {
+            ui.menu_button("Recent files", |ui| {
+                let count = self.recent_files.len();
+                for i in 0..count {
+                    let path = self.recent_files[i].clone();
+                    let exists = path.is_file();
+                    let label = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| path.display().to_string());
+                    let full = path.display().to_string();
+                    if ui
+                        .add_enabled(exists, egui::Button::new(&label))
+                        .on_hover_text(&full)
+                        .clicked()
+                    {
+                        ui.close();
+                        self.open_file(path);
+                    }
+                }
+            });
         }
         ui.separator();
         ui.menu_button("Libraries", |ui| {

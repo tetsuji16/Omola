@@ -18,6 +18,8 @@ Since 2026-11-02 the GUI also uses `egui_extras` with the `image` (PNG/JPEG/GIF)
 
 Since 2026-11-02 the GUI enables eframe's `persistence` feature, which adds `enumn` (MIT OR Apache-2.0), `ron` (MIT OR Apache-2.0), and `typeid` (MIT OR Apache-2.0) to serialize window state across restarts. `serde` (MIT OR Apache-2.0) is also added directly for the persisted-state struct. All three are recorded in `licenses/inventory.toml`.
 
+Since 2026-11-02 the GUI uses `rfd` 0.15 (MIT) with the `xdg-portal` feature for native file dialogs on Windows, macOS, and Linux (via the XDG Desktop Portal; no GTK system dependency). This pulls in `ashpd` (MIT), `zbus`/`zvariant` (MIT), `url` (MIT OR Apache-2.0), ICU normalization crates (Unicode-3.0), `rand` (MIT OR Apache-2.0), and `tempfile` (MIT OR Apache-2.0) — 62 additional crates, all permissively licensed (MIT, Apache-2.0, Unicode-3.0). All are recorded in `licenses/inventory.toml`.
+
 ### Setup scripts and release archives
 
 `scripts/setup-windows.ps1`, `scripts/setup-linux.sh` and `scripts/setup-docker.sh` download OpenModelica directly from `build.openmodelica.org` (official Windows installer, official apt repository, or the pinned `openmodelica/openmodelica:v1.27.1-minimal` image) and install the Modelica Standard Library 4.1.0 through OpenModelica's package manager. The user accepts those upstream licenses (OSMC-PL/AGPLv3 for OpenModelica, BSD-3-Clause for MSL) on their own machine; nothing from OpenModelica or MSL is committed or redistributed. Rust is installed from `rustup.rs` only when missing. The release workflow packages Omola binaries, scripts, examples, `licenses/` and a generated `THIRD_PARTY_LICENSES.md`; it does not include OpenModelica or MSL.
