@@ -1005,8 +1005,7 @@ impl OmolaApp {
                 self.documents[i]
                     .path
                     .as_ref()
-                    .map(|p| p.file_name().map(|n| n.to_owned()))
-                    .flatten()
+                    .and_then(|p| p.file_name().map(|n| n.to_owned()))
             })
             .unwrap_or_else(|| std::ffi::OsString::from("Unnamed.mo"));
         let (tx, rx) = std::sync::mpsc::channel::<DialogResult>();
