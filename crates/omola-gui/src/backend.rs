@@ -356,11 +356,37 @@ mod tests {
             "initial height was {}",
             height[0]
         );
-        assert!(
-            height.iter().all(|h| *h >= -1e-6),
-            "ball went below the ground: min {}",
-            height.iter().cloned().fold(f64::INFINITY, f64::min)
-        );
+        if let Some((at, min)) = height
+            .iter()
+            .cloned()
+            .enumerate()
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .filter(|(_, min)| *min < -1e-6)
+        {
+            let velocity = result.series("velocity");
+            let around: Vec<String> = (at.saturating_sub(3)..(at + 4).min(height.len()))
+                .map(|i| {
+                    format!(
+                        "i={i} t={} h={} v={:?}",
+                        result.time[i],
+                        height[i],
+                        velocity.map(|v| v[i])
+                    )
+                })
+                .collect();
+            let head: Vec<String> = (0..8.min(height.len()))
+                .map(|i| format!("i={i} t={} h={}", result.time[i], height[i]))
+                .collect();
+            let vars: Vec<String> = result
+                .variables
+                .iter()
+                .map(|v| format!("{}{}", v.name, if v.is_parameter { "(p)" } else { "" }))
+                .collect();
+            panic!(
+                "ball went below the ground: min {min} at sample {at} of {}\nvariables: {vars:?}\nhead: {head:#?}\naround min: {around:#?}",
+                height.len()
+            );
+        }
 
         let gravity = result.index_of("gravity").expect("gravity variable");
         assert!(result.variables[gravity].is_parameter);
