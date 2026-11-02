@@ -309,4 +309,91 @@ mod tests {
         assert!(outcome.result_file.ends_with("M_res.mat"));
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    /// Real OpenModelica through the GUI worker. Ignored by default because it needs `omc`
+    /// and mutates nothing global (it only reads `OMOLA_OMC`); CI runs it on its own with
+    /// `cargo test -p omola-gui -- --ignored --test-threads=1 simulate_bouncing_ball_with_real_omc`.
+    #[test]
+    #[ignore = "needs OpenModelica; run with --ignored and OMOLA_OMC set"]
+    fn simulate_bouncing_ball_with_real_omc() {
+        if std::env::var_os("OMOLA_OMC").is_none() {
+            eprintln!("OMOLA_OMC is not set; skipping the real-OMC GUI backend test");
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("omola-gui-real-omc-{}", std::process::id()));
+        let worker = Worker::spawn(root.join("work"), || {});
+        worker.submit(Job::Simulate {
+            source_text: include_str!("../../../examples/BouncingBall.mo").into(),
+            class: "BouncingBall".into(),
+            setup: SimulationSetup {
+                stop_time: 3.0,
+                ..SimulationSetup::default()
+            },
+        });
+        // OMC translates and compiles C code, which can take a while on a cold CI runner.
+        let deadline = Instant::now() + Duration::from_secs(180);
+        let mut outcome = None;
+        while outcome.is_none() && Instant::now() < deadline {
+            for event in worker.poll() {
+                match event {
+                    Event::SimulationFinished(done) => outcome = Some(done),
+                    Event::Log(LogLevel::Error, message) => panic!("worker error: {message}"),
+                    _ => {}
+                }
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        let outcome = outcome.expect("simulation finished within 180 s");
+        let result = &outcome.result;
+
+        assert_eq!(result.time.first(), Some(&0.0));
+        let last = *result.time.last().expect("time samples");
+        assert!((last - 3.0).abs() < 1e-6, "last time was {last}");
+
+        let height = result.series("height").expect("height variable");
+        assert!(
+            (height[0] - 1.0).abs() < 1e-6,
+            "initial height was {}",
+            height[0]
+        );
+        // BouncingBall has no Zeno handling: after the bounces converge (about t = 2.56 s)
+        // `when height <= 0` never fires again and OMC lets the ball fall through the floor.
+        // That is real model behavior, so physics is only checked before that point.
+        let before_zeno: Vec<(f64, f64)> = result
+            .time
+            .iter()
+            .cloned()
+            .zip(height.iter().cloned())
+            .filter(|(t, _)| *t <= 2.0)
+            .collect();
+        assert!(
+            before_zeno.iter().all(|(_, h)| *h >= -1e-4),
+            "ball went below the ground before t = 2 s: {:?}",
+            before_zeno
+                .iter()
+                .find(|(_, h)| *h < -1e-4)
+                .expect("a violating sample")
+        );
+        // First impact happens at sqrt(2 * 1 / 9.81) = 0.4515 s: an event sample sits on the floor.
+        assert!(
+            before_zeno
+                .iter()
+                .any(|(t, h)| (0.44..=0.47).contains(t) && h.abs() < 1e-3),
+            "no floor contact near t = 0.4515 s"
+        );
+        // After the bounce (restitution 0.7) the ball rises again to about 0.49 m.
+        let peak = before_zeno
+            .iter()
+            .filter(|(t, _)| (0.5..=0.8).contains(t))
+            .map(|(_, h)| *h)
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!(
+            (0.4..=0.6).contains(&peak),
+            "expected a rebound peak near 0.49 m, got {peak}"
+        );
+
+        let gravity = result.index_of("gravity").expect("gravity variable");
+        assert!(result.variables[gravity].is_parameter);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

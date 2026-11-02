@@ -20,7 +20,8 @@
    - 受け取った `SimulationOutcome` について次を `assert!`:
      - `result.time.first() == Some(&0.0)`、`result.time.last()` が 3.0 に `1e-6` 以内
      - `result.series("height")` が存在し、最初の値が 1.0 に `1e-6` 以内(`initialHeight = 1`)
-     - `result.series("height")` の全値が `-1e-6` 以上(ボールは地面より下に行かない)
+     - `t <= 2.0` のサンプルで `height >= -1e-4`、`t` が 0.44〜0.47 に `|height| < 1e-3` のサンプルがあり(初回衝突は約 0.4515 s)、`t` が 0.5〜0.8 の `height` の最大が 0.4〜0.6(反発後のピーク約 0.49)
+     - **全区間で `height >= 0` を要求してはいけない**: `BouncingBall` は Zeno 対策が無く、バウンドが収束する約 2.56 s 以降は実 OMC の結果でもボールが床を突き抜ける(CI で実測: stop 3 s で最小約 -0.955)。これはモデルの挙動で、バグではない。
      - `result.index_of("gravity")` の変数が `is_parameter == true`
    - **注意**: 偽 omc テストは `std::env::set_var("OMOLA_OMC", ...)` で環境変数を書き換えます。同じプロセスで並列に走ると衝突するので、新テストは `#[ignore]` にして単独実行します(手順 2)。
 2. `.github/workflows/rust.yml` の `omc-integration` ジョブの `sh -lc '...'` の中で、`cargo check --workspace &&` の**直後**に次の 1 行を追加:
