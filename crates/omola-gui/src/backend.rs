@@ -66,6 +66,11 @@ pub enum Job {
         class: String,
         context: ClassContext,
     },
+    /// Icon graphics of a class, from `getModelInstanceAnnotation` (G07).
+    LoadIcon {
+        class: String,
+        context: ClassContext,
+    },
     Check {
         class: String,
         context: ClassContext,
@@ -139,6 +144,8 @@ pub enum Event {
     ClassText(String, Result<String, String>),
     /// Component tree of a class (empty when the class declares no components).
     Instance(String, Result<Vec<crate::instance::ComponentNode>, String>),
+    /// Icon graphics of a class; `Err` when the class has no usable Icon annotation.
+    Icon(String, Result<crate::graphics::Icon, String>),
     SimulationFinished(Box<SimulationOutcome>),
     /// `InstallLibraries` finished (`true` when the Modelica Standard Library is installed).
     LibrariesInstalled(bool),
@@ -308,6 +315,41 @@ fn run_job(job: Job, run_dir: &Path, send: &dyn Fn(Event)) {
             });
             send(Event::Instance(class, result));
         }
+        Job::LoadIcon { class, context } => {
+            let result = with_user_file(run_dir, &class, &context, |file| {
+                let script = library::icon_script(&class, &context.libraries, file)
+                    .map_err(|e| e.to_string())?;
+                omc.run_query_script(&script)
+                    .map(|out| out.output)
+                    .map_err(|e| e.to_string())
+            })
+            .and_then(|output| {
+                let sections = library::parse_sections(&output);
+                let body = sections.get("icon").map(|s| s.trim()).unwrap_or("");
+                // OMC prints nothing at all when the class declares no Icon anywhere in its
+                // `extends` chain.
+                let json = crate::instance::extract_json(body)
+                    .ok_or_else(|| format!("{class} declares no Icon annotation"))?;
+                let value: serde_json::Value = serde_json::from_str(json)
+                    .map_err(|e| format!("could not read the Icon JSON of {class}: {e}"))?;
+                crate::graphics::parse_icon(&value)
+            });
+            if let Ok(icon) = &result {
+                if !icon.skipped.is_empty() {
+                    // One warning per load, however many graphics were dropped.
+                    send(Event::Log(
+                        LogTab::Translation,
+                        LogLevel::Warning,
+                        format!(
+                            "Icon of {class}: skipped {} graphic(s) that could not be read:\n{}",
+                            icon.skipped.len(),
+                            icon.skipped.join("\n")
+                        ),
+                    ));
+                }
+            }
+            send(Event::Icon(class, result));
+        }
         Job::Check { class, context } => {
             send(Event::Log(
                 LogTab::Syntax,
@@ -419,6 +461,7 @@ fn fail_job(job: Job, message: String, send: &dyn Fn(Event)) {
         Job::LoadClassDoc { class, .. } => send(Event::ClassDoc(class, Err(message))),
         Job::LoadClassText { class, .. } => send(Event::ClassText(class, Err(message))),
         Job::LoadInstance { class, .. } => send(Event::Instance(class, Err(message))),
+        Job::LoadIcon { class, .. } => send(Event::Icon(class, Err(message))),
         Job::Command { text, .. } => send(Event::Command(format!("{text}\n  {message}"))),
         Job::InstallLibraries => send(Event::LibrariesInstalled(false)),
         Job::Doctor | Job::Check { .. } | Job::Simulate { .. } => {}
@@ -710,6 +753,61 @@ mod tests {
 
         let gravity = result.index_of("gravity").expect("gravity variable");
         assert!(result.variables[gravity].is_parameter);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Icon annotations of three Modelica Standard Library classes through the GUI worker:
+    /// `getModelInstanceAnnotation(..., {"Icon"})` is parsed into paintable shapes, and a
+    /// class without an Icon of its own inherits the one of its base class.
+    #[test]
+    #[ignore = "needs OpenModelica with MSL 4.1.0; run with --ignored and OMOLA_OMC set"]
+    fn icon_annotations_with_real_omc() {
+        if std::env::var_os("OMOLA_OMC").is_none() {
+            eprintln!("OMOLA_OMC is not set; skipping");
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("omola-gui-icons-{}", std::process::id()));
+        let worker = Worker::spawn(root.join("work"), || {});
+        let context = ClassContext {
+            libraries: vec![LibrarySpec::new("Modelica", Some("4.1.0"))],
+            user_source: None,
+        };
+        let load = |class: &str| {
+            worker.submit(Job::LoadIcon {
+                class: class.into(),
+                context: context.clone(),
+            });
+            wait_for(&worker, 300, |e| match e {
+                Event::Icon(_, result) => Some(result.expect("icon annotation")),
+                _ => None,
+            })
+        };
+
+        let resistor = load("Modelica.Electrical.Analog.Basic.Resistor");
+        // Rectangle + two lines + two texts; the conditional `useHeatPort` line is dropped.
+        assert_eq!(resistor.len(), 5, "{:?}", resistor.skipped);
+        assert_eq!(resistor.coordinate_extent.x1, -100.0);
+
+        let first_order = load("Modelica.Blocks.Continuous.FirstOrder");
+        assert_eq!(first_order.len(), 7);
+
+        let inertia = load("Modelica.Mechanics.Rotational.Components.Inertia");
+        assert_eq!(inertia.len(), 15);
+
+        // A model without an Icon of its own inherits the one of `Modelica.Blocks.Icons.Block`
+        // through two `extends` levels (see `tests/fixtures/icon_InheritedBlock.json`).
+        worker.submit(Job::LoadIcon {
+            class: "InheritsBlockIcon".into(),
+            context: ClassContext {
+                libraries: context.libraries.clone(),
+                user_source: Some(include_str!("../tests/fixtures/icon_InheritedBlock.mo").into()),
+            },
+        });
+        let inherited = wait_for(&worker, 300, |e| match e {
+            Event::Icon(_, result) => Some(result.expect("inherited icon")),
+            _ => None,
+        });
+        assert!(!inherited.is_empty());
         let _ = std::fs::remove_dir_all(&root);
     }
 

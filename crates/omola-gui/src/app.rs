@@ -215,6 +215,8 @@ pub struct OmolaApp {
     pub component_expanded: BTreeSet<String>,
     /// Class whose component tree has been requested but not received yet.
     pub components_pending: Option<String>,
+    /// Icon graphics per class, for the Icon layer (`getModelInstanceAnnotation`, G07).
+    pub icons: BTreeMap<String, Loadable<crate::graphics::Icon>>,
     pub doc_view: DocView,
     pub find_open: bool,
     pub find_query: String,
@@ -317,6 +319,7 @@ impl OmolaApp {
             components: None,
             component_expanded: BTreeSet::new(),
             components_pending: None,
+            icons: BTreeMap::new(),
             doc_view: DocView::Formatted,
             find_open: false,
             find_query: String::new(),
@@ -611,6 +614,22 @@ impl OmolaApp {
         });
     }
 
+    /// Ask the worker for the Icon graphics of `class` (once per class).
+    ///
+    /// The Icon layer calls this on every frame it is visible, so an entry is added to
+    /// [`Self::icons`] before the job is sent; a failed load is remembered as well and is
+    /// only retried after the next Check.
+    pub fn request_icon(&mut self, class: &str) {
+        if self.icons.contains_key(class) {
+            return;
+        }
+        self.icons.insert(class.to_owned(), Loadable::Loading);
+        self.worker.submit(Job::LoadIcon {
+            class: class.to_owned(),
+            context: self.context_for(class),
+        });
+    }
+
     pub fn request_text(&mut self, class: &str) {
         if self.is_user_class(class) || self.texts.contains_key(class) {
             return;
@@ -773,6 +792,8 @@ impl OmolaApp {
         self.components = None;
         self.components_pending = None;
         self.request_components(&class);
+        self.icons.remove(&class);
+        self.request_icon(&class);
     }
 
     pub fn simulate(&mut self) {
@@ -941,6 +962,15 @@ impl OmolaApp {
                             format!("Component tree of {class} is not available: {message}"),
                         ),
                     }
+                }
+                Event::Icon(class, result) => {
+                    self.icons.insert(
+                        class,
+                        match result {
+                            Ok(icon) => Loadable::Ready(icon),
+                            Err(message) => Loadable::Failed(message),
+                        },
+                    );
                 }
                 Event::SimulationFinished(outcome) => self.add_run(*outcome),
                 Event::LibrariesInstalled(ok) => {

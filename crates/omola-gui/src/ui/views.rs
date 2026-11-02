@@ -110,7 +110,8 @@ impl OmolaApp {
             .show(ui, |ui| {
                 ui.set_min_size(ui.available_size());
                 match self.layer() {
-                    Layer::Diagram | Layer::Icon => diagram_canvas(ui, self.layer()),
+                    Layer::Icon => self.icon_layer(ui, &class),
+                    Layer::Diagram => diagram_canvas(ui, self.layer()),
                     Layer::Documentation => self.documentation_layer(ui, &class),
                     Layer::Text => self.text_layer(ui, &class),
                 }
@@ -168,6 +169,34 @@ impl OmolaApp {
                         );
                     });
             }
+        }
+    }
+
+    /// Graphics tab > Icon: the read-only `annotation(Icon(graphics={...}))` of `class`.
+    fn icon_layer(&mut self, ui: &mut egui::Ui, class: &str) {
+        self.request_icon(class);
+        let (rect, sheet) = canvas_sheet(ui);
+        let painter = ui.painter_at(rect);
+        let note = |text: &str| {
+            painter.text(
+                egui::pos2(sheet.center().x, sheet.bottom() + 12.0),
+                Align2::CENTER_CENTER,
+                text,
+                FontId::proportional(11.0),
+                theme::TEXT_WEAK,
+            );
+        };
+        match self.icons.get(class) {
+            Some(Loadable::Ready(icon)) if !icon.is_empty() => crate::graphics::paint_icon(
+                &painter,
+                sheet,
+                icon,
+                crate::library::short_name(class),
+            ),
+            Some(Loadable::Ready(_)) => note("This class has no Icon graphics."),
+            Some(Loadable::Loading) => note("Loading the Icon annotation ..."),
+            Some(Loadable::Failed(message)) => note(message),
+            None => note("Loading the Icon annotation ..."),
         }
     }
 
@@ -472,11 +501,27 @@ fn empty_canvas(ui: &mut egui::Ui, message: &str) {
 
 /// White canvas with the Modelica coordinate system ({-100,-100},{100,100}) and its grid.
 fn diagram_canvas(ui: &mut egui::Ui, layer: Layer) {
+    let (rect, sheet) = canvas_sheet(ui);
+    let note = match layer {
+        Layer::Icon => "Icon layer: graphical rendering is tracked in issue G07",
+        _ => "Diagram layer: graphical rendering is tracked in issue G12",
+    };
+    ui.painter_at(rect).text(
+        egui::pos2(sheet.center().x, sheet.bottom() + 12.0),
+        Align2::CENTER_CENTER,
+        note,
+        FontId::proportional(11.0),
+        theme::TEXT_WEAK,
+    );
+}
+
+/// Paint the white canvas and its grid, and return the full area plus the square sheet
+/// the Modelica coordinates map onto.
+fn canvas_sheet(ui: &mut egui::Ui) -> (egui::Rect, egui::Rect) {
     let (rect, _) = ui.allocate_exact_size(ui.available_size(), Sense::hover());
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, Color32::WHITE);
-    let side = (rect.width().min(rect.height()) - 40.0).max(100.0);
-    let sheet = egui::Rect::from_center_size(rect.center(), Vec2::splat(side));
+    let sheet = crate::graphics::sheet(rect);
     let grid = Stroke::new(1.0, Color32::from_rgb(0xEA, 0xEA, 0xEA));
     let steps = 20;
     for i in 1..steps {
@@ -497,17 +542,7 @@ fn diagram_canvas(ui: &mut egui::Ui, layer: Layer) {
         Stroke::new(1.0, Color32::from_rgb(0xC8, 0xC8, 0xC8)),
         egui::StrokeKind::Inside,
     );
-    let note = match layer {
-        Layer::Icon => "Icon layer: graphical rendering is tracked in issue G07",
-        _ => "Diagram layer: graphical rendering is tracked in issue G12",
-    };
-    painter.text(
-        egui::pos2(sheet.center().x, sheet.bottom() + 12.0),
-        Align2::CENTER_CENTER,
-        note,
-        FontId::proportional(11.0),
-        theme::TEXT_WEAK,
-    );
+    (rect, sheet)
 }
 
 #[cfg(test)]
