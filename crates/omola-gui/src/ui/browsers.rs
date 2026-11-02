@@ -2,6 +2,7 @@
 
 use super::widgets::{dock_header, icon_button, paint_icon};
 use crate::app::{LibraryState, OmolaApp, PlotSignal};
+use crate::instance::ComponentNode;
 use crate::theme;
 use egui::{Align2, Color32, FontId, RichText, Sense, Stroke, Vec2};
 use egui_material_icons::icons::*;
@@ -114,6 +115,64 @@ fn tree_row(
         response.on_hover_text(tooltip);
     }
     action
+}
+
+/// Icon for a component row: parameters look different from plain signals.
+fn component_icon(node: &ComponentNode) -> (MaterialIcon, Color32) {
+    if node.is_parameter {
+        (ICON_TUNE, Color32::from_rgb(0x8A, 0x6D, 0x3B))
+    } else if matches!(
+        node.type_name.as_str(),
+        "Real" | "Integer" | "Boolean" | "String"
+    ) {
+        (ICON_TEXT_FIELDS, Color32::from_rgb(0x4A, 0x4A, 0x4A))
+    } else {
+        (ICON_CROP_SQUARE, Color32::from_rgb(0x1F, 0x6F, 0xC8))
+    }
+}
+
+/// Draw one component and, when expanded, its children.
+///
+/// `path` is the dotted prefix used as the expansion key; `toggles` collects the paths
+/// whose expander was clicked so the caller can update the state after the frame.
+fn component_rows(
+    ui: &mut egui::Ui,
+    node: &ComponentNode,
+    depth: usize,
+    path: &str,
+    expanded: &std::collections::BTreeSet<String>,
+    toggles: &mut Vec<String>,
+) {
+    let key = if path.is_empty() {
+        node.name.clone()
+    } else {
+        format!("{path}.{}", node.name)
+    };
+    let label = if node.is_parameter {
+        format!("{} (p) : {}", node.name, node.type_name)
+    } else {
+        format!("{} : {}", node.name, node.type_name)
+    };
+    let has_children = !node.children.is_empty();
+    let open = expanded.contains(&key);
+    let action = tree_row(
+        ui,
+        depth,
+        has_children,
+        open,
+        false,
+        component_icon(node),
+        &label,
+        &node.comment,
+    );
+    if action.toggle {
+        toggles.push(key.clone());
+    }
+    if open {
+        for child in &node.children {
+            component_rows(ui, child, depth + 1, &key, expanded, toggles);
+        }
+    }
 }
 
 impl OmolaApp {
@@ -420,23 +479,53 @@ impl OmolaApp {
             icon_button(ui, ICON_ARROW_FORWARD, theme::ACCENT, 14.0, false, false);
             icon_button(ui, ICON_SORT_BY_ALPHA, theme::TEXT, 14.0, false, false);
         });
+        let active = self.active.clone();
+        let loading = self.components_pending.is_some();
+        let mut toggles: Vec<String> = Vec::new();
         Self::browser_frame(ui, |ui| {
             ui.set_min_height(ui.available_height().max(40.0));
             ui.spacing_mut().item_spacing.y = 0.0;
-            if let Some(active) = self.active.clone() {
-                let restriction = self.restriction_of(&active).unwrap_or_default();
-                tree_row(
-                    ui,
-                    0,
-                    false,
-                    false,
-                    false,
-                    class_icon(&restriction, &active),
-                    crate::library::short_name(&active),
-                    "Component hierarchy: issue G06",
+            let Some(active) = active.as_deref() else {
+                ui.label(
+                    RichText::new("Open a model to see its components.")
+                        .small()
+                        .weak(),
                 );
+                return;
+            };
+            let Some((_, nodes)) = self
+                .components
+                .as_ref()
+                .filter(|(class, _)| class == active)
+            else {
+                ui.label(
+                    RichText::new(if loading {
+                        "Loading components ..."
+                    } else {
+                        "Press Check to load components"
+                    })
+                    .small()
+                    .weak(),
+                );
+                return;
+            };
+            if nodes.is_empty() {
+                ui.label(
+                    RichText::new("This class declares no components.")
+                        .small()
+                        .weak(),
+                );
+                return;
+            }
+            for node in nodes {
+                component_rows(ui, node, 0, "", &self.component_expanded, &mut toggles);
             }
         });
+        for path in toggles {
+            if !self.component_expanded.remove(&path) {
+                self.component_expanded.insert(path);
+            }
+        }
     }
 
     // ------------------------------------------------------------------ variable browser

@@ -209,6 +209,12 @@ pub struct OmolaApp {
     pub history_pos: usize,
     pub docs: BTreeMap<String, Loadable<DocPage>>,
     pub texts: BTreeMap<String, Loadable<String>>,
+    /// Component tree of the active class (`getModelInstance`, G06).
+    pub components: Option<(String, Vec<crate::instance::ComponentNode>)>,
+    /// Component nodes the user expanded, as dotted paths from the active class.
+    pub component_expanded: BTreeSet<String>,
+    /// Class whose component tree has been requested but not received yet.
+    pub components_pending: Option<String>,
     pub doc_view: DocView,
     pub find_open: bool,
     pub find_query: String,
@@ -308,6 +314,9 @@ impl OmolaApp {
             history_pos: 0,
             docs: BTreeMap::new(),
             texts: BTreeMap::new(),
+            components: None,
+            component_expanded: BTreeSet::new(),
+            components_pending: None,
             doc_view: DocView::Formatted,
             find_open: false,
             find_query: String::new(),
@@ -518,6 +527,7 @@ impl OmolaApp {
             prefix.push_str(part);
         }
         self.request_doc(class);
+        self.request_components(class);
         if self.tab == RibbonTab::Text {
             self.request_text(class);
         }
@@ -579,6 +589,23 @@ impl OmolaApp {
         }
         self.docs.insert(class.to_owned(), Loadable::Loading);
         self.worker.submit(Job::LoadClassDoc {
+            class: class.to_owned(),
+            context: self.context_for(class),
+        });
+    }
+
+    /// Ask the worker for the component tree of `class` (once per class).
+    ///
+    /// This starts an OMC process, so it is only sent when the active class changes or
+    /// after a successful Check - never per keystroke.
+    pub fn request_components(&mut self, class: &str) {
+        if self.components.as_ref().map(|(c, _)| c.as_str()) == Some(class)
+            || self.components_pending.as_deref() == Some(class)
+        {
+            return;
+        }
+        self.components_pending = Some(class.to_owned());
+        self.worker.submit(Job::LoadInstance {
             class: class.to_owned(),
             context: self.context_for(class),
         });
@@ -740,8 +767,12 @@ impl OmolaApp {
         self.log_tab = LogTab::Syntax;
         self.worker.submit(Job::Check {
             context: self.context_for(&class),
-            class,
+            class: class.clone(),
         });
+        // The buffer may have been edited since the last tree was fetched.
+        self.components = None;
+        self.components_pending = None;
+        self.request_components(&class);
     }
 
     pub fn simulate(&mut self) {
@@ -898,6 +929,18 @@ impl OmolaApp {
                             Err(e) => Loadable::Failed(e),
                         },
                     );
+                }
+                Event::Instance(class, result) => {
+                    if self.components_pending.as_deref() == Some(class.as_str()) {
+                        self.components_pending = None;
+                    }
+                    match result {
+                        Ok(nodes) => self.components = Some((class, nodes)),
+                        Err(message) => self.info(
+                            LogTab::Translation,
+                            format!("Component tree of {class} is not available: {message}"),
+                        ),
+                    }
                 }
                 Event::SimulationFinished(outcome) => self.add_run(*outcome),
                 Event::LibrariesInstalled(ok) => {

@@ -1,0 +1,72 @@
+{
+  "name": "BouncingBall",
+  "restriction": "model",
+  "elements": [
+    {
+      "$kind": "component",
+      "name": "gravity",
+      "type": "Real",
+      "modifiers": "9.81",
+      "value": {
+        "binding": 9.81
+      },
+      "prefixes": {
+        "variability": "parameter"
+      },
+      "comment": "Gravitational acceleration (m/s2)"
+    },
+    {
+      "$kind": "component",
+      "name": "restitution",
+      "type": "Real",
+      "modifiers": "0.7",
+      "value": {
+        "binding": 0.7
+      },
+      "prefixes": {
+        "variability": "parameter"
+      },
+      "comment": "Velocity retention at impact"
+    },
+    {
+      "$kind": "component",
+      "name": "initialHeight",
+      "type": "Real",
+      "modifiers": "1",
+      "value": {
+        "binding": 1
+      },
+      "prefixes": {
+        "variability": "parameter"
+      },
+      "comment": "Initial height (m)"
+    },
+    {
+      "$kind": "component",
+      "name": "height",
+      "type": "Real",
+      "modifiers": {
+        "start": "initialHeight",
+        "fixed": "true"
+      },
+      "comment": "Height above the ground (m)"
+    },
+    {
+      "$kind": "component",
+      "name": "velocity",
+      "type": "Real",
+      "modifiers": {
+        "start": "0",
+        "fixed": "true"
+      },
+      "comment": "Vertical velocity (m/s)"
+    }
+  ],
+  "source": {
+    "filename": "C:/Users/tetsu/WorkBuddy AI/Omola/examples/BouncingBall.mo",
+    "lineStart": 1,
+    "columnStart": 1,
+    "lineEnd": 17,
+    "columnEnd": 17
+  }
+}
