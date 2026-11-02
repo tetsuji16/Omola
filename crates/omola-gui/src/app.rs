@@ -892,9 +892,12 @@ impl OmolaApp {
 
     /// Build a serializable snapshot of the state that should survive a restart.
     pub fn to_persisted(&self) -> PersistedState {
+        // Prefer the active document, but keep a file open even when the active tab is a
+        // library class (clicking `Modelica` must not forget the user's last file).
         let last_file = self
             .active_doc()
-            .and_then(|i| self.documents[i].path.clone());
+            .and_then(|i| self.documents[i].path.clone())
+            .or_else(|| self.documents.iter().rev().find_map(|d| d.path.clone()));
         PersistedState {
             last_file,
             tab: Some(self.tab.label().to_owned()),
@@ -905,6 +908,7 @@ impl OmolaApp {
 
     /// Apply persisted state. Priority: **CLI file > saved last_file > default sample**.
     pub fn apply_persisted(&mut self, state: PersistedState, cli_file: Option<PathBuf>) {
+        let restored_setup = state.setup.is_some();
         if let Some(setup) = state.setup {
             self.setup = setup;
         }
@@ -932,6 +936,11 @@ impl OmolaApp {
         match file_to_open {
             Some(path) => self.open_file(path),
             None => self.open_class("Modelica"),
+        }
+        // A restored Simulation Setup wins over the model's `experiment` annotation:
+        // otherwise opening the last file would immediately overwrite the restored values.
+        if restored_setup {
+            self.setup_from = self.active.clone();
         }
     }
 
@@ -1244,5 +1253,44 @@ mod tests {
         assert_eq!(app.keep_results, 3);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn last_file_survives_browsing_a_library_class() {
+        let dir = std::env::temp_dir().join(format!("omola-last-file-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("Keep.mo");
+        std::fs::write(
+            &file,
+            "model Keep\n  Real x;\nequation\n  x = 1;\nend Keep;\n",
+        )
+        .unwrap();
+
+        let mut app = app();
+        app.open_file(file.clone());
+        // The active tab is now a read-only library class, not the user's file.
+        app.open_class("Modelica.Blocks");
+        assert_eq!(app.to_persisted().last_file, Some(file));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn restored_setup_wins_over_the_experiment_annotation() {
+        let state = PersistedState {
+            last_file: None,
+            tab: Some("Simulation".to_owned()),
+            setup: Some(SimulationSetup {
+                stop_time: 7.0,
+                ..SimulationSetup::default()
+            }),
+            keep_results: Some(3),
+        };
+        let mut app = app();
+        app.apply_persisted(state, None);
+        // `setup_from` is the guard that keeps `Event::ClassDoc` from applying the
+        // experiment annotation over the values restored from storage.
+        assert_eq!(app.setup.stop_time, 7.0);
+        assert_eq!(app.setup_from, app.active);
     }
 }
