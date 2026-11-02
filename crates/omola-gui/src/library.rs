@@ -149,6 +149,11 @@ pub fn parse_library_index(spec: &LibrarySpec, output: &str) -> Result<LoadedLib
         .map(|s| PathBuf::from(s.trim()))
         .filter(|p| !p.as_os_str().is_empty())
         .ok_or("OMC did not report the library source file")?;
+    // `getClassNames(recursive=true)` also returns the top-level class itself, which the
+    // script prints separately before the loop. Keep the first occurrence (the explicit
+    // one, which carries the root's own comment) and drop later duplicates, so class
+    // counts and search results do not list the root twice.
+    let mut seen = std::collections::HashSet::new();
     let classes: Vec<ClassEntry> = output
         .lines()
         .filter_map(|line| line.strip_prefix("OMOLA_CLASS\t"))
@@ -163,6 +168,7 @@ pub fn parse_library_index(spec: &LibrarySpec, output: &str) -> Result<LoadedLib
                 comment,
             })
         })
+        .filter(|c| seen.insert(c.qualified_name.clone()))
         .collect();
     if classes.first().map(|c| c.qualified_name.as_str()) != Some(spec.name.as_str()) {
         return Err(format!("OMC returned no class index for {}", spec.name));
@@ -447,6 +453,23 @@ mod tests {
         assert!(lib.has_children("Modelica.Blocks"));
         assert!(!lib.has_children("Modelica.UsersGuide"));
         assert_eq!(lib.class("Modelica.Blocks.Continuous").unwrap().comment, "");
+    }
+
+    #[test]
+    fn duplicate_root_class_is_listed_once() {
+        // `getClassNames(recursive=true)` returns the top-level class too, so real OMC output
+        // contains the root twice: once from the explicit print, once from the loop.
+        let output = "OMOLA_BEGIN source\n/lib/Modelica 4.1.0/package.mo\nOMOLA_END source\nOMOLA_BEGIN version\n4.1.0\nOMOLA_END version\nOMOLA_CLASS\tModelica\tpackage\tModelica Standard Library\nOMOLA_CLASS\tModelica\tpackage\tModelica Standard Library\nOMOLA_CLASS\tModelica.Blocks\tpackage\tLibrary of basic input/output control blocks\n";
+        let lib = parse_library_index(&msl(), output).unwrap();
+        assert_eq!(lib.classes.len(), 2);
+        assert_eq!(
+            lib.classes
+                .iter()
+                .filter(|c| c.qualified_name == "Modelica")
+                .count(),
+            1
+        );
+        assert_eq!(lib.children("Modelica").len(), 1);
     }
 
     #[test]

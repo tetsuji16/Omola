@@ -13,8 +13,10 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-/// Bump when the serialized layout changes; older files are then ignored.
-const SCHEMA_VERSION: u32 = 1;
+/// Bump when the serialized layout changes, or when a cached file would no longer match a
+/// freshly queried index (schema 2 drops the duplicated root class). Older files are then
+/// ignored and regenerated.
+const SCHEMA_VERSION: u32 = 2;
 
 /// Serialized form of [`LoadedLibrary`], kept separate so the on-disk format is explicit
 /// and does not silently change when the in-memory types evolve.
