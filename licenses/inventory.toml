@@ -2183,3 +2183,21 @@ name = "xmlwriter"
 version = "0.1.0"
 license = "MIT"
 source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "enumn"
+version = "0.1.14"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "ron"
+version = "0.12.3"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "typeid"
+version = "1.0.3"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"

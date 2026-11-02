@@ -42,6 +42,10 @@ impl RibbonTab {
             RibbonTab::Tools => "Tools",
         }
     }
+
+    pub fn from_label(s: &str) -> Option<RibbonTab> {
+        Self::ALL.iter().copied().find(|t| t.label() == s)
+    }
 }
 
 /// Model layers shown in the edit window.
@@ -154,6 +158,21 @@ pub struct LogEntry {
     pub text: String,
 }
 
+/// Serializable subset of [`OmolaApp`] persisted across restarts via eframe storage.
+///
+/// `OmolaApp` itself is not serialized (it contains a worker thread, channels, etc.).
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+#[serde(default)]
+pub struct PersistedState {
+    pub last_file: Option<PathBuf>,
+    pub tab: Option<String>,
+    pub setup: Option<SimulationSetup>,
+    pub keep_results: Option<usize>,
+}
+
+/// Storage key for [`PersistedState`] in eframe's `Storage`.
+const STATE_KEY: &str = "omola_gui_state";
+
 pub struct OmolaApp {
     pub tab: RibbonTab,
     pub graphics_layer: Layer,
@@ -232,10 +251,12 @@ impl OmolaApp {
         // Like a fresh workbench session: an empty model "Unnamed" is always available.
         let unnamed = app.add_unnamed();
         app.model_tabs.push(unnamed);
-        match initial_file {
-            Some(path) => app.open_file(path),
-            None => app.open_class("Modelica"),
-        }
+
+        // Restore persisted state if available.
+        let persisted = cc
+            .storage
+            .and_then(|storage| eframe::get_value::<PersistedState>(storage, STATE_KEY));
+        app.apply_persisted(persisted.unwrap_or_default(), initial_file);
         app
     }
 
@@ -867,6 +888,53 @@ impl OmolaApp {
         }
     }
 
+    // ---------------------------------------------------------------- persistence
+
+    /// Build a serializable snapshot of the state that should survive a restart.
+    pub fn to_persisted(&self) -> PersistedState {
+        let last_file = self
+            .active_doc()
+            .and_then(|i| self.documents[i].path.clone());
+        PersistedState {
+            last_file,
+            tab: Some(self.tab.label().to_owned()),
+            setup: Some(self.setup.clone()),
+            keep_results: Some(self.keep_results),
+        }
+    }
+
+    /// Apply persisted state. Priority: **CLI file > saved last_file > default sample**.
+    pub fn apply_persisted(&mut self, state: PersistedState, cli_file: Option<PathBuf>) {
+        if let Some(setup) = state.setup {
+            self.setup = setup;
+        }
+        if let Some(keep) = state.keep_results {
+            self.keep_results = keep;
+        }
+        if let Some(tab) = state.tab.and_then(|s| RibbonTab::from_label(&s)) {
+            self.tab = tab;
+        }
+
+        let file_to_open = cli_file.or_else(|| {
+            state.last_file.as_ref().and_then(|path| {
+                if path.is_file() {
+                    Some(path.clone())
+                } else {
+                    self.info(
+                        LogTab::Syntax,
+                        format!("Previous file not found: {}", path.display()),
+                    );
+                    None
+                }
+            })
+        });
+
+        match file_to_open {
+            Some(path) => self.open_file(path),
+            None => self.open_class("Modelica"),
+        }
+    }
+
     pub fn set_layer(&mut self, layer: Layer) {
         match layer {
             Layer::Icon | Layer::Diagram => {
@@ -941,6 +1009,11 @@ impl eframe::App for OmolaApp {
         if let Some(url) = self.pending_url.take() {
             ui.ctx().open_url(egui::OpenUrl::new_tab(url));
         }
+    }
+
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        let state = self.to_persisted();
+        eframe::set_value(storage, STATE_KEY, &state);
     }
 }
 
@@ -1095,5 +1168,81 @@ mod tests {
         let lib_ctx = app.context_for("Modelica.Blocks");
         assert!(lib_ctx.user_source.is_none());
         assert_eq!(lib_ctx.libraries[0].name, "Modelica");
+    }
+
+    // --- G02 persistence tests ---
+
+    #[test]
+    fn persisted_state_roundtrips_setup_keep_results_and_tab() {
+        let mut app = app();
+        app.setup.stop_time = 7.0;
+        app.setup.tolerance = 1e-6;
+        app.keep_results = 5;
+        app.tab = RibbonTab::Simulation;
+
+        let state = app.to_persisted();
+        let json = serde_json::to_string(&state).unwrap();
+        let restored: PersistedState = serde_json::from_str(&json).unwrap();
+
+        let mut app2 = OmolaApp::with_worker(Worker::spawn(
+            std::env::temp_dir().join("omola-gui-unused"),
+            || {},
+        ));
+        app2.apply_persisted(restored, None);
+
+        assert_eq!(app2.setup.stop_time, 7.0);
+        assert_eq!(app2.setup.tolerance, 1e-6);
+        assert_eq!(app2.keep_results, 5);
+        assert_eq!(app2.tab, RibbonTab::Simulation);
+    }
+
+    #[test]
+    fn missing_last_file_does_not_panic() {
+        let state = PersistedState {
+            last_file: Some(PathBuf::from("/nonexistent/path/file.mo")),
+            tab: Some("Text".to_owned()),
+            setup: Some(SimulationSetup::default()),
+            keep_results: Some(3),
+        };
+        let mut app = app();
+        app.apply_persisted(state, None);
+        // Should fall back to the default sample ("Modelica") without panicking.
+        assert_eq!(app.active.as_deref(), Some("Modelica"));
+        // Tab and keep_results should still be restored.
+        assert_eq!(app.tab, RibbonTab::Text);
+        assert_eq!(app.keep_results, 3);
+    }
+
+    #[test]
+    fn cli_file_takes_priority_over_saved_last_file() {
+        let dir = std::env::temp_dir().join(format!("omola-persist-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cli_file = dir.join("FromCLI.mo");
+        std::fs::write(
+            &cli_file,
+            "model FromCLI\n  Real x;\nequation\n  x = 1;\nend FromCLI;\n",
+        )
+        .unwrap();
+
+        let state = PersistedState {
+            last_file: Some(PathBuf::from("/nonexistent/saved.mo")),
+            tab: Some("Simulation".to_owned()),
+            setup: Some(SimulationSetup {
+                stop_time: 7.0,
+                ..SimulationSetup::default()
+            }),
+            keep_results: Some(3),
+        };
+        let mut app = app();
+        app.apply_persisted(state, Some(cli_file.clone()));
+
+        // CLI file wins.
+        assert_eq!(app.active.as_deref(), Some("FromCLI"));
+        // But setup/tab/keep from persisted state are still applied.
+        assert_eq!(app.setup.stop_time, 7.0);
+        assert_eq!(app.tab, RibbonTab::Simulation);
+        assert_eq!(app.keep_results, 3);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

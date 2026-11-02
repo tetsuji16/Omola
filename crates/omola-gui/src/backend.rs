@@ -16,7 +16,8 @@ use std::{
 ///
 /// Only `stop_time` and `parameters` reach OMC today; see `docs/issues/gui/` for the
 /// issues that wire the remaining fields into `omola-core`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct SimulationSetup {
     pub start_time: f64,
     pub stop_time: f64,
