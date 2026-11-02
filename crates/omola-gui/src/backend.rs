@@ -61,6 +61,11 @@ pub enum Job {
         class: String,
         context: ClassContext,
     },
+    /// Component tree of a class, from `getModelInstance` (G06).
+    LoadInstance {
+        class: String,
+        context: ClassContext,
+    },
     Check {
         class: String,
         context: ClassContext,
@@ -132,10 +137,15 @@ pub enum Event {
     LibraryLoaded(LibrarySpec, Result<LoadedLibrary, String>),
     ClassDoc(String, Result<ClassDoc, String>),
     ClassText(String, Result<String, String>),
+    /// Component tree of a class (empty when the class declares no components).
+    Instance(String, Result<Vec<crate::instance::ComponentNode>, String>),
     SimulationFinished(Box<SimulationOutcome>),
     /// `InstallLibraries` finished (`true` when the Modelica Standard Library is installed).
     LibrariesInstalled(bool),
 }
+
+/// How deep the Component Browser follows the inlined type definitions of a component.
+const INSTANCE_DEPTH: usize = 4;
 
 pub struct Worker {
     jobs: Sender<Job>,
@@ -279,6 +289,25 @@ fn run_job(job: Job, run_dir: &Path, send: &dyn Fn(Event)) {
                 });
             send(Event::ClassText(class, result));
         }
+        Job::LoadInstance { class, context } => {
+            let result = with_user_file(run_dir, &class, &context, |file| {
+                let script = library::instance_script(&class, &context.libraries, file)
+                    .map_err(|e| e.to_string())?;
+                omc.run_query_script(&script)
+                    .map(|out| out.output)
+                    .map_err(|e| e.to_string())
+            })
+            .and_then(|output| {
+                let sections = library::parse_sections(&output);
+                let body = sections
+                    .get("instance")
+                    .ok_or_else(|| format!("OMC returned no instance JSON for {class}"))?;
+                let json = crate::instance::extract_json(body)
+                    .ok_or_else(|| format!("OMC returned no instance JSON for {class}"))?;
+                crate::instance::parse_components(json, INSTANCE_DEPTH)
+            });
+            send(Event::Instance(class, result));
+        }
         Job::Check { class, context } => {
             send(Event::Log(
                 LogTab::Syntax,
@@ -389,6 +418,7 @@ fn fail_job(job: Job, message: String, send: &dyn Fn(Event)) {
         Job::LoadLibrary(spec) => send(Event::LibraryLoaded(spec, Err(message))),
         Job::LoadClassDoc { class, .. } => send(Event::ClassDoc(class, Err(message))),
         Job::LoadClassText { class, .. } => send(Event::ClassText(class, Err(message))),
+        Job::LoadInstance { class, .. } => send(Event::Instance(class, Err(message))),
         Job::Command { text, .. } => send(Event::Command(format!("{text}\n  {message}"))),
         Job::InstallLibraries => send(Event::LibrariesInstalled(false)),
         Job::Doctor | Job::Check { .. } | Job::Simulate { .. } => {}
