@@ -5,17 +5,29 @@
 
 mod app;
 mod backend;
+mod html;
+mod library;
 mod model;
+mod theme;
 mod ui;
 
 use std::path::PathBuf;
 
 fn main() -> eframe::Result {
     let initial_file = std::env::args_os().nth(1).map(PathBuf::from);
+    // OMOLA_WINDOW_SIZE=WIDTHxHEIGHT sets the initial size (used for screenshot comparisons).
+    let size = std::env::var("OMOLA_WINDOW_SIZE")
+        .ok()
+        .and_then(|s| {
+            let (w, h) = s.split_once('x')?;
+            Some([w.trim().parse::<f32>().ok()?, h.trim().parse::<f32>().ok()?])
+        })
+        .unwrap_or([1280.0, 800.0]);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Omola")
-            .with_inner_size([1280.0, 800.0])
+            .with_decorations(!ui::custom_title_bar())
+            .with_inner_size(size)
             .with_min_inner_size([800.0, 500.0]),
         ..Default::default()
     };

@@ -82,6 +82,7 @@ jobs:
             cargo run -p omola -- project validate tests/project-root/project.toml &&
             cargo run -p omola -- project simulate tests/project-root/project.toml --output "target/project root spaces/RootedModel" &&
             omc tests/compat/install-msl.mos &&
+            OMOLA_OMC="$(command -v omc)" cargo test -p omola-gui -- --ignored --test-threads=1 msl_browse_document_and_simulate_with_real_omc &&
             cargo run -p omola -- compat run --manifest tests/compat/manifest.toml --format json > target/compatibility.json &&
             cargo run -p omola -- compat run --manifest tests/compat/manifest.toml --format markdown > target/compatibility.md &&
             cargo run -p omola -- release verify --scorecard target/compatibility.json --manifest tests/compat/manifest.toml --gates docs/release-gates.toml

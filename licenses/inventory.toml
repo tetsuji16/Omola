@@ -655,12 +655,6 @@ license = "MIT OR Apache-2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[cargo_packages]]
-name = "egui_plot"
-version = "0.38.0"
-license = "MIT OR Apache-2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-
-[[cargo_packages]]
 name = "either"
 version = "1.19.0"
 license = "MIT OR Apache-2.0"
@@ -1978,4 +1972,208 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "zune-jpeg"
 version = "0.5.15"
 license = "MIT OR Apache-2.0 OR Zlib"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "arrayref"
+version = "0.3.9"
+license = "BSD-2-Clause"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "base64"
+version = "0.22.1"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "color_quant"
+version = "1.1.0"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "data-url"
+version = "0.3.2"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "egui_extras"
+version = "0.37.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "egui_material_icons"
+version = "0.9.0"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "enum-map"
+version = "3.1.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "enum-map-derive"
+version = "1.0.1"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "float-cmp"
+version = "0.9.0"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "gif"
+version = "0.14.2"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "imagesize"
+version = "0.13.0"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "kurbo"
+version = "0.11.3"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "mime"
+version = "0.3.17"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "mime_guess2"
+version = "2.3.1"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "phf"
+version = "0.11.3"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "phf_generator"
+version = "0.11.3"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "phf_macros"
+version = "0.11.3"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "phf_shared"
+version = "0.11.3"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "pico-args"
+version = "0.5.0"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "png"
+version = "0.17.16"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "rand"
+version = "0.8.8"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "rand_core"
+version = "0.6.4"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "resvg"
+version = "0.45.1"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "rgb"
+version = "0.8.53"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "roxmltree"
+version = "0.20.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "simplecss"
+version = "0.2.2"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "siphasher"
+version = "1.0.4"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "strict-num"
+version = "0.1.1"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "svgtypes"
+version = "0.15.3"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "tiny-skia"
+version = "0.11.4"
+license = "BSD-3-Clause"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "tiny-skia-path"
+version = "0.11.4"
+license = "BSD-3-Clause"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "unicase"
+version = "2.10.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "usvg"
+version = "0.45.1"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "xmlwriter"
+version = "0.1.0"
+license = "MIT"
 source = "registry+https://github.com/rust-lang/crates.io-index"

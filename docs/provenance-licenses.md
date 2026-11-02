@@ -14,6 +14,8 @@ Update policy: Rust dependencies must be updated with Cargo so `Cargo.lock` and 
 
 The `omola-gui` crate (added 2026-11-02) depends on `eframe`/`egui` 0.37 and `egui_plot` 0.38 and brings 268 additional crates into the locked graph, all recorded in `licenses/inventory.toml`. Every recorded license is permissive or offers a permissive choice (MIT, Apache-2.0, Zlib, BSD, ISC, BSL-1.0, Unicode-3.0). Two crates are dual-licensed with a copyleft alternative (`Apache-2.0 OR GPL-2.0-only`, `MIT OR Apache-2.0 OR LGPL-2.1-or-later`); Omola uses the permissive option. `epaint_default_fonts` embeds fonts under OFL-1.1 and the Ubuntu Font Licence 1.0: a distributed `omola-gui` binary must ship those font notices. The GUI copies no Dymola or OMEdit code, icons, or assets; Dymola screenshots are referenced by URL only (`docs/reference/dymola-gui.md`).
 
+Since 2026-11-02 the GUI also uses `egui_extras` with the `image` (PNG/JPEG/GIF) and `resvg` (SVG) loaders to show images in Modelica documentation, and `egui_material_icons` (crate MIT; it embeds the Material Symbols font under Apache-2.0, whose notice a binary distribution must retain). `egui_plot` was removed; the plot is drawn by Omola. User-interface fonts (Segoe UI, Courier New, Liberation, DejaVu, Noto CJK) are read from the operating system at run time and are not bundled. Documentation images are read from the installed library (for example MSL under its BSD-3-Clause license) and are never copied into this repository.
+
 This is a technical inventory, not legal advice. Check exact versions and terms with qualified counsel where needed.
 
 ## Primary sources
