@@ -236,17 +236,21 @@ fn run_job(job: Job, run_dir: &Path, send: &dyn Fn(Event)) {
                 .and_then(|script| omc.run_query_script(&script).map_err(|e| e.to_string()))
                 .and_then(|out| library::parse_library_index(&spec, &out.output));
             match &result {
-                Ok(lib) => send(Event::Log(
-                    LogTab::Version,
-                    LogLevel::Info,
-                    format!(
-                        "Loaded {} {} ({} classes) from {}",
-                        spec.name,
-                        lib.version,
-                        lib.classes.len(),
-                        lib.source_file.display()
-                    ),
-                )),
+                Ok(lib) => {
+                    // Best effort: a read-only cache directory must not fail the load.
+                    let _ = crate::cache::store(&crate::cache::cache_root(), lib);
+                    send(Event::Log(
+                        LogTab::Version,
+                        LogLevel::Info,
+                        format!(
+                            "Loaded {} {} ({} classes) from {}",
+                            spec.name,
+                            lib.version,
+                            lib.classes.len(),
+                            lib.source_file.display()
+                        ),
+                    ))
+                }
                 Err(message) => send(Event::Log(
                     LogTab::Version,
                     LogLevel::Warning,
