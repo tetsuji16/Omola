@@ -191,10 +191,27 @@ Status is `Not measured` until a versioned test corpus and reports exist. Do not
 | Automation API | Curated scripts with observable operation/result equivalence; percentage pass by named function, unsupported functions explicit | No compatibility API |
 | Results | Import/export format, variable/time coverage, units/metadata preservation and numerical tolerance tested separately | No Omola result reader |
 | Numerical behavior | Fixed benchmark set, tolerances and solver settings; report pass rate and error, never infer exact equivalence from format compatibility | No benchmark |
-| GUI/editor | Workflow checklist for package browsing, text/diagram edits, parameter editing, plotting and project reopen | No GUI |
+| GUI/editor | Workflow checklist for package browsing, text/diagram edits, parameter editing, plotting and project reopen | Native egui skeleton: text edit, check/simulate via OMC, variable browser, plot; diagram/library/component views not implemented (see `docs/issues/gui`) |
 | Vendor ecosystem | Per-library license/access/redistribution review and lawful replacement status | Out of scope for initial backend |
 
 Release gates progress from a reproducible OMC-backed CLI, through a published open-library corpus, through measured interoperability subsets, then GUI and expanded workflows. “Full compatibility” is a long-term aspiration and remains unclaimed until every declared target has a published, reproducible result and lawful delivery path.
+
+## Native GUI (egui, experimental)
+
+`crates/omola-gui` is a native desktop workbench built with [egui](https://github.com/emilk/egui). Its layout follows familiar Modelica tools (ribbon tabs, package/variable browsers, edit and plot windows, messages); see [the layout reference](docs/reference/dymola-gui.md). Checking and simulation are delegated to OMC exactly like the CLI, and OpenModelica `.mat` results are read in-process by `omola_core::mat`.
+
+```sh
+cargo run -p omola-gui -- examples/BouncingBall.mo     # needs omc on PATH or OMOLA_OMC
+```
+
+Without OpenModelica you can exercise the UI with a demo result and a stand-in compiler (not a simulation; no compatibility evidence):
+
+```sh
+cargo run -p omola-gui --example demo_mat -- target/demo_res.mat
+OMOLA_FAKE_MAT="$PWD/target/demo_res.mat" OMOLA_OMC="$PWD/scripts/fake-omc.sh" cargo run -p omola-gui -- examples/BouncingBall.mo
+```
+
+Currently implemented: Modelica text editing (the user's file is never modified by a run; each run writes a private copy), class outline, Check, Simulate with stop time and numeric parameter overrides, result retention, variable browser with filter, time plot, Simulation Setup dialog. Graphical diagram/icon editing, library browsing, component browser, documentation rendering and the remaining setup fields are tracked as issues G01–G14 in [`docs/issues/gui`](docs/issues/gui/README.md). Screenshots: [`docs/images/omola-gui`](docs/images/omola-gui).
 
 ## Plan and issue queue
 

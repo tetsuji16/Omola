@@ -1,6 +1,8 @@
 //! Process boundary around an installed OpenModelica Compiler (OMC).
 //! Modelica parsing, translation, and simulation remain the external backend's job.
 
+pub mod mat;
+
 use std::{
     env,
     ffi::OsString,

@@ -371,3 +371,1611 @@ license = "OSMC Public License 1.8 (upstream repository)"
 distribution = "GitHub-hosted Windows OMC CI action; not included in Omola binaries. Pinned to an immutable upstream commit."
 
 
+
+[[cargo_packages]]
+name = "accesskit"
+version = "0.25.2"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "ahash"
+version = "0.8.12"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "android-activity"
+version = "0.6.1"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "android-properties"
+version = "0.2.2"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "arboard"
+version = "3.7.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "arrayvec"
+version = "0.7.8"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "as-raw-xcb-connection"
+version = "1.0.1"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "atomic-waker"
+version = "1.1.2"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "autocfg"
+version = "1.5.1"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "bit-set"
+version = "0.10.0"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "bit-vec"
+version = "0.9.1"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "bitflags"
+version = "1.3.2"
+license = "MIT/Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "bitflags"
+version = "2.13.2"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "block2"
+version = "0.5.1"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "block2"
+version = "0.6.2"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "bytemuck"
+version = "1.25.2"
+license = "Zlib OR Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "bytemuck_derive"
+version = "1.12.1"
+license = "Zlib OR Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "byteorder-lite"
+version = "0.1.0"
+license = "Unlicense OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "bytes"
+version = "1.12.1"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "calloop"
+version = "0.13.0"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "calloop-wayland-source"
+version = "0.3.0"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "cc"
+version = "1.10.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "cfg_aliases"
+version = "0.2.2"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "cgl"
+version = "0.3.2"
+license = "MIT / Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "clipboard-win"
+version = "5.4.3"
+license = "BSL-1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "codespan-reporting"
+version = "0.13.1"
+license = "Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "color"
+version = "0.3.3"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "combine"
+version = "4.6.9"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "concurrent-queue"
+version = "2.5.0"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "core-foundation"
+version = "0.9.4"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "core-foundation-sys"
+version = "0.8.7"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "core-graphics"
+version = "0.23.2"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "core-graphics-types"
+version = "0.1.3"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "crunchy"
+version = "0.2.4"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "cursor-icon"
+version = "1.2.0"
+license = "MIT OR Apache-2.0 OR Zlib"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "dispatch"
+version = "0.2.0"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "dispatch2"
+version = "0.3.1"
+license = "Zlib OR Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "dlib"
+version = "0.5.3"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "document-features"
+version = "0.2.12"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "downcast-rs"
+version = "1.2.1"
+license = "MIT/Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "dpi"
+version = "0.1.2"
+license = "Apache-2.0 AND MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "ecolor"
+version = "0.37.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "eframe"
+version = "0.37.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "egui"
+version = "0.37.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "egui-wgpu"
+version = "0.37.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "egui-winit"
+version = "0.37.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "egui_glow"
+version = "0.37.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "egui_plot"
+version = "0.38.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "either"
+version = "1.19.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "emath"
+version = "0.37.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "epaint"
+version = "0.37.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "epaint_default_fonts"
+version = "0.37.0"
+license = "(MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "errno"
+version = "0.3.14"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "error-code"
+version = "3.4.0"
+license = "BSL-1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "euclid"
+version = "0.22.14"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "fax"
+version = "0.2.7"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "fdeflate"
+version = "0.3.7"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "fearless_simd"
+version = "0.4.1"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "find-msvc-tools"
+version = "0.1.15"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "fixedbitset"
+version = "0.5.7"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "foldhash"
+version = "0.1.5"
+license = "Zlib"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "foldhash"
+version = "0.2.0"
+license = "Zlib"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "font-types"
+version = "0.12.7"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "foreign-types"
+version = "0.5.0"
+license = "MIT/Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "foreign-types-macros"
+version = "0.2.4"
+license = "MIT/Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "foreign-types-shared"
+version = "0.3.1"
+license = "MIT/Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "futures-core"
+version = "0.3.34"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "futures-task"
+version = "0.3.34"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "futures-util"
+version = "0.3.34"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "gethostname"
+version = "1.1.0"
+license = "Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "getrandom"
+version = "0.3.4"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "getrandom"
+version = "0.4.3"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "gl_generator"
+version = "0.14.0"
+license = "Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "glifo"
+version = "0.3.0"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "glow"
+version = "0.17.0"
+license = "MIT OR Apache-2.0 OR Zlib"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "glutin"
+version = "0.32.3"
+license = "Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "glutin-winit"
+version = "0.5.0"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "glutin_egl_sys"
+version = "0.7.1"
+license = "Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "glutin_glx_sys"
+version = "0.6.1"
+license = "Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "glutin_wgl_sys"
+version = "0.6.1"
+license = "Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "guillotiere"
+version = "0.7.0"
+license = "MIT/Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "half"
+version = "2.7.1"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "harfrust"
+version = "0.12.0"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "hashbrown"
+version = "0.15.5"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "hermit-abi"
+version = "0.5.3"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "image"
+version = "0.25.10"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "itertools"
+version = "0.15.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "jni"
+version = "0.22.4"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "jni-macros"
+version = "0.22.4"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "jni-sys"
+version = "0.3.1"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "jni-sys"
+version = "0.4.1"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "jni-sys-macros"
+version = "0.4.1"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "jobserver"
+version = "0.1.35"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "js-sys"
+version = "0.3.107"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "khronos_api"
+version = "3.1.0"
+license = "Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "kurbo"
+version = "0.13.1"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "libloading"
+version = "0.8.9"
+license = "ISC"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "libm"
+version = "0.2.16"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "libredox"
+version = "0.1.25"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "linebender_resource_handle"
+version = "0.1.1"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "linux-raw-sys"
+version = "0.12.1"
+license = "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "linux-raw-sys"
+version = "0.4.15"
+license = "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "litrs"
+version = "1.0.1"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "lock_api"
+version = "0.4.14"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "memmap2"
+version = "0.9.12"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "miniz_oxide"
+version = "0.8.9"
+license = "MIT OR Zlib OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "moxcms"
+version = "0.8.1"
+license = "BSD-3-Clause OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "naga"
+version = "30.0.1"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "naga-types"
+version = "30.0.1"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "ndk"
+version = "0.9.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "ndk-context"
+version = "0.1.1"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "ndk-sys"
+version = "0.6.0+11769913"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "nohash-hasher"
+version = "0.2.0"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "nom"
+version = "8.0.0"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "num-traits"
+version = "0.2.19"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "num_enum"
+version = "0.7.6"
+license = "BSD-3-Clause OR MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "num_enum_derive"
+version = "0.7.6"
+license = "BSD-3-Clause OR MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "objc-sys"
+version = "0.3.5"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "objc2"
+version = "0.5.3"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "objc2"
+version = "0.6.5"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "objc2-app-kit"
+version = "0.2.2"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "objc2-app-kit"
+version = "0.3.2"
+license = "Zlib OR Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "objc2-cloud-kit"
+version = "0.2.2"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "objc2-contacts"
+version = "0.2.2"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "objc2-core-data"
+version = "0.2.2"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "objc2-core-foundation"
+version = "0.3.2"
+license = "Zlib OR Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "objc2-core-graphics"
+version = "0.3.2"
+license = "Zlib OR Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "objc2-core-image"
+version = "0.2.2"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "objc2-core-location"
+version = "0.2.2"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "objc2-encode"
+version = "4.1.0"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "objc2-foundation"
+version = "0.2.2"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "objc2-foundation"
+version = "0.3.2"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "objc2-io-surface"
+version = "0.3.2"
+license = "Zlib OR Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "objc2-link-presentation"
+version = "0.2.2"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "objc2-metal"
+version = "0.2.2"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "objc2-quartz-core"
+version = "0.2.2"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "objc2-symbols"
+version = "0.2.2"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "objc2-ui-kit"
+version = "0.2.2"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "objc2-ui-kit"
+version = "0.3.2"
+license = "Zlib OR Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "objc2-uniform-type-identifiers"
+version = "0.2.2"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "objc2-user-notifications"
+version = "0.2.2"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "once_cell"
+version = "1.21.4"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "orbclient"
+version = "0.3.55"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "os_pipe"
+version = "1.2.3"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "parking_lot"
+version = "0.12.5"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "parking_lot_core"
+version = "0.9.12"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "peniko"
+version = "0.6.1"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "percent-encoding"
+version = "2.3.2"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "petgraph"
+version = "0.8.3"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "pin-project"
+version = "1.1.13"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "pin-project-internal"
+version = "1.1.13"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "pin-project-lite"
+version = "0.2.17"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "pkg-config"
+version = "0.3.34"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "plain"
+version = "0.2.3"
+license = "MIT/Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "png"
+version = "0.18.1"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "polling"
+version = "3.11.0"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "polycool"
+version = "0.4.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "portable-atomic"
+version = "1.15.0"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "portable-atomic-util"
+version = "0.2.8"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "proc-macro-crate"
+version = "3.5.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "profiling"
+version = "1.0.18"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "pxfm"
+version = "0.1.30"
+license = "BSD-3-Clause OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "quick-error"
+version = "2.0.1"
+license = "MIT/Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "quick-xml"
+version = "0.41.0"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "r-efi"
+version = "5.3.0"
+license = "MIT OR Apache-2.0 OR LGPL-2.1-or-later"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "r-efi"
+version = "6.0.0"
+license = "MIT OR Apache-2.0 OR LGPL-2.1-or-later"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "raw-window-handle"
+version = "0.6.2"
+license = "MIT OR Apache-2.0 OR Zlib"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "read-fonts"
+version = "0.41.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "redox_syscall"
+version = "0.4.1"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "redox_syscall"
+version = "0.5.18"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "redox_syscall"
+version = "0.9.5"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "renderdoc-sys"
+version = "1.1.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "rustc-hash"
+version = "1.1.0"
+license = "Apache-2.0/MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "rustc-hash"
+version = "2.1.3"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "rustc_version"
+version = "0.4.1"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "rustix"
+version = "0.38.44"
+license = "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "rustix"
+version = "1.1.6"
+license = "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "rustversion"
+version = "1.0.23"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "same-file"
+version = "1.0.6"
+license = "Unlicense/MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "scoped-tls"
+version = "1.0.1"
+license = "MIT/Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "scopeguard"
+version = "1.2.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "self_cell"
+version = "1.3.0"
+license = "Apache-2.0 OR GPL-2.0-only"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "semver"
+version = "1.0.28"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "send_wrapper"
+version = "0.6.0"
+license = "MIT/Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "shlex"
+version = "2.0.1"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "simd_cesu8"
+version = "1.2.0"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "simdutf8"
+version = "0.1.5"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "skrifa"
+version = "0.44.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "slab"
+version = "0.4.12"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "slotmap"
+version = "1.1.1"
+license = "Zlib"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "smallvec"
+version = "1.16.4"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "smithay-client-toolkit"
+version = "0.19.2"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "smol_str"
+version = "0.2.2"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "static_assertions"
+version = "1.1.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "syn"
+version = "2.0.119"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "thiserror"
+version = "1.0.69"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "thiserror-impl"
+version = "1.0.69"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "tiff"
+version = "0.11.3"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "tokio"
+version = "1.54.1"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "toml_datetime"
+version = "1.1.2+spec-1.1.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "toml_edit"
+version = "0.25.17+spec-1.1.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "toml_parser"
+version = "1.1.5+spec-1.1.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "tracing"
+version = "0.1.44"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "tracing-core"
+version = "0.1.36"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "tree_magic_mini"
+version = "3.2.2"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "type-map"
+version = "0.5.1"
+license = "MIT/Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "unicode-general-category"
+version = "1.1.0"
+license = "Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "unicode-properties"
+version = "0.1.5"
+license = "(MIT OR Apache-2.0) AND Unicode-3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "unicode-segmentation"
+version = "1.13.3"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "unicode-width"
+version = "0.2.3"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "uuid"
+version = "1.29.0"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "vello_common"
+version = "0.2.0"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "vello_cpu"
+version = "0.2.0"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "walkdir"
+version = "2.5.0"
+license = "Unlicense/MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "wasip2"
+version = "1.0.4+wasi-0.2.12"
+license = "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "wasm-bindgen"
+version = "0.2.130"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "wasm-bindgen-futures"
+version = "0.4.80"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "wasm-bindgen-macro"
+version = "0.2.130"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "wasm-bindgen-macro-support"
+version = "0.2.130"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "wasm-bindgen-shared"
+version = "0.2.130"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "wayland-backend"
+version = "0.3.17"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "wayland-client"
+version = "0.31.15"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "wayland-csd-frame"
+version = "0.3.0"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "wayland-cursor"
+version = "0.31.14"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "wayland-protocols"
+version = "0.32.13"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "wayland-protocols-plasma"
+version = "0.3.12"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "wayland-protocols-wlr"
+version = "0.3.12"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "wayland-scanner"
+version = "0.31.11"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "wayland-sys"
+version = "0.31.11"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "web-sys"
+version = "0.3.107"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "web-time"
+version = "1.1.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "weezl"
+version = "0.1.12"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "wgpu"
+version = "30.0.1"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "wgpu-core"
+version = "30.0.1"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "wgpu-core-deps-windows-linux-android"
+version = "30.0.1"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "wgpu-hal"
+version = "30.0.1"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "wgpu-naga-bridge"
+version = "30.0.1"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "wgpu-types"
+version = "30.0.1"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "winapi-util"
+version = "0.1.11"
+license = "Unlicense OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "windows-link"
+version = "0.2.1"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "windows-sys"
+version = "0.52.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "windows-sys"
+version = "0.59.0"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "windows-sys"
+version = "0.61.2"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "windows-targets"
+version = "0.52.6"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "windows_aarch64_gnullvm"
+version = "0.52.6"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "windows_aarch64_msvc"
+version = "0.52.6"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "windows_i686_gnu"
+version = "0.52.6"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "windows_i686_gnullvm"
+version = "0.52.6"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "windows_i686_msvc"
+version = "0.52.6"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "windows_x86_64_gnu"
+version = "0.52.6"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "windows_x86_64_gnullvm"
+version = "0.52.6"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "windows_x86_64_msvc"
+version = "0.52.6"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "winit"
+version = "0.30.13"
+license = "Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "winnow"
+version = "1.0.4"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "wit-bindgen"
+version = "0.57.1"
+license = "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "wl-clipboard-rs"
+version = "0.9.5"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "x11-dl"
+version = "2.21.0"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "x11rb"
+version = "0.13.2"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "x11rb-protocol"
+version = "0.13.2"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "xcursor"
+version = "0.3.11"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "xkbcommon-dl"
+version = "0.4.2"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "xkeysym"
+version = "0.2.1"
+license = "MIT OR Apache-2.0 OR Zlib"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "xml-rs"
+version = "0.8.29"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "zerocopy"
+version = "0.8.63"
+license = "BSD-2-Clause OR Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "zerocopy-derive"
+version = "0.8.63"
+license = "BSD-2-Clause OR Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "zlib-rs"
+version = "0.6.8"
+license = "Zlib"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "zune-core"
+version = "0.5.3"
+license = "MIT OR Apache-2.0 OR Zlib"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "zune-jpeg"
+version = "0.5.15"
+license = "MIT OR Apache-2.0 OR Zlib"
+source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,0 +1,117 @@
+# Omola ネイティブ GUI(egui)issue 一覧と共通ルール
+
+`crates/omola-gui` の残作業を、小さく独立した issue に分けたものです。
+**各 issue に着手する前に、このファイルを最後まで読んでください。** 各 issue 本文はこのファイルのルールを前提にしています。
+
+## 0. 方針(2026-11-02 決定)
+
+- Omola の GUI は **Rust + egui(eframe 0.37, egui_plot 0.38)のネイティブアプリ**として作ります。
+  以前の「OMEdit を改造する」方針(`docs/gui-roadmap.md`)は、この決定で置き換えました。OMEdit 連携の CLI コマンドは残しますが、新規 GUI 機能は `omola-gui` に実装します。
+- **計算(構文チェック・翻訳・シミュレーション)は OpenModelica の `omc` に委譲**します。Rust でソルバや Modelica コンパイラを書いてはいけません(README の Architecture 節)。
+- 画面構成は `docs/reference/dymola-gui.md` を参照。**Dymola の画像・アイコン・文言はコピー禁止。**
+- 「Dymola 互換」と書いてはいけません。測定していない機能を「対応済み」と書いてはいけません。
+
+## 1. コードの地図
+
+```
+crates/omola-core/src/lib.rs     OMC プロセス境界(Omc::discover, check_model, simulate_project_model_with_parameters, run_script)
+crates/omola-core/src/mat.rs     OpenModelica .mat(v4, binTrans/binNormal)リーダ/ライタ。std のみ
+crates/omola-gui/src/main.rs     起動(eframe::run_native)
+crates/omola-gui/src/app.rs      OmolaApp の状態、毎フレームのレイアウト、結果の保持(add_run)
+crates/omola-gui/src/backend.rs  ワーカースレッド。Job を受けて OMC を呼び、Event を返す
+crates/omola-gui/src/model.rs    Document(開いた .mo)と、クラス一覧の簡易スキャナ(表示用。パーサではない)
+crates/omola-gui/src/ui/chrome.rs    メニュー、リボン、ステータスバー、Messages
+crates/omola-gui/src/ui/browsers.rs  Package/Component Browser、Variable Browser
+crates/omola-gui/src/ui/views.rs     編集ウィンドウ(各層)、プロット
+crates/omola-gui/src/ui/dialogs.rs   Simulation Setup、パス入力ダイアログ
+crates/omola-gui/examples/demo_mat.rs  OMC なしで GUI を試すためのデモ結果生成
+scripts/fake-omc.sh              開発用の偽 omc(.mat をコピーするだけ)
+scripts/gui-screenshot.sh        Xvfb でヘッドレス起動してスクリーンショット
+```
+
+データの流れ: UI → `Worker::submit(Job)` → ワーカースレッドで `omola_core::Omc` → `Event` → `OmolaApp::handle_events()`(毎フレーム)。
+**UI スレッドから OMC を直接呼んではいけません**(画面が固まります)。新しい OMC 呼び出しは必ず `backend.rs` に `Job` と `Event` を追加して行います。
+
+## 2. 必ず実行するコマンド(全 issue 共通の受け入れ条件)
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+cargo run -p omola -- licenses check      # 依存クレートを追加・更新したときは必須
+git diff --check
+```
+
+5 つすべて成功しない PR はマージしません。
+
+## 3. OMC なしで GUI を動かす方法
+
+```sh
+cargo run -p omola-gui --example demo_mat -- target/demo_res.mat
+OMOLA_FAKE_MAT="$PWD/target/demo_res.mat" OMOLA_OMC="$PWD/scripts/fake-omc.sh" \
+  cargo run -p omola-gui -- examples/BouncingBall.mo
+```
+
+Windows PowerShell では fake-omc.sh は動きません。WSL か Docker の開発コンテナを使うか、本物の OpenModelica を入れて `OMOLA_OMC` に `omc.exe` を設定してください。
+
+本物の OMC がある場合: `OMOLA_OMC=/path/to/omc cargo run -p omola-gui -- examples/BouncingBall.mo`。
+開発コンテナ(`.devcontainer/Dockerfile`)には OMC 1.27.1 が入っています。
+
+ヘッドレスでスクリーンショット(Linux, Xvfb と ImageMagick が必要):
+
+```sh
+pip install python-xlib
+scripts/gui-screenshot.sh target/shot.png click:283,37 sleep:1
+```
+
+座標は 1280x800 の画面上のピクセル。既定レイアウトでの目安: リボンのタブ Graphics(41,37) Documentation(135,37) Text(217,37) Simulation(283,37) Tools(354,37)。
+UI の見た目を変える issue では、**変更後のスクリーンショットを PR に添付**してください(画像はリポジトリにコミットしない。`docs/images/omola-gui/` の既存画像を更新する場合のみコミット可)。
+
+## 4. egui 0.37 の書き方メモ(古い記事のコードは動きません)
+
+- アプリのトレイトは `fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame)`(`update(ctx, ..)` ではない)。
+- パネルは `egui::Panel::left("id")`, `Panel::right`, `Panel::top`, `Panel::bottom` + `.show(ui, |ui| ...)`。
+  `SidePanel` / `TopBottomPanel` / `show_inside` は使わない。サイズは `.default_size(260.0)`、リサイズは `.resizable(true)`。
+- 中央は `egui::CentralPanel::default().show(ui, |ui| ...)`。**パネルはすべて CentralPanel より前に出す。**
+- ウィンドウ(ダイアログ)は `egui::Window::new("title").open(&mut bool).show(ui.ctx(), |ui| ...)`。
+- メニューは `egui::MenuBar::new().ui(ui, |ui| { ui.menu_button("File", |ui| { ... }); })`。
+- プロット: `egui_plot::Plot::new("id").legend(Legend::default()).show(ui, |p| p.line(Line::new("name", PlotPoints::from(vec_of_[x, y]))))`。
+- 既定フォントには絵文字/記号が一部しかありません。ボタン文字に絵文字(▶ ✔ 💾 等)を使うと豆腐(□)になるので、**ASCII の文字だけ**を使ってください。
+- API が分からないときは `~/.cargo/registry/src/*/egui-0.37.0/src/` を grep して確認する。推測で書かない。
+
+## 5. 依存クレートを追加するとき
+
+1. `crates/omola-gui/Cargo.toml` に追加し、`cargo build` で `Cargo.lock` を更新。
+2. `cargo run -p omola -- licenses check` が「unrecorded crate」を列挙するので、`licenses/inventory.toml` の末尾に
+   `[[cargo_packages]]` ブロック(name / version / license / source)を **cargo metadata の値そのまま**で追加。
+   `cargo metadata --format-version 1 --locked` の `packages[].license` を使う。手で推測しない。
+3. GPL/AGPL/LGPL **のみ**のライセンスのクレートは追加禁止(`MIT OR ...` のように選択肢があれば可)。迷ったら追加せず PR で質問。
+4. `docs/provenance-licenses.md` の「Native GUI」節に 1 行追記。
+
+## 6. issue 一覧(依存順)
+
+| ID | タイトル | 難易度 | 依存 |
+|---|---|---|---|
+| [G01](G01-real-omc-integration-test.md) | 実 OMC で GUI バックエンドを通す結合テストを CI に追加 | 易 | — |
+| [G02](G02-persist-settings.md) | 設定・最後に開いたファイルの保存と復元 | 易 | — |
+| [G03](G03-native-file-dialogs.md) | ネイティブのファイルダイアログと「最近使ったファイル」 | 易 | — |
+| [G04](G04-library-package-browser.md) | MSL などのライブラリ読み込みと Package Browser の木表示 | 中 | G01 |
+| [G05](G05-full-simulation-setup.md) | Simulation Setup の全項目を OMC に渡す + experiment 注釈の読み込み | 中 | G01 |
+| [G06](G06-component-browser.md) | Component Browser(getModelInstance の JSON を使う) | 中 | G01 |
+| [G07](G07-icon-layer-rendering.md) | Icon 層の描画(グラフィックス注釈の読み取り専用レンダリング) | 中〜難 | G06 |
+| [G08](G08-documentation-layer.md) | Documentation 層の表示 | 易 | G01 |
+| [G09](G09-variable-browser-tree.md) | Variable Browser の木構造化・パラメータ編集から再シミュレーション | 中 | — |
+| [G10](G10-plot-window.md) | プロット強化(複数ダイアグラム・カーソル・CSV 出力) | 中 | — |
+| [G11](G11-text-editor.md) | テキストエディタ(シンタックスハイライト・行番号・エラー行ジャンプ) | 中 | — |
+| [G12](G12-diagram-layer-readonly.md) | Diagram 層の読み取り専用表示(部品配置と結線) | 難 | G06, G07 |
+| [G13](G13-cancel-simulation.md) | 実行中のシミュレーションの中断 | 中 | — |
+| [G14](G14-result-management.md) | 結果の読み込み・保持/破棄・エクスポート | 易 | — |
+
+並行して進めてよいもの: G02, G03, G09, G10, G11, G13, G14 は互いに独立。
+**同じファイルを触る issue を同時に進めると衝突します。** PR は小さく、1 issue = 1 PR にしてください。
+
+## 7. PR の書き方
+
+- タイトル: `GUI G0X: <issue タイトル>`
+- 本文: 何を変えたか / 受け入れ条件のチェックリスト(すべてに [x] と根拠)/ 実行したコマンドと結果 / スクリーンショット(UI 変更時)/ 未対応のこと
+- 実 OMC で確認していない場合は「fake-omc でのみ確認」と**明記**する。

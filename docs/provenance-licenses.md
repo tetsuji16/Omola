@@ -10,6 +10,10 @@ CI action references are recorded with their upstream repository and declared li
 
 Update policy: Rust dependencies must be updated with Cargo so `Cargo.lock` and this exact-version/license/source ledger change together; CI checks the resolved graph, not just direct manifest declarations. Changes to OMC image tags, installed OS packages, rustup channel, optional MSL pins, or workflow actions require reviewing the upstream source and current license, updating this inventory, and rerunning the license check. Container OS packages currently inherit versions from the upstream image repositories and are not individually pinned; the image is development-only. Action SHA pinning and a fully version-pinned container toolchain remain explicit hardening follow-ups.
 
+### Native GUI (`omola-gui`, egui)
+
+The `omola-gui` crate (added 2026-11-02) depends on `eframe`/`egui` 0.37 and `egui_plot` 0.38 and brings 268 additional crates into the locked graph, all recorded in `licenses/inventory.toml`. Every recorded license is permissive or offers a permissive choice (MIT, Apache-2.0, Zlib, BSD, ISC, BSL-1.0, Unicode-3.0). Two crates are dual-licensed with a copyleft alternative (`Apache-2.0 OR GPL-2.0-only`, `MIT OR Apache-2.0 OR LGPL-2.1-or-later`); Omola uses the permissive option. `epaint_default_fonts` embeds fonts under OFL-1.1 and the Ubuntu Font Licence 1.0: a distributed `omola-gui` binary must ship those font notices. The GUI copies no Dymola or OMEdit code, icons, or assets; Dymola screenshots are referenced by URL only (`docs/reference/dymola-gui.md`).
+
 This is a technical inventory, not legal advice. Check exact versions and terms with qualified counsel where needed.
 
 ## Primary sources

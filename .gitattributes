@@ -1,3 +1,4 @@
 .devcontainer/*.sh text eol=lf
 .devcontainer/Dockerfile.omedit text eol=lf
 .devcontainer/docker-compose.omedit.yml text eol=lf
+scripts/*.sh text eol=lf

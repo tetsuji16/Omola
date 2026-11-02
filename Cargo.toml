@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/omola-core", "crates/omola-cli"]
+members = ["crates/omola-core", "crates/omola-cli", "crates/omola-gui"]
 resolver = "2"
 
 [workspace.package]
