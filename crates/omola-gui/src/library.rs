@@ -326,6 +326,33 @@ pub fn instance_script(
     Ok(script)
 }
 
+/// Script printing `getModelInstanceAnnotation(CLASS, {"Icon"})` as JSON (G07).
+///
+/// Only the Icon annotation is asked for: the answer is a few KB instead of the ~75 KB of
+/// a full `getModelInstance`, and OMC still nests the inherited annotations of the
+/// `extends` chain into it (see `docs/omc-model-instance-json.md`).
+pub fn icon_script(
+    class: &str,
+    libraries: &[LibrarySpec],
+    user_file: Option<&Path>,
+) -> Result<String, BackendError> {
+    validate_class_name(class)?;
+    let mut script = String::new();
+    for (i, spec) in libraries.iter().enumerate() {
+        script.push_str(&load_statement(spec, &format!("omolaLib{i}"))?);
+    }
+    if let Some(file) = user_file {
+        script.push_str(&format!(
+            "omolaUser := loadFile(\"{}\");\n",
+            escape_modelica_string(&file.to_string_lossy())
+        ));
+    }
+    script.push_str(&format!(
+        "print(\"OMOLA_BEGIN icon\\n\" + getModelInstanceAnnotation({class}, {{\"Icon\"}}) + \"\\nOMOLA_END icon\\n\");\n"
+    ));
+    Ok(script)
+}
+
 /// Script running `checkModel` on a class from loaded libraries and/or a user file.
 pub fn check_script(
     class: &str,
@@ -507,6 +534,20 @@ mod tests {
         let s = parse_sections("x\nOMOLA_BEGIN info\n<p>Error: a\n\"b\"</p>\nOMOLA_END info\nOMOLA_BEGIN comment\n\nOMOLA_END comment\n");
         assert_eq!(s["info"], "<p>Error: a\n\"b\"</p>");
         assert_eq!(s["comment"], "");
+    }
+
+    #[test]
+    fn icon_script_asks_for_the_icon_annotation_only() {
+        let script = icon_script("Modelica.Blocks.Continuous.FirstOrder", &[msl()], None).unwrap();
+        assert!(script.contains("loadModel(Modelica, {\"4.1.0\"})"));
+        assert!(script.contains(
+            "getModelInstanceAnnotation(Modelica.Blocks.Continuous.FirstOrder, {\"Icon\"})"
+        ));
+        assert!(script.contains("OMOLA_BEGIN icon"));
+        // The user file is loaded after the libraries, like the other scripts.
+        let with_file = icon_script("M", &[], Some(Path::new("/tmp/M.mo"))).unwrap();
+        assert!(with_file.contains("loadFile(\"/tmp/M.mo\")"));
+        assert!(icon_script("A\"); system(\"x", &[], None).is_err());
     }
 
     #[test]

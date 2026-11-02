@@ -121,7 +121,8 @@
 | Component Browser | 同上 | 選択クラスのみ(部品階層は G06) |
 | Documentation 層 | `ui/doc_view.rs` + `html.rs` | HTML 描画(見出し・太字・リンク・リスト・表・画像 SVG/PNG)、Info Source / Revision Source、検索ハイライト、Package Content 表、`modelica://` リンク移動 |
 | Text 層 | `ui/views.rs` | ユーザーモデルは編集可、ライブラリのクラスは `list()` を読み取り専用表示 |
-| Diagram / Icon 層 | 同上 | 座標系グリッドのみ(G07 / G12) |
+| Icon 層 | 同上 + `graphics.rs` | `annotation(Icon(graphics={...}))` を描画(Line/Polygon/Rectangle/Ellipse/Text、origin と rotation、線種、`%name`)。編集は不可 |
+| Diagram 層 | 同上 | 座標系グリッドのみ(G12) |
 | Simulation | `backend.rs` | ライブラリのクラス(例: `Modelica.Blocks.Examples.PID_Controller`)とユーザーモデルを OMC で実行。experiment 注釈の StopTime を反映 |
 | Variable Browser | `ui/browsers.rs` | 宣言順の並び、Value/Unit/Description、パラメータと状態の初期値を編集して次の実行に反映 |
 | プロット | `ui/views.rs` | 自前描画(ドラッグでズーム、ダブルクリックで戻す、ホバーで値) |
