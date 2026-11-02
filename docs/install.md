@@ -6,7 +6,7 @@ Omola はチェック・シミュレーション・ライブラリ照会を **Op
 | OS | コマンド(リポジトリのルートで実行) | 導入される OpenModelica |
 |---|---|---|
 | Windows 10/11 (x64) | `powershell -ExecutionPolicy Bypass -File scripts\setup-windows.ps1` | 公式インストーラ v1.27.1(`C:\Program Files\OpenModelica1.27.1-64bit`) |
-| Debian / Ubuntu | `scripts/setup-linux.sh` | 公式 apt リポジトリ `build.openmodelica.org/apt`(1.27.1 があれば固定、なければ stable の `omc`) |
+| Debian / Ubuntu | `scripts/setup-linux.sh` | 公式 apt リポジトリ `build.openmodelica.org/apt`(1.27.1 があれば固定、なければ stable の `omc`。2026-11-02 時点の Ubuntu 24.04 では 1.27.2) |
 | macOS / Docker | `scripts/setup-docker.sh` | 固定イメージ `openmodelica/openmodelica:v1.27.1-minimal` を元にした `.devcontainer/Dockerfile` |
 
 終わったら、ワークベンチを起動します。
@@ -21,7 +21,7 @@ target/release/omola-gui examples/Pendulum.mo
 ## スクリプトが行うこと
 
 1. **OpenModelica の導入**(すでに `omc` が見つかる場合は省略)
-   - Windows: `https://build.openmodelica.org/omc/builds/windows/releases/1.27/1/64bit/OpenModelica-v1.27.1-64bit.exe` を取得し、署名を表示してから `/S` でサイレントインストールします。管理者権限が必要なので、UAC の確認が出ます。見つかった `omc.exe` をユーザー環境変数 `OMOLA_OMC` に保存します。
+   - Windows: `https://build.openmodelica.org/omc/builds/windows/releases/1.27/1/64bit/OpenModelica-v1.27.1-64bit.exe` を取得し、Authenticode 署名が有効で署名者が Open Source Modelica Consortium であることを確認してから(違えば中止。`-AllowUnsignedInstaller` で無視)、`/S` でサイレントインストールします。管理者権限が必要なので、UAC の確認が出ます。見つかった `omc.exe` をユーザー環境変数 `OMOLA_OMC` に保存します。
    - Debian/Ubuntu: 公式の鍵(`https://build.openmodelica.org/apt/openmodelica.asc`)と apt ソースを登録し、`omc` と C コンパイラ(`build-essential`)を入れます。`sudo` を使います。
    - Docker: イメージをビルドし、`scripts/omc-docker.sh` を `omc` の代わりに使います。ホーム・一時フォルダ・カレントフォルダを同じパスでマウントするので、Omola からは普通の `omc` に見えます。
 2. **Modelica ライブラリ**: `omc scripts/install-libraries.mos` で、OpenModelica のパッケージマネージャから Modelica 4.1.0(必須)と ModelicaReference(任意)を入れます。保存先は `~/.openmodelica/libraries` です(Docker の場合はボリューム `omola-omc-home`)。
@@ -30,7 +30,7 @@ target/release/omola-gui examples/Pendulum.mo
 
 オプションは次のとおりです。
 
-- Windows: `-SkipOmc` / `-SkipLibraries` / `-SkipBuild` / `-Version 1.27.1`
+- Windows: `-SkipOmc` / `-SkipLibraries` / `-SkipBuild` / `-Version 1.27.1` / `-AllowUnsignedInstaller`
 - Linux: `--skip-omc` / `--skip-libraries` / `--skip-build` / `--no-rust`、および環境変数 `OMOLA_OM_VERSION`
 - Docker: `--skip-build` / `--no-rust`
 

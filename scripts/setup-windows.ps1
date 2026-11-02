@@ -9,7 +9,8 @@
   powershell -ExecutionPolicy Bypass -File scripts\setup-windows.ps1 -SkipBuild
 
 .NOTES
-  The OpenModelica installer needs administrator rights; Windows asks for confirmation
+  The installer must carry a valid Authenticode signature of the Open Source Modelica
+  Consortium (override with -AllowUnsignedInstaller). It needs administrator rights; Windows asks for confirmation
   (UAC) when the script is not already elevated. OMOLA_OMC is stored as a user
   environment variable so Omola finds the compiler in new terminals.
 #>
@@ -17,7 +18,8 @@ param(
     [string]$Version = "1.27.1",
     [switch]$SkipOmc,
     [switch]$SkipLibraries,
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$AllowUnsignedInstaller
 )
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
@@ -55,6 +57,11 @@ if (-not $omc -and -not $SkipOmc) {
     }
     $signature = Get-AuthenticodeSignature $installer
     Write-Host "Installer signature: $($signature.Status) $($signature.SignerCertificate.Subject)"
+    $trusted = $signature.Status -eq "Valid" -and $signature.SignerCertificate.Subject -match "OPEN SOURCE MODELICA CONSORTIUM"
+    if (-not $trusted -and -not $AllowUnsignedInstaller) {
+        Remove-Item $installer -ErrorAction SilentlyContinue
+        throw "The installer is not validly signed by the Open Source Modelica Consortium. Re-run with -AllowUnsignedInstaller only if you trust the download."
+    }
     Step "Running the OpenModelica installer silently (administrator rights required)"
     $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
         [Security.Principal.WindowsBuiltInRole]::Administrator)
