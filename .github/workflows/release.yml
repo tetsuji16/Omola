@@ -1,0 +1,78 @@
+name: Release
+
+# Build omola + omola-gui for Windows, Linux and macOS and package them with the setup
+# scripts, examples and license notices. Runs manually (artifacts only) or on a `v*` tag
+# (also attaches the archives to a GitHub release). OpenModelica is not bundled: the setup
+# scripts install it from the official OpenModelica sources.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows-x86_64
+          - os: ubuntu-latest
+            name: linux-x86_64
+          - os: macos-latest
+            name: macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        run: cargo build --locked --release -p omola -p omola-gui
+      - name: Third-party license inventory
+        run: cargo run --locked -p omola -- licenses check --output target/THIRD_PARTY_LICENSES.md
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkg="omola-${{ matrix.name }}"
+          mkdir -p "dist/$pkg/bin"
+          ext=""
+          if [ "${{ runner.os }}" = "Windows" ]; then ext=".exe"; fi
+          cp "target/release/omola$ext" "target/release/omola-gui$ext" "dist/$pkg/bin/"
+          cp -R scripts examples licenses "dist/$pkg/"
+          mkdir -p "dist/$pkg/docs" "dist/$pkg/tests/compat"
+          cp docs/install.md "dist/$pkg/docs/"
+          cp tests/compat/install-msl.mos "dist/$pkg/tests/compat/"
+          cp README.md LICENSE target/THIRD_PARTY_LICENSES.md "dist/$pkg/"
+          cd dist
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a -tzip "$pkg.zip" "$pkg" > /dev/null
+          else
+            tar -czf "$pkg.tar.gz" "$pkg"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: omola-${{ matrix.name }}
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/* --title "Omola ${GITHUB_REF_NAME}" \
+            --notes "Desktop workbench and CLI. Install OpenModelica and the Modelica Standard Library with scripts/setup-* (see docs/install.md). Not affiliated with Dassault Systemes; no Dymola compatibility claim."

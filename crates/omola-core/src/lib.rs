@@ -53,7 +53,7 @@ pub struct SimulationConfig<'a> {
 impl std::fmt::Display for BackendError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::MissingCompiler { searched } => write!(f, "OpenModelica compiler `omc` was not found ({searched}). Install OpenModelica and add its bin directory to PATH, or set OMOLA_OMC to the executable path."),
+            Self::MissingCompiler { searched } => write!(f, "OpenModelica compiler `omc` was not found ({searched}). Install it with scripts/setup-windows.ps1, scripts/setup-linux.sh or scripts/setup-macos.sh (see docs/install.md), add its bin directory to PATH, or set OMOLA_OMC to the executable path."),
             Self::InvalidConfiguredCompiler { path } => write!(f, "OMOLA_OMC points to a missing or non-file path: {}", path.display()),
             Self::LaunchFailed { executable, source } => write!(f, "Could not launch OpenModelica at {}: {source}", executable.display()),
             Self::Io(source) => write!(f, "OMC adapter I/O failed: {source}"),
@@ -84,7 +84,9 @@ pub struct Omc {
 }
 
 impl Omc {
-    /// Resolve OMOLA_OMC first; when unset/empty, use `omc[.exe]` from PATH.
+    /// Resolve the compiler: a non-empty `OMOLA_OMC` first, then `omc[.exe]` on PATH, then
+    /// the standard OpenModelica installation locations (`OPENMODELICAHOME`, and on Windows
+    /// `C:\Program Files\OpenModelica*\bin`, newest version first).
     pub fn discover() -> Result<Self, BackendError> {
         if let Some(configured) = env::var_os("OMOLA_OMC") {
             if !configured.is_empty() {
@@ -99,8 +101,26 @@ impl Omc {
         if let Some(path) = find_on_path(name) {
             return Ok(Self { executable: path });
         }
+        let program_files = if cfg!(windows) {
+            Some(
+                env::var_os("ProgramFiles")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("C:\\Program Files")),
+            )
+        } else {
+            None
+        };
+        let installed = installation_candidates(
+            env::var_os("OPENMODELICAHOME").map(PathBuf::from),
+            program_files.as_deref(),
+            name,
+        );
+        if let Some(path) = installed.into_iter().find(|p| p.is_file()) {
+            return Ok(Self { executable: path });
+        }
         Err(BackendError::MissingCompiler {
-            searched: "checked OMOLA_OMC and PATH".into(),
+            searched: "checked OMOLA_OMC, PATH, OPENMODELICAHOME and the standard install folders"
+                .into(),
         })
     }
 
@@ -768,6 +788,39 @@ fn output_text(out: &Output) -> String {
 fn modelica_string(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
+/// Candidate `omc` locations outside PATH, in priority order: `<OPENMODELICAHOME>/bin`,
+/// then `<program_files>/OpenModelica*/bin` sorted by version, newest first.
+fn installation_candidates(
+    openmodelica_home: Option<PathBuf>,
+    program_files: Option<&Path>,
+    name: &str,
+) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    if let Some(home) = openmodelica_home.filter(|h| !h.as_os_str().is_empty()) {
+        out.push(home.join("bin").join(name));
+    }
+    if let Some(root) = program_files {
+        let mut dirs: Vec<(Vec<u64>, PathBuf)> = fs::read_dir(root)
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| entry.ok())
+            .filter_map(|entry| {
+                let file_name = entry.file_name().to_string_lossy().into_owned();
+                let rest = file_name.strip_prefix("OpenModelica")?;
+                let version: Vec<u64> = rest
+                    .split(|c: char| !c.is_ascii_digit())
+                    .filter(|p| !p.is_empty())
+                    .map(|p| p.parse().unwrap_or(0))
+                    .collect();
+                Some((version, entry.path().join("bin").join(name)))
+            })
+            .collect();
+        dirs.sort_by(|a, b| b.0.cmp(&a.0));
+        out.extend(dirs.into_iter().map(|(_, p)| p));
+    }
+    out
+}
+
 fn find_on_path(name: &str) -> Option<PathBuf> {
     env::split_paths(&env::var_os("PATH")?)
         .map(|p| p.join(name))
@@ -777,6 +830,44 @@ fn find_on_path(name: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn installation_candidates_prefer_home_then_newest_version() {
+        let root = env::temp_dir().join(unique_name("pf"));
+        for dir in [
+            "OpenModelica1.26.3-64bit",
+            "OpenModelica1.27.1-64bit",
+            "OpenModelica1.9.0",
+            "Other",
+        ] {
+            fs::create_dir_all(root.join(dir).join("bin")).unwrap();
+        }
+        let found = installation_candidates(Some(PathBuf::from("/om")), Some(&root), "omc.exe");
+        assert_eq!(found[0], PathBuf::from("/om").join("bin").join("omc.exe"));
+        let names: Vec<String> = found[1..]
+            .iter()
+            .map(|p| {
+                p.parent()
+                    .unwrap()
+                    .parent()
+                    .unwrap()
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "OpenModelica1.27.1-64bit",
+                "OpenModelica1.26.3-64bit",
+                "OpenModelica1.9.0"
+            ]
+        );
+        assert!(installation_candidates(None, None, "omc").is_empty());
+        let _ = fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn validates_qualified_names_and_stop_times_before_creating_script() {

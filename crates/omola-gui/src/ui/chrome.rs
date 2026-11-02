@@ -780,6 +780,17 @@ impl OmolaApp {
                     self.load_library(spec);
                 }
             }
+            if big_button(ui, ICON_DOWNLOAD, BLUE, "Install\nLibraries", !self.busy, false)
+                .on_hover_text(
+                    "Install Modelica Standard Library 4.1.0 and ModelicaReference with the OpenModelica package manager",
+                )
+                .clicked()
+            {
+                self.worker.submit(crate::backend::Job::InstallLibraries);
+                self.log_tab = crate::backend::LogTab::Version;
+                self.bottom_pane = crate::app::BottomPane::Logs;
+                self.docks.bottom = true;
+            }
         });
         group(ui, "About", |ui| {
             column(ui, |ui| {

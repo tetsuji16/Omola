@@ -4,6 +4,18 @@
 
 The first slice delegates Modelica parsing, checking, translation, and solving to an installed `omc`. Omola is intended to build on the upstream OMEdit C++/Qt application and add Omola project workflows to its existing modeling UI; a native OMEdit source build and in-application project integration are in progress. Until those changes are built and tested, the existing `omola project open` command remains only an external launcher. Omola's backend behavior remains limited by the selected OMC version, its library support, and external tools used by each model.
 
+## Quick start: install OpenModelica, the Modelica Standard Library and Omola
+
+One command per platform installs the OpenModelica compiler (`omc`) from its official sources, the Modelica Standard Library 4.1.0, builds Omola, and runs a smoke simulation ([details and options](docs/install.md)):
+
+```sh
+powershell -ExecutionPolicy Bypass -File scripts\setup-windows.ps1   # Windows 10/11
+scripts/setup-linux.sh                                               # Debian / Ubuntu
+scripts/setup-docker.sh                                              # macOS or any Docker host
+```
+
+Then start the workbench with `target/release/omola-gui` (or `target\release\omola-gui.exe`). Omola finds `omc` through `OMOLA_OMC`, `PATH`, `OPENMODELICAHOME`, or the standard `C:\Program Files\OpenModelica*` folder. OpenModelica and MSL are downloaded from their official sources and are never bundled with Omola.
+
 ## Current skeleton
 
 - `omola doctor` locates OMC through `OMOLA_OMC` or `PATH` and reports its version. Missing OMC yields a setup diagnostic.

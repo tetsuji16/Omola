@@ -290,8 +290,10 @@ impl OmolaApp {
                         false,
                         false,
                         (ICON_ERROR, Color32::from_rgb(0xC6, 0x28, 0x28)),
-                        &format!("{} (not available)", spec.name),
-                        message,
+                        &format!("{} (not installed)", spec.name),
+                        &format!(
+                            "{message}\n\nInstall it with Tools > Install Libraries, or run scripts/setup-* (docs/install.md)."
+                        ),
                     );
                 }
             }
