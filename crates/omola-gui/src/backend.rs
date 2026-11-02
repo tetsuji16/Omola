@@ -309,4 +309,61 @@ mod tests {
         assert!(outcome.result_file.ends_with("M_res.mat"));
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    /// Real OpenModelica through the GUI worker. Ignored by default because it needs `omc`
+    /// and mutates nothing global (it only reads `OMOLA_OMC`); CI runs it on its own with
+    /// `cargo test -p omola-gui -- --ignored --test-threads=1 simulate_bouncing_ball_with_real_omc`.
+    #[test]
+    #[ignore = "needs OpenModelica; run with --ignored and OMOLA_OMC set"]
+    fn simulate_bouncing_ball_with_real_omc() {
+        if std::env::var_os("OMOLA_OMC").is_none() {
+            eprintln!("OMOLA_OMC is not set; skipping the real-OMC GUI backend test");
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("omola-gui-real-omc-{}", std::process::id()));
+        let worker = Worker::spawn(root.join("work"), || {});
+        worker.submit(Job::Simulate {
+            source_text: include_str!("../../../examples/BouncingBall.mo").into(),
+            class: "BouncingBall".into(),
+            setup: SimulationSetup {
+                stop_time: 3.0,
+                ..SimulationSetup::default()
+            },
+        });
+        // OMC translates and compiles C code, which can take a while on a cold CI runner.
+        let deadline = Instant::now() + Duration::from_secs(180);
+        let mut outcome = None;
+        while outcome.is_none() && Instant::now() < deadline {
+            for event in worker.poll() {
+                match event {
+                    Event::SimulationFinished(done) => outcome = Some(done),
+                    Event::Log(LogLevel::Error, message) => panic!("worker error: {message}"),
+                    _ => {}
+                }
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        let outcome = outcome.expect("simulation finished within 180 s");
+        let result = &outcome.result;
+
+        assert_eq!(result.time.first(), Some(&0.0));
+        let last = *result.time.last().expect("time samples");
+        assert!((last - 3.0).abs() < 1e-6, "last time was {last}");
+
+        let height = result.series("height").expect("height variable");
+        assert!(
+            (height[0] - 1.0).abs() < 1e-6,
+            "initial height was {}",
+            height[0]
+        );
+        assert!(
+            height.iter().all(|h| *h >= -1e-6),
+            "ball went below the ground: min {}",
+            height.iter().cloned().fold(f64::INFINITY, f64::min)
+        );
+
+        let gravity = result.index_of("gravity").expect("gravity variable");
+        assert!(result.variables[gravity].is_parameter);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
