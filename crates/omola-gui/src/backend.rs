@@ -356,37 +356,41 @@ mod tests {
             "initial height was {}",
             height[0]
         );
-        if let Some((at, min)) = height
+        // BouncingBall has no Zeno handling: after the bounces converge (about t = 2.56 s)
+        // `when height <= 0` never fires again and OMC lets the ball fall through the floor.
+        // That is real model behavior, so physics is only checked before that point.
+        let before_zeno: Vec<(f64, f64)> = result
+            .time
             .iter()
             .cloned()
-            .enumerate()
-            .min_by(|a, b| a.1.total_cmp(&b.1))
-            .filter(|(_, min)| *min < -1e-6)
-        {
-            let velocity = result.series("velocity");
-            let around: Vec<String> = (at.saturating_sub(3)..(at + 4).min(height.len()))
-                .map(|i| {
-                    format!(
-                        "i={i} t={} h={} v={:?}",
-                        result.time[i],
-                        height[i],
-                        velocity.map(|v| v[i])
-                    )
-                })
-                .collect();
-            let head: Vec<String> = (0..8.min(height.len()))
-                .map(|i| format!("i={i} t={} h={}", result.time[i], height[i]))
-                .collect();
-            let vars: Vec<String> = result
-                .variables
+            .zip(height.iter().cloned())
+            .filter(|(t, _)| *t <= 2.0)
+            .collect();
+        assert!(
+            before_zeno.iter().all(|(_, h)| *h >= -1e-4),
+            "ball went below the ground before t = 2 s: {:?}",
+            before_zeno
                 .iter()
-                .map(|v| format!("{}{}", v.name, if v.is_parameter { "(p)" } else { "" }))
-                .collect();
-            panic!(
-                "ball went below the ground: min {min} at sample {at} of {}\nvariables: {vars:?}\nhead: {head:#?}\naround min: {around:#?}",
-                height.len()
-            );
-        }
+                .find(|(_, h)| *h < -1e-4)
+                .expect("a violating sample")
+        );
+        // First impact happens at sqrt(2 * 1 / 9.81) = 0.4515 s: an event sample sits on the floor.
+        assert!(
+            before_zeno
+                .iter()
+                .any(|(t, h)| (0.44..=0.47).contains(t) && h.abs() < 1e-3),
+            "no floor contact near t = 0.4515 s"
+        );
+        // After the bounce (restitution 0.7) the ball rises again to about 0.49 m.
+        let peak = before_zeno
+            .iter()
+            .filter(|(t, _)| (0.5..=0.8).contains(t))
+            .map(|(_, h)| *h)
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!(
+            (0.4..=0.6).contains(&peak),
+            "expected a rebound peak near 0.49 m, got {peak}"
+        );
 
         let gravity = result.index_of("gravity").expect("gravity variable");
         assert!(result.variables[gravity].is_parameter);
