@@ -1,0 +1,16 @@
+[package]
+name = "omola-gui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Omola desktop GUI (egui): Dymola-style modeling and simulation workbench backed by OpenModelica"
+
+[[bin]]
+name = "omola-gui"
+path = "src/main.rs"
+
+[dependencies]
+omola-core = { path = "../omola-core" }
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+egui = "0.37"
+egui_plot = "0.38"
