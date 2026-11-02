@@ -2573,3 +2573,76 @@ name = "zvariant_utils"
 version = "4.2.0"
 license = "MIT"
 source = "registry+https://github.com/rust-lang/crates.io-index"
+
+# Pulled in on Linux by rfd's `async-std` feature (ashpd -> zbus -> async-io).
+[[cargo_packages]]
+name = "async-channel"
+version = "2.5.0"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "async-executor"
+version = "1.14.0"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "async-fs"
+version = "2.2.0"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "async-io"
+version = "2.6.0"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "async-lock"
+version = "3.4.2"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "async-net"
+version = "2.0.0"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "async-process"
+version = "2.5.0"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "async-signal"
+version = "0.2.14"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "async-task"
+version = "4.7.1"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "blocking"
+version = "1.7.0"
+license = "Apache-2.0 OR MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "piper"
+version = "0.2.5"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "signal-hook-registry"
+version = "1.4.8"
+license = "MIT OR Apache-2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
