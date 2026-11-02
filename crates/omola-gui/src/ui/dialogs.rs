@@ -12,6 +12,15 @@ impl OmolaApp {
 
     fn setup_dialog(&mut self, ctx: &egui::Context) {
         let mut open = self.show_setup;
+        // Snapshot the general fields so a manual edit can be detected: from then on the
+        // `experiment` annotation of a newly opened class must not overwrite them.
+        let before = (
+            self.setup.start_time,
+            self.setup.stop_time,
+            self.setup.number_of_intervals,
+            self.setup.tolerance,
+            self.setup.method.clone(),
+        );
         egui::Window::new("Simulation Setup")
             .open(&mut open)
             .resizable(false)
@@ -58,19 +67,16 @@ impl OmolaApp {
                         egui::ComboBox::from_id_salt("algorithm")
                             .selected_text(self.setup.method.clone())
                             .show_ui(ui, |ui| {
-                                for m in ["dassl", "ida", "cvode", "euler", "rungekutta"] {
-                                    ui.selectable_value(&mut self.setup.method, m.to_owned(), m);
+                                for m in omola_core::SIMULATION_METHODS {
+                                    ui.selectable_value(
+                                        &mut self.setup.method,
+                                        (*m).to_owned(),
+                                        *m,
+                                    );
                                 }
                             });
                         ui.end_row();
                     });
-                ui.label(
-                    egui::RichText::new(
-                        "Only Stop time and parameter overrides reach OMC today (issue G05).",
-                    )
-                    .small()
-                    .weak(),
-                );
                 ui.separator();
                 ui.strong("Parameter overrides");
                 let mut remove = None;
@@ -119,6 +125,16 @@ impl OmolaApp {
                 });
             });
         self.show_setup = open && self.show_setup;
+        let after = (
+            self.setup.start_time,
+            self.setup.stop_time,
+            self.setup.number_of_intervals,
+            self.setup.tolerance,
+            self.setup.method.clone(),
+        );
+        if after != before {
+            self.setup_edited_by_user = true;
+        }
     }
 
     fn path_dialog_window(&mut self, ctx: &egui::Context) {

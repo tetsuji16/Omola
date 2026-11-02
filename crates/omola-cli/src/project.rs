@@ -110,6 +110,10 @@ pub(crate) fn run(args: &[String]) -> Result<String, BackendError> {
         &project.manifest.entry_model,
         SimulationConfig {
             stop_time: project.manifest.simulation.stop_time,
+            start_time: None,
+            number_of_intervals: None,
+            tolerance: None,
+            method: None,
             result: Some(&output),
             libraries: &project.libraries,
             package_roots: &project.package_roots,

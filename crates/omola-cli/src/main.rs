@@ -186,6 +186,10 @@ pub(crate) fn simulate(args: &[String]) -> Result<String, BackendError> {
         &class,
         SimulationConfig {
             stop_time,
+            start_time: None,
+            number_of_intervals: None,
+            tolerance: None,
+            method: None,
             result: output.as_deref(),
             libraries: &[],
             package_roots: &[],
