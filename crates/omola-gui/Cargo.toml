@@ -17,7 +17,5 @@ egui_material_icons = "0.9"
 egui_extras = { version = "0.37", default-features = false, features = ["file", "image", "svg"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif"] }
 serde = { version = "1", features = ["derive"] }
-rfd = { version = "0.15", default-features = false, features = ["xdg-portal"] }
-
-[dev-dependencies]
 serde_json = "1"
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal"] }

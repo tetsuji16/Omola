@@ -5,6 +5,7 @@
 
 mod app;
 mod backend;
+mod cache;
 mod html;
 mod library;
 mod model;
