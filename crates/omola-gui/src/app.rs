@@ -601,6 +601,7 @@ impl OmolaApp {
             .iter()
             .position(|d| d.path.as_deref() == Some(path.as_path()))
         {
+            push_recent(&mut self.recent_files, path);
             let first = self.first_class_of(i);
             if let Some(class) = first {
                 self.open_in_new_tab(&class);

@@ -18,7 +18,7 @@ Since 2026-11-02 the GUI also uses `egui_extras` with the `image` (PNG/JPEG/GIF)
 
 Since 2026-11-02 the GUI enables eframe's `persistence` feature, which adds `enumn` (MIT OR Apache-2.0), `ron` (MIT OR Apache-2.0), and `typeid` (MIT OR Apache-2.0) to serialize window state across restarts. `serde` (MIT OR Apache-2.0) is also added directly for the persisted-state struct. All three are recorded in `licenses/inventory.toml`.
 
-Since 2026-11-02 the GUI uses `rfd` 0.15 (MIT) with the `xdg-portal` feature for native file dialogs on Windows, macOS, and Linux (via the XDG Desktop Portal; no GTK system dependency). This pulls in `ashpd` (MIT), `zbus`/`zvariant` (MIT), `url` (MIT OR Apache-2.0), ICU normalization crates (Unicode-3.0), `rand` (MIT OR Apache-2.0), and `tempfile` (MIT OR Apache-2.0) — 62 additional crates, all permissively licensed (MIT, Apache-2.0, Unicode-3.0). All are recorded in `licenses/inventory.toml`.
+Since 2026-11-02 the GUI uses `rfd` 0.15 (MIT) with the `xdg-portal` and `async-std` features for native file dialogs on Windows, macOS, and Linux (via the XDG Desktop Portal; no GTK system dependency). (`async-std` here enables ashpd's `zbus/async-io` runtime, not the async-std crate.) This pulls in `ashpd` (MIT), `zbus`/`zvariant` (MIT), `url` (MIT OR Apache-2.0), ICU normalization crates (Unicode-3.0), `rand` (MIT OR Apache-2.0), `tempfile` (MIT OR Apache-2.0), and the async-io runtime crates (`async-io`, `async-fs`, `async-net`, `blocking`, ...; MIT OR Apache-2.0) — 74 additional crates, all permissively licensed (MIT, Apache-2.0, Unicode-3.0). All are recorded in `licenses/inventory.toml`.
 
 ### Setup scripts and release archives
 
