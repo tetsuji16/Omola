@@ -240,6 +240,8 @@ pub struct OmolaApp {
     pub bottom_height: f32,
     pub busy: bool,
     pub omc_version: Option<String>,
+    /// Root of the on-disk library index cache (see [`crate::cache`]).
+    pub cache_root: PathBuf,
     pub worker: Worker,
     /// Last window title sent to the OS.
     pub title_sent: String,
@@ -267,8 +269,12 @@ impl OmolaApp {
         });
         let mut app = Self::with_worker(worker);
         app.worker.submit(Job::Doctor);
+        // Serve the library tree from the on-disk index cache when it is still valid, so
+        // start-up does not re-run `getClassNames(recursive=true)` over the whole MSL.
         for spec in library::default_libraries() {
-            app.load_library(spec);
+            if !app.load_library_from_cache(spec.clone()) {
+                app.load_library(spec);
+            }
         }
         // Like a fresh workbench session: an empty model "Unnamed" is always available.
         let unnamed = app.add_unnamed();
@@ -324,6 +330,7 @@ impl OmolaApp {
             bottom_height: 135.0,
             busy: false,
             omc_version: None,
+            cache_root: crate::cache::cache_root(),
             worker,
             title_sent: String::new(),
             pending_url: None,
@@ -337,6 +344,33 @@ impl OmolaApp {
         self.libraries.retain(|l| l.spec().name != spec.name);
         self.libraries.push(LibraryState::Loading(spec.clone()));
         self.worker.submit(Job::LoadLibrary(spec));
+    }
+
+    /// Install a library from the on-disk index cache without starting OMC.
+    ///
+    /// Returns `false` on a cache miss (or a stale/corrupt entry), so the caller can fall
+    /// back to [`Self::load_library`]. `load_library` itself always queries OMC, which is
+    /// what the Tools > Reload Libraries command wants.
+    pub fn load_library_from_cache(&mut self, spec: LibrarySpec) -> bool {
+        let Some(lib) = crate::cache::load(&self.cache_root, &spec) else {
+            return false;
+        };
+        let (name, version, count, source) = (
+            spec.name.clone(),
+            lib.version.clone(),
+            lib.classes.len(),
+            lib.source_file.clone(),
+        );
+        self.libraries.retain(|l| l.spec().name != name);
+        self.libraries.push(LibraryState::Loaded(lib));
+        self.info(
+            LogTab::Version,
+            format!(
+                "Loaded {name} {version} ({count} classes) from cache {}",
+                source.display()
+            ),
+        );
+        true
     }
 
     pub fn loaded_specs(&self) -> Vec<LibrarySpec> {
@@ -1450,6 +1484,51 @@ mod tests {
         app.open_class("Unnamed");
         app.open_file(file.clone());
         assert_eq!(app.recent_files.len(), 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- G04 library index cache ---
+
+    #[test]
+    fn library_index_is_reused_from_the_cache() {
+        use crate::library::ClassEntry;
+
+        let dir = std::env::temp_dir().join(format!("omola-lib-cache-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("package.mo");
+        std::fs::write(&source, "package Modelica end Modelica;").unwrap();
+
+        let spec = LibrarySpec::new("Modelica", Some("4.1.0"));
+        let lib = LoadedLibrary {
+            spec: spec.clone(),
+            version: "4.1.0".into(),
+            source_file: source,
+            classes: vec![
+                ClassEntry {
+                    qualified_name: "Modelica".into(),
+                    restriction: "package".into(),
+                    comment: "Modelica Standard Library".into(),
+                },
+                ClassEntry {
+                    qualified_name: "Modelica.Blocks".into(),
+                    restriction: "package".into(),
+                    comment: String::new(),
+                },
+            ],
+        };
+        crate::cache::store(&dir.join("cache"), &lib).unwrap();
+
+        let mut app = app();
+        app.cache_root = dir.join("cache");
+        assert!(app.load_library_from_cache(spec.clone()));
+        // Installed synchronously: no `Loading` placeholder and no OMC job was needed.
+        assert!(matches!(app.libraries[0], LibraryState::Loaded(_)));
+        assert_eq!(app.children_of("Modelica").len(), 1);
+
+        // A version that was never indexed is a cache miss.
+        assert!(!app.load_library_from_cache(LibrarySpec::new("Modelica", Some("3.2.3"))));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
