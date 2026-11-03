@@ -144,12 +144,29 @@ pub struct PlotSignal {
     pub variable: String,
 }
 
-/// Small text-input dialogs (until native file dialogs land, issue G03).
+/// Small text-input dialogs (fallback when `OMOLA_GUI_TEXT_DIALOGS=1` or no native portal).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PathDialog {
     Open(String),
     SaveAs(String),
     RunScript(String),
+}
+
+/// Async result from a native file dialog (picked on a background thread).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DialogResult {
+    Open(Option<PathBuf>),
+    SaveAs(Option<PathBuf>),
+}
+
+/// Maximum number of entries in the "Recent files" menu.
+pub const MAX_RECENT_FILES: usize = 8;
+
+/// Add `path` to the front of `list`, removing duplicates and trimming to `MAX_RECENT_FILES`.
+pub fn push_recent(list: &mut Vec<PathBuf>, path: PathBuf) {
+    list.retain(|p| p != &path);
+    list.insert(0, path);
+    list.truncate(MAX_RECENT_FILES);
 }
 
 pub struct LogEntry {
@@ -168,6 +185,7 @@ pub struct PersistedState {
     pub tab: Option<String>,
     pub setup: Option<SimulationSetup>,
     pub keep_results: Option<usize>,
+    pub recent_files: Vec<PathBuf>,
 }
 
 /// Storage key for [`PersistedState`] in eframe's `Storage`.
@@ -199,6 +217,10 @@ pub struct OmolaApp {
     pub setup_from: Option<String>,
     pub show_setup: bool,
     pub path_dialog: Option<PathDialog>,
+    /// Channel for async results from native file dialogs.
+    pub dialog_rx: Option<std::sync::mpsc::Receiver<DialogResult>>,
+    /// Recently opened/saved files (max [`MAX_RECENT_FILES`]).
+    pub recent_files: Vec<PathBuf>,
     pub runs: Vec<ResultRun>,
     pub next_run_id: u64,
     pub keep_results: usize,
@@ -284,6 +306,8 @@ impl OmolaApp {
             setup_from: None,
             show_setup: false,
             path_dialog: None,
+            dialog_rx: None,
+            recent_files: Vec::new(),
             runs: Vec::new(),
             next_run_id: 1,
             keep_results: 2,
@@ -577,6 +601,7 @@ impl OmolaApp {
             .iter()
             .position(|d| d.path.as_deref() == Some(path.as_path()))
         {
+            push_recent(&mut self.recent_files, path);
             let first = self.first_class_of(i);
             if let Some(class) = first {
                 self.open_in_new_tab(&class);
@@ -588,6 +613,7 @@ impl OmolaApp {
                 self.documents.push(doc);
                 self.refresh_outline();
                 self.info(LogTab::Syntax, format!("Opened {}", path.display()));
+                push_recent(&mut self.recent_files, path);
                 if let Some(class) = self.first_class_of(self.documents.len() - 1) {
                     self.open_in_new_tab(&class);
                 }
@@ -616,12 +642,15 @@ impl OmolaApp {
             return;
         };
         if self.documents[i].path.is_none() {
-            self.path_dialog = Some(PathDialog::SaveAs(String::new()));
+            self.request_save_as_dialog();
             return;
         }
         match self.documents[i].save() {
             Ok(()) => {
                 let title = self.documents[i].title();
+                if let Some(path) = self.documents[i].path.clone() {
+                    push_recent(&mut self.recent_files, path);
+                }
                 self.info(LogTab::Syntax, format!("Saved {title}"))
             }
             Err(e) => self.error(LogTab::Syntax, format!("Save failed: {e}")),
@@ -903,6 +932,7 @@ impl OmolaApp {
             tab: Some(self.tab.label().to_owned()),
             setup: Some(self.setup.clone()),
             keep_results: Some(self.keep_results),
+            recent_files: self.recent_files.clone(),
         }
     }
 
@@ -918,6 +948,12 @@ impl OmolaApp {
         if let Some(tab) = state.tab.and_then(|s| RibbonTab::from_label(&s)) {
             self.tab = tab;
         }
+        // Restore recent files, keeping only those that still exist.
+        self.recent_files = state
+            .recent_files
+            .into_iter()
+            .filter(|p| p.is_file())
+            .collect();
 
         let file_to_open = cli_file.or_else(|| {
             state.last_file.as_ref().and_then(|path| {
@@ -941,6 +977,74 @@ impl OmolaApp {
         // otherwise opening the last file would immediately overwrite the restored values.
         if restored_setup {
             self.setup_from = self.active.clone();
+        }
+    }
+
+    // ---------------------------------------------------------------- native dialogs
+
+    /// True when text-input path dialogs should be used instead of native OS dialogs.
+    pub fn use_text_dialogs() -> bool {
+        std::env::var("OMOLA_GUI_TEXT_DIALOGS").as_deref() == Ok("1")
+    }
+
+    /// Open a native "Open file" dialog on a background thread.
+    pub fn request_open_dialog(&mut self) {
+        if Self::use_text_dialogs() {
+            self.path_dialog = Some(PathDialog::Open(String::new()));
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel::<DialogResult>();
+        self.dialog_rx = Some(rx);
+        std::thread::spawn(move || {
+            let result = rfd::FileDialog::new()
+                .add_filter("Modelica", &["mo"])
+                .pick_file();
+            let _ = tx.send(DialogResult::Open(result));
+        });
+    }
+
+    /// Open a native "Save as" dialog on a background thread.
+    pub fn request_save_as_dialog(&mut self) {
+        if Self::use_text_dialogs() {
+            self.path_dialog = Some(PathDialog::SaveAs(String::new()));
+            return;
+        }
+        let file_name = self
+            .active_doc()
+            .and_then(|i| {
+                self.documents[i]
+                    .path
+                    .as_ref()
+                    .and_then(|p| p.file_name().map(|n| n.to_owned()))
+            })
+            .unwrap_or_else(|| std::ffi::OsString::from("Unnamed.mo"));
+        let (tx, rx) = std::sync::mpsc::channel::<DialogResult>();
+        self.dialog_rx = Some(rx);
+        std::thread::spawn(move || {
+            let result = rfd::FileDialog::new()
+                .add_filter("Modelica", &["mo"])
+                .set_file_name(file_name.to_string_lossy())
+                .save_file();
+            let _ = tx.send(DialogResult::SaveAs(result));
+        });
+    }
+
+    /// Poll the native dialog channel and apply results.
+    pub fn poll_dialog(&mut self) {
+        let result = self.dialog_rx.as_ref().and_then(|rx| rx.try_recv().ok());
+        if let Some(result) = result {
+            self.dialog_rx = None;
+            match result {
+                DialogResult::Open(Some(path)) => self.open_file(path),
+                DialogResult::Open(None) => {}
+                DialogResult::SaveAs(Some(path)) => {
+                    if let Some(i) = self.active_doc() {
+                        self.documents[i].path = Some(path);
+                    }
+                    self.save();
+                }
+                DialogResult::SaveAs(None) => {}
+            }
         }
     }
 
@@ -1006,6 +1110,7 @@ pub fn merge_overrides(
 impl eframe::App for OmolaApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.handle_events();
+        self.poll_dialog();
         self.handle_shortcuts(ui);
         let title = self.window_title();
         if title != self.title_sent {
@@ -1212,6 +1317,7 @@ mod tests {
             tab: Some("Text".to_owned()),
             setup: Some(SimulationSetup::default()),
             keep_results: Some(3),
+            recent_files: Vec::new(),
         };
         let mut app = app();
         app.apply_persisted(state, None);
@@ -1241,6 +1347,7 @@ mod tests {
                 ..SimulationSetup::default()
             }),
             keep_results: Some(3),
+            recent_files: Vec::new(),
         };
         let mut app = app();
         app.apply_persisted(state, Some(cli_file.clone()));
@@ -1285,6 +1392,7 @@ mod tests {
                 ..SimulationSetup::default()
             }),
             keep_results: Some(3),
+            recent_files: Vec::new(),
         };
         let mut app = app();
         app.apply_persisted(state, None);
@@ -1292,5 +1400,57 @@ mod tests {
         // experiment annotation over the values restored from storage.
         assert_eq!(app.setup.stop_time, 7.0);
         assert_eq!(app.setup_from, app.active);
+    }
+
+    // --- G03 recent files tests ---
+
+    #[test]
+    fn push_recent_deduplicates_and_caps_at_max() {
+        let mut list = Vec::new();
+        let a = PathBuf::from("/tmp/a.mo");
+        let b = PathBuf::from("/tmp/b.mo");
+        push_recent(&mut list, a.clone());
+        push_recent(&mut list, b.clone());
+        assert_eq!(list, vec![b.clone(), a.clone()]);
+
+        // Re-adding `a` moves it to the front and removes the duplicate.
+        push_recent(&mut list, a.clone());
+        assert_eq!(list, vec![a.clone(), b.clone()]);
+        assert_eq!(list.len(), 2);
+
+        // Fill beyond the cap.
+        for i in 0..(MAX_RECENT_FILES + 3) {
+            push_recent(&mut list, PathBuf::from(format!("/tmp/{i}.mo")));
+        }
+        assert_eq!(list.len(), MAX_RECENT_FILES);
+        // The most recently added should be first.
+        assert_eq!(
+            list[0],
+            PathBuf::from(format!("/tmp/{}.mo", MAX_RECENT_FILES + 2))
+        );
+    }
+
+    #[test]
+    fn open_file_adds_to_recent_files() {
+        let dir = std::env::temp_dir().join(format!("omola-recent-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("Recent.mo");
+        std::fs::write(
+            &file,
+            "model Recent\n  Real x;\nequation\n  x = 1;\nend Recent;\n",
+        )
+        .unwrap();
+
+        let mut app = app();
+        app.open_file(file.clone());
+        assert_eq!(app.recent_files.len(), 1);
+        assert_eq!(app.recent_files[0], file);
+
+        // Opening the same file again should not create a duplicate.
+        app.open_class("Unnamed");
+        app.open_file(file.clone());
+        assert_eq!(app.recent_files.len(), 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
