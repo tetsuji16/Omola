@@ -11,6 +11,7 @@ mod html;
 mod instance;
 mod library;
 mod model;
+mod plot;
 mod series;
 mod theme;
 mod ui;
