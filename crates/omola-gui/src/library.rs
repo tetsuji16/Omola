@@ -303,6 +303,29 @@ pub fn class_text_script(class: &str, libraries: &[LibrarySpec]) -> Result<Strin
     Ok(script)
 }
 
+/// Script printing `getModelInstance(CLASS)` as JSON (with the user file loaded when given).
+pub fn instance_script(
+    class: &str,
+    libraries: &[LibrarySpec],
+    user_file: Option<&Path>,
+) -> Result<String, BackendError> {
+    validate_class_name(class)?;
+    let mut script = String::new();
+    for (i, spec) in libraries.iter().enumerate() {
+        script.push_str(&load_statement(spec, &format!("omolaLib{i}"))?);
+    }
+    if let Some(file) = user_file {
+        script.push_str(&format!(
+            "omolaUser := loadFile(\"{}\");\n",
+            escape_modelica_string(&file.to_string_lossy())
+        ));
+    }
+    script.push_str(&format!(
+        "print(\"OMOLA_BEGIN instance\\n\" + getModelInstance({class}, prettyPrint=true) + \"\\nOMOLA_END instance\\n\");\n"
+    ));
+    Ok(script)
+}
+
 /// Script running `checkModel` on a class from loaded libraries and/or a user file.
 pub fn check_script(
     class: &str,

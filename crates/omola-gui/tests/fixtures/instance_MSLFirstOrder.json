@@ -1,0 +1,2236 @@
+{
+  "name": "MSLFirstOrder",
+  "restriction": "model",
+  "annotation": {
+    "uses": {
+      "Modelica": {
+        "version": "4.1.0"
+      }
+    }
+  },
+  "elements": [
+    {
+      "$kind": "component",
+      "name": "inputSignal",
+      "type": {
+        "name": "Modelica.Blocks.Sources.Step",
+        "restriction": "block",
+        "comment": "Generate step signal of type Real",
+        "annotation": {
+          "Icon": {
+            "coordinateSystem": {
+              "preserveAspectRatio": true,
+              "extent": [
+                [
+                  -100,
+                  -100
+                ],
+                [
+                  100,
+                  100
+                ]
+              ]
+            },
+            "graphics": [
+              {
+                "$kind": "record",
+                "name": "Line",
+                "elements": [
+                  true,
+                  [
+                    0,
+                    0
+                  ],
+                  0,
+                  [
+                    [
+                      -80,
+                      68
+                    ],
+                    [
+                      -80,
+                      -80
+                    ]
+                  ],
+                  [
+                    192,
+                    192,
+                    192
+                  ],
+                  {
+                    "$kind": "enum",
+                    "name": "LinePattern.Solid",
+                    "index": 2
+                  },
+                  0.25,
+                  [
+                    {
+                      "$kind": "enum",
+                      "name": "Arrow.None",
+                      "index": 1
+                    },
+                    {
+                      "$kind": "enum",
+                      "name": "Arrow.None",
+                      "index": 1
+                    }
+                  ],
+                  3,
+                  {
+                    "$kind": "enum",
+                    "name": "Smooth.None",
+                    "index": 1
+                  }
+                ]
+              },
+              {
+                "$kind": "record",
+                "name": "Polygon",
+                "elements": [
+                  true,
+                  [
+                    0,
+                    0
+                  ],
+                  0,
+                  [
+                    192,
+                    192,
+                    192
+                  ],
+                  [
+                    192,
+                    192,
+                    192
+                  ],
+                  {
+                    "$kind": "enum",
+                    "name": "LinePattern.Solid",
+                    "index": 2
+                  },
+                  {
+                    "$kind": "enum",
+                    "name": "FillPattern.Solid",
+                    "index": 2
+                  },
+                  0.25,
+                  [
+                    [
+                      -80,
+                      90
+                    ],
+                    [
+                      -88,
+                      68
+                    ],
+                    [
+                      -72,
+                      68
+                    ],
+                    [
+                      -80,
+                      90
+                    ]
+                  ],
+                  {
+                    "$kind": "enum",
+                    "name": "Smooth.None",
+                    "index": 1
+                  }
+                ]
+              },
+              {
+                "$kind": "record",
+                "name": "Line",
+                "elements": [
+                  true,
+                  [
+                    0,
+                    0
+                  ],
+                  0,
+                  [
+                    [
+                      -90,
+                      -70
+                    ],
+                    [
+                      82,
+                      -70
+                    ]
+                  ],
+                  [
+                    192,
+                    192,
+                    192
+                  ],
+                  {
+                    "$kind": "enum",
+                    "name": "LinePattern.Solid",
+                    "index": 2
+                  },
+                  0.25,
+                  [
+                    {
+                      "$kind": "enum",
+                      "name": "Arrow.None",
+                      "index": 1
+                    },
+                    {
+                      "$kind": "enum",
+                      "name": "Arrow.None",
+                      "index": 1
+                    }
+                  ],
+                  3,
+                  {
+                    "$kind": "enum",
+                    "name": "Smooth.None",
+                    "index": 1
+                  }
+                ]
+              },
+              {
+                "$kind": "record",
+                "name": "Polygon",
+                "elements": [
+                  true,
+                  [
+                    0,
+                    0
+                  ],
+                  0,
+                  [
+                    192,
+                    192,
+                    192
+                  ],
+                  [
+                    192,
+                    192,
+                    192
+                  ],
+                  {
+                    "$kind": "enum",
+                    "name": "LinePattern.Solid",
+                    "index": 2
+                  },
+                  {
+                    "$kind": "enum",
+                    "name": "FillPattern.Solid",
+                    "index": 2
+                  },
+                  0.25,
+                  [
+                    [
+                      90,
+                      -70
+                    ],
+                    [
+                      68,
+                      -62
+                    ],
+                    [
+                      68,
+                      -78
+                    ],
+                    [
+                      90,
+                      -70
+                    ]
+                  ],
+                  {
+                    "$kind": "enum",
+                    "name": "Smooth.None",
+                    "index": 1
+                  }
+                ]
+              },
+              {
+                "$kind": "record",
+                "name": "Line",
+                "elements": [
+                  true,
+                  [
+                    0,
+                    0
+                  ],
+                  0,
+                  [
+                    [
+                      -80,
+                      -70
+                    ],
+                    [
+                      0,
+                      -70
+                    ],
+                    [
+                      0,
+                      50
+                    ],
+                    [
+                      80,
+                      50
+                    ]
+                  ],
+                  [
+                    0,
+                    0,
+                    0
+                  ],
+                  {
+                    "$kind": "enum",
+                    "name": "LinePattern.Solid",
+                    "index": 2
+                  },
+                  0.25,
+                  [
+                    {
+                      "$kind": "enum",
+                      "name": "Arrow.None",
+                      "index": 1
+                    },
+                    {
+                      "$kind": "enum",
+                      "name": "Arrow.None",
+                      "index": 1
+                    }
+                  ],
+                  3,
+                  {
+                    "$kind": "enum",
+                    "name": "Smooth.None",
+                    "index": 1
+                  }
+                ]
+              },
+              {
+                "$kind": "record",
+                "name": "Text",
+                "elements": [
+                  true,
+                  [
+                    0,
+                    0
+                  ],
+                  0,
+                  [
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0
+                  ],
+                  {
+                    "$kind": "enum",
+                    "name": "LinePattern.Solid",
+                    "index": 2
+                  },
+                  {
+                    "$kind": "enum",
+                    "name": "FillPattern.None",
+                    "index": 1
+                  },
+                  0.25,
+                  [
+                    [
+                      -150,
+                      -150
+                    ],
+                    [
+                      150,
+                      -110
+                    ]
+                  ],
+                  "startTime=%startTime",
+                  0,
+                  [
+                    -1,
+                    -1,
+                    -1
+                  ],
+                  "",
+                  [
+
+                  ],
+                  {
+                    "$kind": "enum",
+                    "name": "TextAlignment.Center",
+                    "index": 2
+                  }
+                ]
+              }
+            ]
+          },
+          "Documentation": {
+            "info": "<html>\n<p>\nThe Real output y is a step signal:\n</p>\n\n<div>\n<img src=\\\"modelica://Modelica/Resources/Images/Blocks/Sources/Step.png\\\"\n     alt=\\\"Step.png\\\">\n</div>\n\n</html>"
+          }
+        },
+        "elements": [
+          {
+            "$kind": "component",
+            "name": "height",
+            "type": "Real",
+            "modifiers": "1",
+            "value": {
+              "binding": 1
+            },
+            "prefixes": {
+              "variability": "parameter"
+            },
+            "comment": "Height of step",
+            "annotation": {
+              "Dialog": {
+                "groupImage": "modelica://Modelica/Resources/Images/Blocks/Sources/Step.png"
+              }
+            }
+          },
+          {
+            "$kind": "extends",
+            "baseClass": {
+              "name": "Modelica.Blocks.Interfaces.SignalSource",
+              "restriction": "block",
+              "prefixes": {
+                "partial": true
+              },
+              "comment": "Base class for continuous signal source",
+              "annotation": {
+                "Documentation": {
+                  "info": "<html>\n<p>\nBasic block for Real sources of package Blocks.Sources.\nThis component has one continuous Real output signal y\nand two parameters (offset, startTime) to shift the\ngenerated signal.\n</p>\n</html>"
+                }
+              },
+              "elements": [
+                {
+                  "$kind": "extends",
+                  "baseClass": {
+                    "name": "Modelica.Blocks.Interfaces.SO",
+                    "restriction": "block",
+                    "prefixes": {
+                      "partial": true
+                    },
+                    "comment": "Single Output continuous control block",
+                    "annotation": {
+                      "Documentation": {
+                        "info": "<html>\n<p>\nBlock has one continuous Real output signal.\n</p>\n</html>"
+                      }
+                    },
+                    "elements": [
+                      {
+                        "$kind": "extends",
+                        "baseClass": {
+                          "name": "Modelica.Blocks.Icons.Block",
+                          "restriction": "block",
+                          "prefixes": {
+                            "partial": true
+                          },
+                          "comment": "Basic graphical layout of input/output block",
+                          "annotation": {
+                            "Icon": {
+                              "coordinateSystem": {
+                                "preserveAspectRatio": true,
+                                "extent": [
+                                  [
+                                    -100,
+                                    -100
+                                  ],
+                                  [
+                                    100,
+                                    100
+                                  ]
+                                ]
+                              },
+                              "graphics": [
+                                {
+                                  "$kind": "record",
+                                  "name": "Rectangle",
+                                  "elements": [
+                                    true,
+                                    [
+                                      0,
+                                      0
+                                    ],
+                                    0,
+                                    [
+                                      0,
+                                      0,
+                                      127
+                                    ],
+                                    [
+                                      255,
+                                      255,
+                                      255
+                                    ],
+                                    {
+                                      "$kind": "enum",
+                                      "name": "LinePattern.Solid",
+                                      "index": 2
+                                    },
+                                    {
+                                      "$kind": "enum",
+                                      "name": "FillPattern.Solid",
+                                      "index": 2
+                                    },
+                                    0.25,
+                                    {
+                                      "$kind": "enum",
+                                      "name": "BorderPattern.None",
+                                      "index": 1
+                                    },
+                                    [
+                                      [
+                                        -100,
+                                        -100
+                                      ],
+                                      [
+                                        100,
+                                        100
+                                      ]
+                                    ],
+                                    0
+                                  ]
+                                },
+                                {
+                                  "$kind": "record",
+                                  "name": "Text",
+                                  "elements": [
+                                    true,
+                                    [
+                                      0,
+                                      0
+                                    ],
+                                    0,
+                                    [
+                                      0,
+                                      0,
+                                      0
+                                    ],
+                                    [
+                                      0,
+                                      0,
+                                      0
+                                    ],
+                                    {
+                                      "$kind": "enum",
+                                      "name": "LinePattern.Solid",
+                                      "index": 2
+                                    },
+                                    {
+                                      "$kind": "enum",
+                                      "name": "FillPattern.None",
+                                      "index": 1
+                                    },
+                                    0.25,
+                                    [
+                                      [
+                                        -150,
+                                        150
+                                      ],
+                                      [
+                                        150,
+                                        110
+                                      ]
+                                    ],
+                                    "%name",
+                                    0,
+                                    [
+                                      0,
+                                      0,
+                                      255
+                                    ],
+                                    "",
+                                    [
+
+                                    ],
+                                    {
+                                      "$kind": "enum",
+                                      "name": "TextAlignment.Center",
+                                      "index": 2
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            "Documentation": {
+                              "info": "<html>\n<p>\nBlock that has only the basic icon for an input/output\nblock (no declarations, no equations). Most blocks\nof package Modelica.Blocks inherit directly or indirectly\nfrom this block.\n</p>\n</html>"
+                            }
+                          },
+                          "imports": [
+                            {
+                              "path": "Modelica.Units.SI"
+                            }
+                          ],
+                          "source": {
+                            "filename": "C:/Users/tetsu/AppData/Roaming/.openmodelica/libraries/Modelica 4.1.0+maint.om/Blocks/Interfaces.mo",
+                            "lineStart": 298,
+                            "columnStart": 5,
+                            "lineEnd": 298,
+                            "columnEnd": 40
+                          }
+                        }
+                      },
+                      {
+                        "$kind": "component",
+                        "name": "y",
+                        "type": {
+                          "name": "Modelica.Blocks.Interfaces.RealOutput",
+                          "restriction": "connector",
+                          "prefixes": {
+                            "direction": "output"
+                          },
+                          "comment": "'output Real' as connector",
+                          "annotation": {
+                            "defaultComponentName": "y",
+                            "Icon": {
+                              "coordinateSystem": {
+                                "preserveAspectRatio": true,
+                                "extent": [
+                                  [
+                                    -100,
+                                    -100
+                                  ],
+                                  [
+                                    100,
+                                    100
+                                  ]
+                                ]
+                              },
+                              "graphics": [
+                                {
+                                  "$kind": "record",
+                                  "name": "Polygon",
+                                  "elements": [
+                                    true,
+                                    [
+                                      0,
+                                      0
+                                    ],
+                                    0,
+                                    [
+                                      0,
+                                      0,
+                                      127
+                                    ],
+                                    [
+                                      255,
+                                      255,
+                                      255
+                                    ],
+                                    {
+                                      "$kind": "enum",
+                                      "name": "LinePattern.Solid",
+                                      "index": 2
+                                    },
+                                    {
+                                      "$kind": "enum",
+                                      "name": "FillPattern.Solid",
+                                      "index": 2
+                                    },
+                                    0.25,
+                                    [
+                                      [
+                                        -100,
+                                        100
+                                      ],
+                                      [
+                                        100,
+                                        0
+                                      ],
+                                      [
+                                        -100,
+                                        -100
+                                      ]
+                                    ],
+                                    {
+                                      "$kind": "enum",
+                                      "name": "Smooth.None",
+                                      "index": 1
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            "Diagram": {
+                              "coordinateSystem": {
+                                "preserveAspectRatio": true,
+                                "extent": [
+                                  [
+                                    -100,
+                                    -100
+                                  ],
+                                  [
+                                    100,
+                                    100
+                                  ]
+                                ]
+                              },
+                              "graphics": [
+                                {
+                                  "$kind": "record",
+                                  "name": "Polygon",
+                                  "elements": [
+                                    true,
+                                    [
+                                      0,
+                                      0
+                                    ],
+                                    0,
+                                    [
+                                      0,
+                                      0,
+                                      127
+                                    ],
+                                    [
+                                      255,
+                                      255,
+                                      255
+                                    ],
+                                    {
+                                      "$kind": "enum",
+                                      "name": "LinePattern.Solid",
+                                      "index": 2
+                                    },
+                                    {
+                                      "$kind": "enum",
+                                      "name": "FillPattern.Solid",
+                                      "index": 2
+                                    },
+                                    0.25,
+                                    [
+                                      [
+                                        -100,
+                                        50
+                                      ],
+                                      [
+                                        0,
+                                        0
+                                      ],
+                                      [
+                                        -100,
+                                        -50
+                                      ]
+                                    ],
+                                    {
+                                      "$kind": "enum",
+                                      "name": "Smooth.None",
+                                      "index": 1
+                                    }
+                                  ]
+                                },
+                                {
+                                  "$kind": "record",
+                                  "name": "Text",
+                                  "elements": [
+                                    true,
+                                    [
+                                      0,
+                                      0
+                                    ],
+                                    0,
+                                    [
+                                      0,
+                                      0,
+                                      0
+                                    ],
+                                    [
+                                      0,
+                                      0,
+                                      0
+                                    ],
+                                    {
+                                      "$kind": "enum",
+                                      "name": "LinePattern.Solid",
+                                      "index": 2
+                                    },
+                                    {
+                                      "$kind": "enum",
+                                      "name": "FillPattern.None",
+                                      "index": 1
+                                    },
+                                    0.25,
+                                    [
+                                      [
+                                        30,
+                                        60
+                                      ],
+                                      [
+                                        30,
+                                        110
+                                      ]
+                                    ],
+                                    "%name",
+                                    0,
+                                    [
+                                      0,
+                                      0,
+                                      127
+                                    ],
+                                    "",
+                                    [
+
+                                    ],
+                                    {
+                                      "$kind": "enum",
+                                      "name": "TextAlignment.Center",
+                                      "index": 2
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            "Documentation": {
+                              "info": "<html>\n<p>\nConnector with one output signal of type Real.\n</p>\n</html>"
+                            }
+                          },
+                          "elements": [
+                            {
+                              "$kind": "extends",
+                              "baseClass": "Real"
+                            }
+                          ],
+                          "imports": [
+                            {
+                              "path": "Modelica.Units.SI"
+                            }
+                          ],
+                          "source": {
+                            "filename": "C:/Users/tetsu/AppData/Roaming/.openmodelica/libraries/Modelica 4.1.0+maint.om/Blocks/Interfaces.mo",
+                            "lineStart": 38,
+                            "columnStart": 3,
+                            "lineEnd": 66,
+                            "columnEnd": 11
+                          }
+                        },
+                        "comment": "Connector of Real output signal",
+                        "annotation": {
+                          "Placement": {
+                            "transformation": {
+                              "extent": [
+                                [
+                                  100,
+                                  -10
+                                ],
+                                [
+                                  120,
+                                  10
+                                ]
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "imports": [
+                      {
+                        "path": "Modelica.Units.SI"
+                      }
+                    ],
+                    "source": {
+                      "filename": "C:/Users/tetsu/AppData/Roaming/.openmodelica/libraries/Modelica 4.1.0+maint.om/Blocks/Interfaces.mo",
+                      "lineStart": 478,
+                      "columnStart": 5,
+                      "lineEnd": 478,
+                      "columnEnd": 15
+                    }
+                  }
+                },
+                {
+                  "$kind": "component",
+                  "name": "offset",
+                  "type": "Real",
+                  "modifiers": "0",
+                  "value": {
+                    "binding": 0
+                  },
+                  "prefixes": {
+                    "variability": "parameter"
+                  },
+                  "comment": "Offset of output signal y"
+                },
+                {
+                  "$kind": "component",
+                  "name": "startTime",
+                  "type": {
+                    "name": "Modelica.Units.SI.Time",
+                    "restriction": "type",
+                    "elements": [
+                      {
+                        "$kind": "extends",
+                        "modifiers": {
+                          "quantity": {
+                            "final": true,
+                            "$value": "\"Time\""
+                          },
+                          "unit": {
+                            "final": true,
+                            "$value": "\"s\""
+                          }
+                        },
+                        "baseClass": "Real"
+                      }
+                    ],
+                    "source": {
+                      "filename": "C:/Users/tetsu/AppData/Roaming/.openmodelica/libraries/Modelica 4.1.0+maint.om/Units.mo",
+                      "lineStart": 258,
+                      "columnStart": 5,
+                      "lineEnd": 258,
+                      "columnEnd": 61
+                    }
+                  },
+                  "modifiers": "0",
+                  "value": {
+                    "binding": 0.1
+                  },
+                  "prefixes": {
+                    "variability": "parameter"
+                  },
+                  "comment": "Output y = offset for time < startTime"
+                }
+              ],
+              "imports": [
+                {
+                  "path": "Modelica.Units.SI"
+                }
+              ],
+              "source": {
+                "filename": "C:/Users/tetsu/AppData/Roaming/.openmodelica/libraries/Modelica 4.1.0+maint.om/Blocks/Sources.mo",
+                "lineStart": 207,
+                "columnStart": 5,
+                "lineEnd": 207,
+                "columnEnd": 36
+              }
+            }
+          }
+        ],
+        "imports": [
+          {
+            "path": "Modelica.Blocks.Interfaces"
+          },
+          {
+            "path": "Modelica.Units.SI"
+          }
+        ],
+        "source": {
+          "filename": "C:/Users/tetsu/AppData/Roaming/.openmodelica/libraries/Modelica 4.1.0+maint.om/Blocks/Sources.mo",
+          "lineStart": 204,
+          "columnStart": 3,
+          "lineEnd": 242,
+          "columnEnd": 11
+        }
+      },
+      "modifiers": {
+        "startTime": "0.1"
+      }
+    },
+    {
+      "$kind": "component",
+      "name": "plant",
+      "type": {
+        "name": "Modelica.Blocks.Continuous.FirstOrder",
+        "restriction": "block",
+        "comment": "First order transfer function block (= 1 pole)",
+        "annotation": {
+          "Documentation": {
+            "info": "<html>\n<p>\nThis blocks defines the transfer function between the input u\nand the output y as <em>first order</em> system:\n</p>\n<blockquote><pre>\n          k\ny = ------------ * u\n       T * s + 1\n</pre></blockquote>\n<p>\nIf you would like to be able to change easily between different\ntransfer functions (FirstOrder, SecondOrder, ... ) by changing\nparameters, use the general block <strong>TransferFunction</strong> instead\nand model a first order SISO system with parameters<br>\nb = {k}, a = {T, 1}.\n</p>\n<blockquote><pre>\nExample:\n   parameter: k = 0.3, T = 0.4\n   results in:\n             0.3\n      y = ----------- * u\n          0.4 s + 1.0\n</pre></blockquote>\n\n</html>"
+          },
+          "Icon": {
+            "coordinateSystem": {
+              "preserveAspectRatio": true,
+              "extent": [
+                [
+                  -100,
+                  -100
+                ],
+                [
+                  100,
+                  100
+                ]
+              ]
+            },
+            "graphics": [
+              {
+                "$kind": "record",
+                "name": "Line",
+                "elements": [
+                  true,
+                  [
+                    0,
+                    0
+                  ],
+                  0,
+                  [
+                    [
+                      -80,
+                      78
+                    ],
+                    [
+                      -80,
+                      -90
+                    ]
+                  ],
+                  [
+                    192,
+                    192,
+                    192
+                  ],
+                  {
+                    "$kind": "enum",
+                    "name": "LinePattern.Solid",
+                    "index": 2
+                  },
+                  0.25,
+                  [
+                    {
+                      "$kind": "enum",
+                      "name": "Arrow.None",
+                      "index": 1
+                    },
+                    {
+                      "$kind": "enum",
+                      "name": "Arrow.None",
+                      "index": 1
+                    }
+                  ],
+                  3,
+                  {
+                    "$kind": "enum",
+                    "name": "Smooth.None",
+                    "index": 1
+                  }
+                ]
+              },
+              {
+                "$kind": "record",
+                "name": "Polygon",
+                "elements": [
+                  true,
+                  [
+                    0,
+                    0
+                  ],
+                  0,
+                  [
+                    192,
+                    192,
+                    192
+                  ],
+                  [
+                    192,
+                    192,
+                    192
+                  ],
+                  {
+                    "$kind": "enum",
+                    "name": "LinePattern.Solid",
+                    "index": 2
+                  },
+                  {
+                    "$kind": "enum",
+                    "name": "FillPattern.Solid",
+                    "index": 2
+                  },
+                  0.25,
+                  [
+                    [
+                      -80,
+                      90
+                    ],
+                    [
+                      -88,
+                      68
+                    ],
+                    [
+                      -72,
+                      68
+                    ],
+                    [
+                      -80,
+                      90
+                    ]
+                  ],
+                  {
+                    "$kind": "enum",
+                    "name": "Smooth.None",
+                    "index": 1
+                  }
+                ]
+              },
+              {
+                "$kind": "record",
+                "name": "Line",
+                "elements": [
+                  true,
+                  [
+                    0,
+                    0
+                  ],
+                  0,
+                  [
+                    [
+                      -90,
+                      -80
+                    ],
+                    [
+                      82,
+                      -80
+                    ]
+                  ],
+                  [
+                    192,
+                    192,
+                    192
+                  ],
+                  {
+                    "$kind": "enum",
+                    "name": "LinePattern.Solid",
+                    "index": 2
+                  },
+                  0.25,
+                  [
+                    {
+                      "$kind": "enum",
+                      "name": "Arrow.None",
+                      "index": 1
+                    },
+                    {
+                      "$kind": "enum",
+                      "name": "Arrow.None",
+                      "index": 1
+                    }
+                  ],
+                  3,
+                  {
+                    "$kind": "enum",
+                    "name": "Smooth.None",
+                    "index": 1
+                  }
+                ]
+              },
+              {
+                "$kind": "record",
+                "name": "Polygon",
+                "elements": [
+                  true,
+                  [
+                    0,
+                    0
+                  ],
+                  0,
+                  [
+                    192,
+                    192,
+                    192
+                  ],
+                  [
+                    192,
+                    192,
+                    192
+                  ],
+                  {
+                    "$kind": "enum",
+                    "name": "LinePattern.Solid",
+                    "index": 2
+                  },
+                  {
+                    "$kind": "enum",
+                    "name": "FillPattern.Solid",
+                    "index": 2
+                  },
+                  0.25,
+                  [
+                    [
+                      90,
+                      -80
+                    ],
+                    [
+                      68,
+                      -72
+                    ],
+                    [
+                      68,
+                      -88
+                    ],
+                    [
+                      90,
+                      -80
+                    ]
+                  ],
+                  {
+                    "$kind": "enum",
+                    "name": "Smooth.None",
+                    "index": 1
+                  }
+                ]
+              },
+              {
+                "$kind": "record",
+                "name": "Line",
+                "elements": [
+                  true,
+                  [
+                    -26.667,
+                    6.667
+                  ],
+                  0,
+                  [
+                    [
+                      106.667,
+                      43.333
+                    ],
+                    [
+                      -13.333,
+                      29.333
+                    ],
+                    [
+                      -53.333,
+                      -86.667
+                    ]
+                  ],
+                  [
+                    0,
+                    0,
+                    127
+                  ],
+                  {
+                    "$kind": "enum",
+                    "name": "LinePattern.Solid",
+                    "index": 2
+                  },
+                  0.25,
+                  [
+                    {
+                      "$kind": "enum",
+                      "name": "Arrow.None",
+                      "index": 1
+                    },
+                    {
+                      "$kind": "enum",
+                      "name": "Arrow.None",
+                      "index": 1
+                    }
+                  ],
+                  3,
+                  {
+                    "$kind": "enum",
+                    "name": "Smooth.Bezier",
+                    "index": 2
+                  }
+                ]
+              },
+              {
+                "$kind": "record",
+                "name": "Text",
+                "elements": [
+                  true,
+                  [
+                    0,
+                    0
+                  ],
+                  0,
+                  [
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0
+                  ],
+                  {
+                    "$kind": "enum",
+                    "name": "LinePattern.Solid",
+                    "index": 2
+                  },
+                  {
+                    "$kind": "enum",
+                    "name": "FillPattern.None",
+                    "index": 1
+                  },
+                  0.25,
+                  [
+                    [
+                      0,
+                      -60
+                    ],
+                    [
+                      60,
+                      0
+                    ]
+                  ],
+                  "PT1",
+                  0,
+                  [
+                    192,
+                    192,
+                    192
+                  ],
+                  "",
+                  [
+
+                  ],
+                  {
+                    "$kind": "enum",
+                    "name": "TextAlignment.Center",
+                    "index": 2
+                  }
+                ]
+              },
+              {
+                "$kind": "record",
+                "name": "Text",
+                "elements": [
+                  true,
+                  [
+                    0,
+                    0
+                  ],
+                  0,
+                  [
+                    0,
+                    0,
+                    0
+                  ],
+                  [
+                    0,
+                    0,
+                    0
+                  ],
+                  {
+                    "$kind": "enum",
+                    "name": "LinePattern.Solid",
+                    "index": 2
+                  },
+                  {
+                    "$kind": "enum",
+                    "name": "FillPattern.None",
+                    "index": 1
+                  },
+                  0.25,
+                  [
+                    [
+                      -150,
+                      -150
+                    ],
+                    [
+                      150,
+                      -110
+                    ]
+                  ],
+                  "T=%T",
+                  0,
+                  [
+                    -1,
+                    -1,
+                    -1
+                  ],
+                  "",
+                  [
+
+                  ],
+                  {
+                    "$kind": "enum",
+                    "name": "TextAlignment.Center",
+                    "index": 2
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "elements": [
+          {
+            "$kind": "component",
+            "name": "k",
+            "type": "Real",
+            "modifiers": "1",
+            "value": {
+              "binding": 1
+            },
+            "prefixes": {
+              "variability": "parameter"
+            },
+            "comment": "Gain"
+          },
+          {
+            "$kind": "component",
+            "name": "T",
+            "type": {
+              "name": "Modelica.Units.SI.Time",
+              "restriction": "type",
+              "elements": [
+                {
+                  "$kind": "extends",
+                  "modifiers": {
+                    "quantity": {
+                      "final": true,
+                      "$value": "\"Time\""
+                    },
+                    "unit": {
+                      "final": true,
+                      "$value": "\"s\""
+                    }
+                  },
+                  "baseClass": "Real"
+                }
+              ],
+              "source": {
+                "filename": "C:/Users/tetsu/AppData/Roaming/.openmodelica/libraries/Modelica 4.1.0+maint.om/Units.mo",
+                "lineStart": 258,
+                "columnStart": 5,
+                "lineEnd": 258,
+                "columnEnd": 61
+              }
+            },
+            "modifiers": {
+              "start": "1"
+            },
+            "value": {
+              "binding": 0.25
+            },
+            "prefixes": {
+              "variability": "parameter"
+            },
+            "comment": "Time Constant"
+          },
+          {
+            "$kind": "component",
+            "name": "initType",
+            "type": {
+              "name": "Modelica.Blocks.Types.Init",
+              "restriction": "type",
+              "comment": "Enumeration defining initialization of a block",
+              "annotation": {
+                "Evaluate": true,
+                "Documentation": {
+                  "info": "<html>\n  <p>The following initialization alternatives are available:</p>\n  <dl>\n    <dt><code><strong>NoInit</strong></code></dt>\n      <dd>No initialization (start values are used as guess values with <code>fixed=false</code>)</dd>\n    <dt><code><strong>SteadyState</strong></code></dt>\n      <dd>Steady state initialization (derivatives of states are zero)</dd>\n    <dt><code><strong>InitialState</strong></code></dt>\n      <dd>Initialization with initial states</dd>\n    <dt><code><strong>InitialOutput</strong></code></dt>\n      <dd>Initialization with initial outputs (and steady state of the states if possible)</dd>\n  </dl>\n</html>"
+                }
+              },
+              "elements": [
+                {
+                  "$kind": "extends",
+                  "baseClass": "enumeration"
+                },
+                {
+                  "$kind": "component",
+                  "name": "NoInit",
+                  "comment": "No initialization (start values are used as guess values with fixed=false)"
+                },
+                {
+                  "$kind": "component",
+                  "name": "SteadyState",
+                  "comment": "Steady state initialization (derivatives of states are zero)"
+                },
+                {
+                  "$kind": "component",
+                  "name": "InitialState",
+                  "comment": "Initialization with initial states"
+                },
+                {
+                  "$kind": "component",
+                  "name": "InitialOutput",
+                  "comment": "Initialization with initial outputs (and steady state of the states if possible)"
+                }
+              ],
+              "source": {
+                "filename": "C:/Users/tetsu/AppData/Roaming/.openmodelica/libraries/Modelica 4.1.0+maint.om/Blocks/Types.mo",
+                "lineStart": 35,
+                "columnStart": 5,
+                "lineEnd": 56,
+                "columnEnd": 11
+              }
+            },
+            "modifiers": "Init.NoInit",
+            "value": {
+              "binding": {
+                "$kind": "enum",
+                "name": "Modelica.Blocks.Types.Init.NoInit",
+                "index": 1
+              }
+            },
+            "prefixes": {
+              "variability": "parameter"
+            },
+            "comment": "Type of initialization (1: no init, 2: steady state, 3/4: initial output)",
+            "annotation": {
+              "Evaluate": true,
+              "Dialog": {
+                "group": "Initialization"
+              }
+            }
+          },
+          {
+            "$kind": "component",
+            "name": "y_start",
+            "type": "Real",
+            "modifiers": "0",
+            "value": {
+              "binding": 0
+            },
+            "prefixes": {
+              "variability": "parameter"
+            },
+            "comment": "Initial or guess value of output (= state)",
+            "annotation": {
+              "Dialog": {
+                "group": "Initialization"
+              }
+            }
+          },
+          {
+            "$kind": "extends",
+            "modifiers": {
+              "y": {
+                "start": "y_start"
+              }
+            },
+            "baseClass": {
+              "name": "Modelica.Blocks.Interfaces.SISO",
+              "restriction": "block",
+              "prefixes": {
+                "partial": true
+              },
+              "comment": "Single Input Single Output continuous control block",
+              "annotation": {
+                "Documentation": {
+                  "info": "<html>\n<p>\nBlock has one continuous Real input and one continuous Real output signal.\n</p>\n</html>"
+                }
+              },
+              "elements": [
+                {
+                  "$kind": "extends",
+                  "baseClass": {
+                    "name": "Modelica.Blocks.Icons.Block",
+                    "restriction": "block",
+                    "prefixes": {
+                      "partial": true
+                    },
+                    "comment": "Basic graphical layout of input/output block",
+                    "annotation": {
+                      "Icon": {
+                        "coordinateSystem": {
+                          "preserveAspectRatio": true,
+                          "extent": [
+                            [
+                              -100,
+                              -100
+                            ],
+                            [
+                              100,
+                              100
+                            ]
+                          ]
+                        },
+                        "graphics": [
+                          {
+                            "$kind": "record",
+                            "name": "Rectangle",
+                            "elements": [
+                              true,
+                              [
+                                0,
+                                0
+                              ],
+                              0,
+                              [
+                                0,
+                                0,
+                                127
+                              ],
+                              [
+                                255,
+                                255,
+                                255
+                              ],
+                              {
+                                "$kind": "enum",
+                                "name": "LinePattern.Solid",
+                                "index": 2
+                              },
+                              {
+                                "$kind": "enum",
+                                "name": "FillPattern.Solid",
+                                "index": 2
+                              },
+                              0.25,
+                              {
+                                "$kind": "enum",
+                                "name": "BorderPattern.None",
+                                "index": 1
+                              },
+                              [
+                                [
+                                  -100,
+                                  -100
+                                ],
+                                [
+                                  100,
+                                  100
+                                ]
+                              ],
+                              0
+                            ]
+                          },
+                          {
+                            "$kind": "record",
+                            "name": "Text",
+                            "elements": [
+                              true,
+                              [
+                                0,
+                                0
+                              ],
+                              0,
+                              [
+                                0,
+                                0,
+                                0
+                              ],
+                              [
+                                0,
+                                0,
+                                0
+                              ],
+                              {
+                                "$kind": "enum",
+                                "name": "LinePattern.Solid",
+                                "index": 2
+                              },
+                              {
+                                "$kind": "enum",
+                                "name": "FillPattern.None",
+                                "index": 1
+                              },
+                              0.25,
+                              [
+                                [
+                                  -150,
+                                  150
+                                ],
+                                [
+                                  150,
+                                  110
+                                ]
+                              ],
+                              "%name",
+                              0,
+                              [
+                                0,
+                                0,
+                                255
+                              ],
+                              "",
+                              [
+
+                              ],
+                              {
+                                "$kind": "enum",
+                                "name": "TextAlignment.Center",
+                                "index": 2
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      "Documentation": {
+                        "info": "<html>\n<p>\nBlock that has only the basic icon for an input/output\nblock (no declarations, no equations). Most blocks\nof package Modelica.Blocks inherit directly or indirectly\nfrom this block.\n</p>\n</html>"
+                      }
+                    },
+                    "imports": [
+                      {
+                        "path": "Modelica.Units.SI"
+                      }
+                    ],
+                    "source": {
+                      "filename": "C:/Users/tetsu/AppData/Roaming/.openmodelica/libraries/Modelica 4.1.0+maint.om/Blocks/Interfaces.mo",
+                      "lineStart": 325,
+                      "columnStart": 5,
+                      "lineEnd": 325,
+                      "columnEnd": 40
+                    }
+                  }
+                },
+                {
+                  "$kind": "component",
+                  "name": "u",
+                  "type": {
+                    "name": "Modelica.Blocks.Interfaces.RealInput",
+                    "restriction": "connector",
+                    "prefixes": {
+                      "direction": "input"
+                    },
+                    "comment": "'input Real' as connector",
+                    "annotation": {
+                      "defaultComponentName": "u",
+                      "Icon": {
+                        "graphics": [
+                          {
+                            "$kind": "record",
+                            "name": "Polygon",
+                            "elements": [
+                              true,
+                              [
+                                0,
+                                0
+                              ],
+                              0,
+                              [
+                                0,
+                                0,
+                                127
+                              ],
+                              [
+                                0,
+                                0,
+                                127
+                              ],
+                              {
+                                "$kind": "enum",
+                                "name": "LinePattern.Solid",
+                                "index": 2
+                              },
+                              {
+                                "$kind": "enum",
+                                "name": "FillPattern.Solid",
+                                "index": 2
+                              },
+                              0.25,
+                              [
+                                [
+                                  -100,
+                                  100
+                                ],
+                                [
+                                  100,
+                                  0
+                                ],
+                                [
+                                  -100,
+                                  -100
+                                ]
+                              ],
+                              {
+                                "$kind": "enum",
+                                "name": "Smooth.None",
+                                "index": 1
+                              }
+                            ]
+                          }
+                        ],
+                        "coordinateSystem": {
+                          "extent": [
+                            [
+                              -100,
+                              -100
+                            ],
+                            [
+                              100,
+                              100
+                            ]
+                          ],
+                          "preserveAspectRatio": true,
+                          "initialScale": 0.2
+                        }
+                      },
+                      "Diagram": {
+                        "coordinateSystem": {
+                          "preserveAspectRatio": true,
+                          "initialScale": 0.2,
+                          "extent": [
+                            [
+                              -100,
+                              -100
+                            ],
+                            [
+                              100,
+                              100
+                            ]
+                          ]
+                        },
+                        "graphics": [
+                          {
+                            "$kind": "record",
+                            "name": "Polygon",
+                            "elements": [
+                              true,
+                              [
+                                0,
+                                0
+                              ],
+                              0,
+                              [
+                                0,
+                                0,
+                                127
+                              ],
+                              [
+                                0,
+                                0,
+                                127
+                              ],
+                              {
+                                "$kind": "enum",
+                                "name": "LinePattern.Solid",
+                                "index": 2
+                              },
+                              {
+                                "$kind": "enum",
+                                "name": "FillPattern.Solid",
+                                "index": 2
+                              },
+                              0.25,
+                              [
+                                [
+                                  0,
+                                  50
+                                ],
+                                [
+                                  100,
+                                  0
+                                ],
+                                [
+                                  0,
+                                  -50
+                                ],
+                                [
+                                  0,
+                                  50
+                                ]
+                              ],
+                              {
+                                "$kind": "enum",
+                                "name": "Smooth.None",
+                                "index": 1
+                              }
+                            ]
+                          },
+                          {
+                            "$kind": "record",
+                            "name": "Text",
+                            "elements": [
+                              true,
+                              [
+                                0,
+                                0
+                              ],
+                              0,
+                              [
+                                0,
+                                0,
+                                0
+                              ],
+                              [
+                                0,
+                                0,
+                                0
+                              ],
+                              {
+                                "$kind": "enum",
+                                "name": "LinePattern.Solid",
+                                "index": 2
+                              },
+                              {
+                                "$kind": "enum",
+                                "name": "FillPattern.None",
+                                "index": 1
+                              },
+                              0.25,
+                              [
+                                [
+                                  -10,
+                                  60
+                                ],
+                                [
+                                  -10,
+                                  85
+                                ]
+                              ],
+                              "%name",
+                              0,
+                              [
+                                0,
+                                0,
+                                127
+                              ],
+                              "",
+                              [
+
+                              ],
+                              {
+                                "$kind": "enum",
+                                "name": "TextAlignment.Center",
+                                "index": 2
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      "Documentation": {
+                        "info": "<html>\n<p>\nConnector with one input signal of type Real.\n</p>\n</html>"
+                      }
+                    },
+                    "elements": [
+                      {
+                        "$kind": "extends",
+                        "baseClass": "Real"
+                      }
+                    ],
+                    "imports": [
+                      {
+                        "path": "Modelica.Units.SI"
+                      }
+                    ],
+                    "source": {
+                      "filename": "C:/Users/tetsu/AppData/Roaming/.openmodelica/libraries/Modelica 4.1.0+maint.om/Blocks/Interfaces.mo",
+                      "lineStart": 7,
+                      "columnStart": 3,
+                      "lineEnd": 36,
+                      "columnEnd": 11
+                    }
+                  },
+                  "comment": "Connector of Real input signal",
+                  "annotation": {
+                    "Placement": {
+                      "transformation": {
+                        "extent": [
+                          [
+                            -140,
+                            -20
+                          ],
+                          [
+                            -100,
+                            20
+                          ]
+                        ]
+                      }
+                    }
+                  }
+                },
+                {
+                  "$kind": "component",
+                  "name": "y",
+                  "type": {
+                    "name": "Modelica.Blocks.Interfaces.RealOutput",
+                    "restriction": "connector",
+                    "prefixes": {
+                      "direction": "output"
+                    },
+                    "comment": "'output Real' as connector",
+                    "annotation": {
+                      "defaultComponentName": "y",
+                      "Icon": {
+                        "coordinateSystem": {
+                          "preserveAspectRatio": true,
+                          "extent": [
+                            [
+                              -100,
+                              -100
+                            ],
+                            [
+                              100,
+                              100
+                            ]
+                          ]
+                        },
+                        "graphics": [
+                          {
+                            "$kind": "record",
+                            "name": "Polygon",
+                            "elements": [
+                              true,
+                              [
+                                0,
+                                0
+                              ],
+                              0,
+                              [
+                                0,
+                                0,
+                                127
+                              ],
+                              [
+                                255,
+                                255,
+                                255
+                              ],
+                              {
+                                "$kind": "enum",
+                                "name": "LinePattern.Solid",
+                                "index": 2
+                              },
+                              {
+                                "$kind": "enum",
+                                "name": "FillPattern.Solid",
+                                "index": 2
+                              },
+                              0.25,
+                              [
+                                [
+                                  -100,
+                                  100
+                                ],
+                                [
+                                  100,
+                                  0
+                                ],
+                                [
+                                  -100,
+                                  -100
+                                ]
+                              ],
+                              {
+                                "$kind": "enum",
+                                "name": "Smooth.None",
+                                "index": 1
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      "Diagram": {
+                        "coordinateSystem": {
+                          "preserveAspectRatio": true,
+                          "extent": [
+                            [
+                              -100,
+                              -100
+                            ],
+                            [
+                              100,
+                              100
+                            ]
+                          ]
+                        },
+                        "graphics": [
+                          {
+                            "$kind": "record",
+                            "name": "Polygon",
+                            "elements": [
+                              true,
+                              [
+                                0,
+                                0
+                              ],
+                              0,
+                              [
+                                0,
+                                0,
+                                127
+                              ],
+                              [
+                                255,
+                                255,
+                                255
+                              ],
+                              {
+                                "$kind": "enum",
+                                "name": "LinePattern.Solid",
+                                "index": 2
+                              },
+                              {
+                                "$kind": "enum",
+                                "name": "FillPattern.Solid",
+                                "index": 2
+                              },
+                              0.25,
+                              [
+                                [
+                                  -100,
+                                  50
+                                ],
+                                [
+                                  0,
+                                  0
+                                ],
+                                [
+                                  -100,
+                                  -50
+                                ]
+                              ],
+                              {
+                                "$kind": "enum",
+                                "name": "Smooth.None",
+                                "index": 1
+                              }
+                            ]
+                          },
+                          {
+                            "$kind": "record",
+                            "name": "Text",
+                            "elements": [
+                              true,
+                              [
+                                0,
+                                0
+                              ],
+                              0,
+                              [
+                                0,
+                                0,
+                                0
+                              ],
+                              [
+                                0,
+                                0,
+                                0
+                              ],
+                              {
+                                "$kind": "enum",
+                                "name": "LinePattern.Solid",
+                                "index": 2
+                              },
+                              {
+                                "$kind": "enum",
+                                "name": "FillPattern.None",
+                                "index": 1
+                              },
+                              0.25,
+                              [
+                                [
+                                  30,
+                                  60
+                                ],
+                                [
+                                  30,
+                                  110
+                                ]
+                              ],
+                              "%name",
+                              0,
+                              [
+                                0,
+                                0,
+                                127
+                              ],
+                              "",
+                              [
+
+                              ],
+                              {
+                                "$kind": "enum",
+                                "name": "TextAlignment.Center",
+                                "index": 2
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      "Documentation": {
+                        "info": "<html>\n<p>\nConnector with one output signal of type Real.\n</p>\n</html>"
+                      }
+                    },
+                    "elements": [
+                      {
+                        "$kind": "extends",
+                        "baseClass": "Real"
+                      }
+                    ],
+                    "imports": [
+                      {
+                        "path": "Modelica.Units.SI"
+                      }
+                    ],
+                    "source": {
+                      "filename": "C:/Users/tetsu/AppData/Roaming/.openmodelica/libraries/Modelica 4.1.0+maint.om/Blocks/Interfaces.mo",
+                      "lineStart": 38,
+                      "columnStart": 3,
+                      "lineEnd": 66,
+                      "columnEnd": 11
+                    }
+                  },
+                  "comment": "Connector of Real output signal",
+                  "annotation": {
+                    "Placement": {
+                      "transformation": {
+                        "extent": [
+                          [
+                            100,
+                            -10
+                          ],
+                          [
+                            120,
+                            10
+                          ]
+                        ]
+                      }
+                    }
+                  }
+                }
+              ],
+              "imports": [
+                {
+                  "path": "Modelica.Units.SI"
+                }
+              ],
+              "source": {
+                "filename": "C:/Users/tetsu/AppData/Roaming/.openmodelica/libraries/Modelica 4.1.0+maint.om/Blocks/Continuous.mo",
+                "lineStart": 361,
+                "columnStart": 5,
+                "lineEnd": 361,
+                "columnEnd": 46
+              }
+            }
+          }
+        ],
+        "imports": [
+          {
+            "path": "Modelica.Blocks.Types.Init"
+          },
+          {
+            "path": "Modelica.Blocks.Interfaces"
+          },
+          {
+            "path": "Modelica.Units.SI"
+          }
+        ],
+        "source": {
+          "filename": "C:/Users/tetsu/AppData/Roaming/.openmodelica/libraries/Modelica 4.1.0+maint.om/Blocks/Continuous.mo",
+          "lineStart": 351,
+          "columnStart": 3,
+          "lineEnd": 423,
+          "columnEnd": 17
+        }
+      },
+      "modifiers": {
+        "T": "0.25",
+        "k": "1"
+      }
+    }
+  ],
+  "connections": [
+    {
+      "lhs": {
+        "$kind": "cref",
+        "parts": [
+          {
+            "name": "inputSignal"
+          },
+          {
+            "name": "y"
+          }
+        ]
+      },
+      "rhs": {
+        "$kind": "cref",
+        "parts": [
+          {
+            "name": "plant"
+          },
+          {
+            "name": "u"
+          }
+        ]
+      }
+    }
+  ],
+  "source": {
+    "filename": "C:/Users/tetsu/WorkBuddy AI/Omola/tests/compat/fixtures/MSLFirstOrder.mo",
+    "lineStart": 1,
+    "columnStart": 1,
+    "lineEnd": 7,
+    "columnEnd": 18
+  }
+}
