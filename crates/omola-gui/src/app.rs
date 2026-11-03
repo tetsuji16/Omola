@@ -236,6 +236,17 @@ pub struct OmolaApp {
     pub next_run_id: u64,
     pub keep_results: usize,
     pub variable_filter: String,
+    /// Time shown in the Value column; `None` = the last sample of the newest result.
+    pub variable_time: Option<f64>,
+    /// Explicit expand/collapse state of the Variable Browser tree, keyed by
+    /// `<run id>:<path>`. A node that was never touched follows the default rule
+    /// (a top-level node with at most 20 children starts open).
+    pub variable_expanded: BTreeMap<String, bool>,
+    /// Filter toggles of the Variable Browser (both on by default).
+    pub variable_show_parameters: bool,
+    pub variable_show_time_varying: bool,
+    /// The `More >>` row of the Variable Browser is open.
+    pub variable_advanced: bool,
     pub plotted: Vec<PlotSignal>,
     /// Values edited in the variable browser, applied as overrides on the next simulation.
     pub pending_overrides: BTreeMap<String, String>,
@@ -334,6 +345,11 @@ impl OmolaApp {
             next_run_id: 1,
             keep_results: 2,
             variable_filter: String::new(),
+            variable_time: None,
+            variable_expanded: BTreeMap::new(),
+            variable_show_parameters: true,
+            variable_show_time_varying: true,
+            variable_advanced: false,
             plotted: Vec::new(),
             pending_overrides: BTreeMap::new(),
             plot_view: None,
@@ -808,6 +824,22 @@ impl OmolaApp {
         }
         let mut setup = self.setup.clone();
         setup.parameters = merge_overrides(&setup.parameters, &self.pending_overrides);
+        // A half-typed value in the Variable Browser must not silently change the run.
+        let ignored: Vec<&str> = self
+            .pending_overrides
+            .iter()
+            .filter(|(_, v)| v.trim().parse::<f64>().is_err())
+            .map(|(n, _)| n.as_str())
+            .collect();
+        if !ignored.is_empty() {
+            self.warn(
+                LogTab::Simulation,
+                format!(
+                    "Ignoring overrides that are not numbers: {}",
+                    ignored.join(", ")
+                ),
+            );
+        }
         if let Err(e) = omola_core::validate_parameter_overrides(&setup.parameters) {
             return self.error(LogTab::Translation, e.to_string());
         }
@@ -846,6 +878,14 @@ impl OmolaApp {
         self.logs.push(LogEntry {
             tab,
             level: LogLevel::Error,
+            text,
+        });
+    }
+
+    pub fn warn(&mut self, tab: LogTab, text: String) {
+        self.logs.push(LogEntry {
+            tab,
+            level: LogLevel::Warning,
             text,
         });
     }
@@ -1036,6 +1076,8 @@ impl OmolaApp {
             let removed = self.runs.remove(0);
             self.plotted.retain(|s| s.run_id != removed.id);
         }
+        // A new result has its own time axis: show its last sample again.
+        self.variable_time = None;
         self.tab = RibbonTab::Simulation;
         self.log_tab = LogTab::Simulation;
     }
