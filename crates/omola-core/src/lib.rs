@@ -44,11 +44,37 @@ pub enum BackendError {
 
 pub struct SimulationConfig<'a> {
     pub stop_time: f64,
+    /// `startTime=` in `simulate(...)`; `None` keeps the OMC default.
+    pub start_time: Option<f64>,
+    /// `numberOfIntervals=` in `simulate(...)`; `None` keeps the OMC default.
+    pub number_of_intervals: Option<u32>,
+    /// `tolerance=` in `simulate(...)`; `None` keeps the OMC default.
+    pub tolerance: Option<f64>,
+    /// `method=` in `simulate(...)`; must be one of [`SIMULATION_METHODS`].
+    pub method: Option<&'a str>,
     pub result: Option<&'a Path>,
     pub libraries: &'a [(String, String)],
     pub package_roots: &'a [PathBuf],
     pub parameters: &'a [(String, String)],
 }
+
+/// Integration methods accepted by OpenModelica 1.27.1.
+///
+/// This is the list OMC itself prints when `simulate(..., method="bogus")` fails
+/// ("current options are: ..."), minus the entries that do not run without extra
+/// configuration: `symSolver` is reported as deprecated and `optimization` needs a
+/// special setup, so neither is offered. Every name here was verified to complete a
+/// simulation of `examples/BouncingBall.mo` with OMC 1.27.1.
+pub const SIMULATION_METHODS: &[&str] = &[
+    "dassl",
+    "ida",
+    "cvode",
+    "gbode",
+    "euler",
+    "rungekutta",
+    "symSolverSsc",
+    "qss",
+];
 
 impl std::fmt::Display for BackendError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -218,6 +244,10 @@ impl Omc {
             class,
             SimulationConfig {
                 stop_time,
+                start_time: None,
+                number_of_intervals: None,
+                tolerance: None,
+                method: None,
                 result,
                 libraries,
                 package_roots,
@@ -249,6 +279,7 @@ impl Omc {
             libraries,
             package_roots,
             parameters,
+            ..
         } = config;
         validate_class(class)?;
         validate_parameter_overrides(parameters)?;
@@ -310,10 +341,7 @@ impl Omc {
                 modelica_string(&source.to_string_lossy())
             ));
         }
-        script.push_str(&format!(
-            "simulationResult := simulate({}, stopTime={}, fileNamePrefix=\"{}\", simflags=\"{}\");\nprint(\"OMOLA_RESULT_FILE:\" + simulationResult.resultFile);\n",
-            class, stop_time, output_prefix, modelica_string(&simflags)
-        ));
+        script.push_str(&simulate_call(class, &output_prefix, &config, &simflags)?);
         let (mut result, workspace, _cleanup) = self.run_script_in_temp(&script)?;
         let generated = match find_result_file(&result.output) {
             Some(path) if path.is_absolute() => path,
@@ -722,6 +750,66 @@ fn load_libraries_script(libraries: &[(String, String)]) -> Result<String, Backe
 pub fn validate_library_pins(libraries: &[(String, String)]) -> Result<(), BackendError> {
     load_libraries_script(libraries).map(|_| ())
 }
+
+/// Build the `simulate(...)` statement used by [`Omc::simulate_class`].
+///
+/// Options that are `None` are left out entirely, so the generated script is byte for byte
+/// the one written before `start_time`/`number_of_intervals`/`tolerance`/`method` existed
+/// as long as callers do not set them.
+fn simulate_call(
+    class: &str,
+    output_prefix: &str,
+    config: &SimulationConfig<'_>,
+    simflags: &str,
+) -> Result<String, BackendError> {
+    let mut call = format!("simulate({}, stopTime={}", class, config.stop_time);
+    if let Some(start_time) = config.start_time {
+        if !start_time.is_finite() {
+            return Err(BackendError::InvalidInput(
+                "start time must be finite".into(),
+            ));
+        }
+        if start_time > config.stop_time {
+            return Err(BackendError::InvalidInput(format!(
+                "start time ({start_time}) must not be later than the stop time ({})",
+                config.stop_time
+            )));
+        }
+        call.push_str(&format!(", startTime={start_time}"));
+    }
+    if let Some(intervals) = config.number_of_intervals {
+        if intervals == 0 {
+            return Err(BackendError::InvalidInput(
+                "number of intervals must be at least 1".into(),
+            ));
+        }
+        call.push_str(&format!(", numberOfIntervals={intervals}"));
+    }
+    if let Some(tolerance) = config.tolerance {
+        if !tolerance.is_finite() || tolerance <= 0.0 || tolerance >= 1.0 {
+            return Err(BackendError::InvalidInput(
+                "tolerance must be greater than 0 and smaller than 1".into(),
+            ));
+        }
+        call.push_str(&format!(", tolerance={tolerance}"));
+    }
+    if let Some(method) = config.method {
+        if !SIMULATION_METHODS.contains(&method) {
+            return Err(BackendError::InvalidInput(format!(
+                "unsupported integration method {method:?}; expected one of {}",
+                SIMULATION_METHODS.join(", ")
+            )));
+        }
+        call.push_str(&format!(", method=\"{}\"", modelica_string(method)));
+    }
+    call.push_str(&format!(
+        ", fileNamePrefix=\"{}\", simflags=\"{}\");\nprint(\"OMOLA_RESULT_FILE:\" + simulationResult.resultFile);\n",
+        output_prefix,
+        modelica_string(simflags)
+    ));
+    Ok(call)
+}
+
 fn absolute_output(path: &Path) -> Result<PathBuf, BackendError> {
     if path.is_absolute() {
         Ok(path.to_path_buf())
@@ -931,6 +1019,115 @@ mod tests {
             modelica_string(r#"C:\a \"quoted\" folder\m.mo"#),
             r#"C:\\a \\\"quoted\\\" folder\\m.mo"#
         );
+    }
+
+    fn simulate_config(
+        start_time: Option<f64>,
+        number_of_intervals: Option<u32>,
+        tolerance: Option<f64>,
+        method: Option<&'static str>,
+    ) -> SimulationConfig<'static> {
+        SimulationConfig {
+            stop_time: 2.0,
+            start_time,
+            number_of_intervals,
+            tolerance,
+            method,
+            result: None,
+            libraries: &[],
+            package_roots: &[],
+            parameters: &[],
+        }
+    }
+
+    #[test]
+    fn simulate_call_is_unchanged_when_no_option_is_set() {
+        let call = simulate_call("M", "run", &simulate_config(None, None, None, None), "").unwrap();
+        assert_eq!(
+            call,
+            "simulate(M, stopTime=2, fileNamePrefix=\"run\", simflags=\"\");\nprint(\"OMOLA_RESULT_FILE:\" + simulationResult.resultFile);\n"
+        );
+    }
+
+    #[test]
+    fn simulate_call_passes_every_setting() {
+        let call = simulate_call(
+            "Modelica.Blocks.Examples.PID_Controller",
+            "run",
+            &simulate_config(Some(0.0), Some(10), Some(1e-6), Some("euler")),
+            "-override=k=2",
+        )
+        .unwrap();
+        assert_eq!(
+            call,
+            "simulate(Modelica.Blocks.Examples.PID_Controller, stopTime=2, startTime=0, numberOfIntervals=10, tolerance=0.000001, method=\"euler\", fileNamePrefix=\"run\", simflags=\"-override=k=2\");\nprint(\"OMOLA_RESULT_FILE:\" + simulationResult.resultFile);\n"
+        );
+    }
+
+    #[test]
+    fn simulate_call_rejects_unsafe_or_inconsistent_options() {
+        let injected = "dassl\"); system(\"x";
+        assert!(simulate_call(
+            "M",
+            "run",
+            &simulate_config(None, None, None, Some(injected)),
+            ""
+        )
+        .is_err());
+        assert!(simulate_call(
+            "M",
+            "run",
+            &simulate_config(None, None, None, Some("bogus")),
+            ""
+        )
+        .is_err());
+        assert!(simulate_call(
+            "M",
+            "run",
+            &simulate_config(Some(3.0), None, None, None),
+            ""
+        )
+        .is_err());
+        assert!(simulate_call(
+            "M",
+            "run",
+            &simulate_config(Some(f64::NAN), None, None, None),
+            ""
+        )
+        .is_err());
+        assert!(
+            simulate_call("M", "run", &simulate_config(None, Some(0), None, None), "").is_err()
+        );
+        assert!(simulate_call(
+            "M",
+            "run",
+            &simulate_config(None, None, Some(0.0), None),
+            ""
+        )
+        .is_err());
+        assert!(simulate_call(
+            "M",
+            "run",
+            &simulate_config(None, None, Some(1.0), None),
+            ""
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn every_listed_method_is_accepted() {
+        for method in SIMULATION_METHODS {
+            assert!(
+                simulate_call(
+                    "M",
+                    "run",
+                    &simulate_config(None, None, None, Some(*method)),
+                    ""
+                )
+                .is_ok(),
+                "{method}"
+            );
+        }
     }
 
     #[test]
