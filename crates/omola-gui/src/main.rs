@@ -6,6 +6,8 @@
 mod app;
 mod backend;
 mod cache;
+mod diagram;
+mod diagram_view;
 mod graphics;
 mod html;
 mod instance;
@@ -13,6 +15,7 @@ mod library;
 mod model;
 mod plot;
 mod series;
+mod text_editor;
 mod theme;
 mod ui;
 mod var_tree;

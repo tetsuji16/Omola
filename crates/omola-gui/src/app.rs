@@ -222,6 +222,14 @@ pub struct OmolaApp {
     pub components_pending: Option<String>,
     /// Icon graphics per class, for the Icon layer (`getModelInstanceAnnotation`, G07).
     pub icons: BTreeMap<String, Loadable<crate::graphics::Icon>>,
+    /// Diagram graphics + placement + connections per class (G12).
+    pub model_diagrams: BTreeMap<String, Loadable<crate::diagram::Diagram>>,
+    /// Viewport zoom for the Diagram layer.
+    pub diagram_zoom: f32,
+    /// Viewport pan for the Diagram layer (in diagram coordinates).
+    pub diagram_pan: egui::Vec2,
+    /// Selected component in the Diagram layer (for tooltip and component browser sync).
+    pub selected_component: Option<String>,
     pub doc_view: DocView,
     pub find_open: bool,
     pub find_query: String,
@@ -341,6 +349,10 @@ impl OmolaApp {
             component_expanded: BTreeSet::new(),
             components_pending: None,
             icons: BTreeMap::new(),
+            model_diagrams: BTreeMap::new(),
+            diagram_zoom: 1.0,
+            diagram_pan: egui::Vec2::ZERO,
+            selected_component: None,
             doc_view: DocView::Formatted,
             find_open: false,
             find_query: String::new(),
@@ -653,6 +665,23 @@ impl OmolaApp {
         }
         self.icons.insert(class.to_owned(), Loadable::Loading);
         self.worker.submit(Job::LoadIcon {
+            class: class.to_owned(),
+            context: self.context_for(class),
+        });
+    }
+
+    /// Ask the worker for the Diagram graphics of `class` (once per class).
+    ///
+    /// The Diagram layer calls this on every frame it is visible, so an entry is added to
+    /// [`Self::model_diagrams`] before the job is sent; a failed load is remembered as well and is
+    /// only retried after the next Check.
+    pub fn request_diagram(&mut self, class: &str) {
+        if self.model_diagrams.contains_key(class) {
+            return;
+        }
+        self.model_diagrams
+            .insert(class.to_owned(), Loadable::Loading);
+        self.worker.submit(Job::LoadDiagram {
             class: class.to_owned(),
             context: self.context_for(class),
         });
@@ -1020,6 +1049,15 @@ impl OmolaApp {
                         class,
                         match result {
                             Ok(icon) => Loadable::Ready(icon),
+                            Err(message) => Loadable::Failed(message),
+                        },
+                    );
+                }
+                Event::Diagram(class, result) => {
+                    self.model_diagrams.insert(
+                        class,
+                        match result {
+                            Ok(diagram) => Loadable::Ready(diagram),
                             Err(message) => Loadable::Failed(message),
                         },
                     );

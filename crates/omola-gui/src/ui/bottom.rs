@@ -177,6 +177,9 @@ impl OmolaApp {
                     ui.add_space(12.0);
                     ui.spinner();
                     ui.label(RichText::new(" Running OpenModelica...").size(12.0));
+                    if ui.small_button("Stop").clicked() {
+                        self.worker.cancel();
+                    }
                 } else if self.omc_version.is_none() {
                     ui.add_space(12.0);
                     ui.label(

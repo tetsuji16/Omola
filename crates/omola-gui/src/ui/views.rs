@@ -2,6 +2,8 @@
 
 use super::widgets::{flat_tab, paint_icon};
 use crate::app::{Layer, Loadable, OmolaApp, PlotSignal};
+use crate::backend::LogTab;
+use crate::text_editor::{draw_text_editor, extract_error_lines};
 use crate::theme;
 use egui::{Align2, Color32, FontId, RichText, Sense, Stroke, Vec2};
 use egui_material_icons::icons::*;
@@ -111,7 +113,7 @@ impl OmolaApp {
                 ui.set_min_size(ui.available_size());
                 match self.layer() {
                     Layer::Icon => self.icon_layer(ui, &class),
-                    Layer::Diagram => diagram_canvas(ui, self.layer()),
+                    Layer::Diagram => self.diagram_layer(ui, &class),
                     Layer::Documentation => self.documentation_layer(ui, &class),
                     Layer::Text => self.text_layer(ui, &class),
                 }
@@ -121,21 +123,24 @@ impl OmolaApp {
     fn text_layer(&mut self, ui: &mut egui::Ui, class: &str) {
         if let Some(i) = self.doc_of(class) {
             let doc = &mut self.documents[i];
-            let changed = egui::ScrollArea::both()
-                .id_salt(("user_text", i))
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    ui.add(
-                        egui::TextEdit::multiline(&mut doc.text)
-                            .code_editor()
-                            .frame(egui::Frame::NONE)
-                            .desired_width(f32::INFINITY)
-                            .desired_rows(40),
-                    )
-                    .changed()
-                })
-                .inner;
+
+            // Extract error lines from OMC output for this file
+            let error_lines =
+                if let Some(log_tab) = self.logs.iter().find(|l| l.tab == LogTab::Simulation) {
+                    extract_error_lines(&log_tab.text, doc.path.as_ref())
+                } else {
+                    Vec::new()
+                };
+
+            let changed = draw_text_editor(
+                ui,
+                &mut doc.editor,
+                &mut doc.text,
+                doc.path.as_ref(),
+                &error_lines,
+            );
             if changed {
+                doc.dirty = true;
                 self.user_text_changed(i);
             }
             return;
@@ -197,6 +202,100 @@ impl OmolaApp {
             Some(Loadable::Loading) => note("Loading the Icon annotation ..."),
             Some(Loadable::Failed(message)) => note(message),
             None => note("Loading the Icon annotation ..."),
+        }
+    }
+
+    /// Graphics tab > Diagram: read-only placement + connections (G12).
+    fn diagram_layer(&mut self, ui: &mut egui::Ui, class: &str) {
+        self.request_diagram(class);
+        // Toolbar
+        ui.horizontal(|ui| {
+            if ui.button("Fit").clicked() {
+                self.diagram_zoom = 1.0;
+                self.diagram_pan = egui::Vec2::ZERO;
+            }
+            if ui.button("+").clicked() {
+                self.diagram_zoom = (self.diagram_zoom * 1.2).clamp(0.1, 20.0);
+            }
+            if ui.button("−").clicked() {
+                self.diagram_zoom = (self.diagram_zoom / 1.2).clamp(0.1, 20.0);
+            }
+            ui.label(format!("Zoom: {:.0}%", self.diagram_zoom * 100.0));
+        });
+        let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, 0.0, Color32::WHITE);
+        // wheel zoom around cursor
+        let scroll = ui.input(|i| i.zoom_delta());
+        if scroll != 1.0 && scroll > 0.0 {
+            self.diagram_zoom = (self.diagram_zoom * scroll).clamp(0.1, 20.0);
+        }
+        // pan with middle/right drag or left drag with shift
+        if response.dragged() {
+            let secondary = ui.input(|i| i.pointer.secondary_down() || i.pointer.middle_down());
+            if secondary {
+                self.diagram_pan += response.drag_delta();
+            }
+        }
+        let diagram = match self.model_diagrams.get(class) {
+            Some(Loadable::Ready(d)) => d.clone(),
+            Some(Loadable::Loading) => {
+                painter.text(
+                    rect.center(),
+                    Align2::CENTER_CENTER,
+                    "Loading Diagram ...",
+                    FontId::proportional(13.0),
+                    theme::TEXT_WEAK,
+                );
+                return;
+            }
+            Some(Loadable::Failed(e)) => {
+                painter.text(
+                    rect.center(),
+                    Align2::CENTER_CENTER,
+                    e.clone(),
+                    FontId::proportional(13.0),
+                    theme::TEXT_WEAK,
+                );
+                return;
+            }
+            None => {
+                painter.text(
+                    rect.center(),
+                    Align2::CENTER_CENTER,
+                    "Loading Diagram ...",
+                    FontId::proportional(13.0),
+                    theme::TEXT_WEAK,
+                );
+                return;
+            }
+        };
+        crate::diagram_view::paint_diagram(
+            &painter,
+            rect,
+            &diagram,
+            self.diagram_zoom,
+            self.diagram_pan,
+        );
+        // Hover / click on components
+        if let Some(pos) = response.hover_pos() {
+            for comp in &diagram.components {
+                let cr = crate::diagram_view::component_screen_rect(
+                    &diagram,
+                    rect,
+                    self.diagram_zoom,
+                    self.diagram_pan,
+                    comp,
+                );
+                if cr.contains(pos) {
+                    if response.clicked() {
+                        self.selected_component = Some(comp.name.clone());
+                        self.component_expanded.insert(comp.name.clone());
+                    }
+                    response.on_hover_text(format!("{} : {}", comp.name, comp.type_name));
+                    break;
+                }
+            }
         }
     }
 
@@ -620,22 +719,6 @@ fn empty_canvas(ui: &mut egui::Ui, message: &str) {
         Align2::CENTER_CENTER,
         message,
         FontId::proportional(13.0),
-        theme::TEXT_WEAK,
-    );
-}
-
-/// White canvas with the Modelica coordinate system ({-100,-100},{100,100}) and its grid.
-fn diagram_canvas(ui: &mut egui::Ui, layer: Layer) {
-    let (rect, sheet) = canvas_sheet(ui);
-    let note = match layer {
-        Layer::Icon => "Icon layer: graphical rendering is tracked in issue G07",
-        _ => "Diagram layer: graphical rendering is tracked in issue G12",
-    };
-    ui.painter_at(rect).text(
-        egui::pos2(sheet.center().x, sheet.bottom() + 12.0),
-        Align2::CENTER_CENTER,
-        note,
-        FontId::proportional(11.0),
         theme::TEXT_WEAK,
     );
 }

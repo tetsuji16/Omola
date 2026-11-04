@@ -18,6 +18,7 @@ egui_extras = { version = "0.37", default-features = false, features = ["file", 
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+syntect = { version = "5", default-features = false, features = ["default"] }
 # `xdg-portal` alone is not enough: rfd's own default is `["xdg-portal", "async-std"]`,
 # and without `async-std` the `zbus` it pulls in is built with neither `async-io` nor
 # `tokio`, which does not compile ("no field `0` on `abstractions::process::Command`").
