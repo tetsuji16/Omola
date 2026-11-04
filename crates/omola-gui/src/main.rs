@@ -11,8 +11,10 @@ mod html;
 mod instance;
 mod library;
 mod model;
+mod series;
 mod theme;
 mod ui;
+mod var_tree;
 
 use std::path::PathBuf;
 
