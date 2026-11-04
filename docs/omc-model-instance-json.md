@@ -152,3 +152,19 @@ G07 で取得した実データ(`crates/omola-gui/tests/fixtures/`):
 | `icon_Resistor.json` | `Modelica.Electrical.Analog.Basic.Resistor` | Rectangle, Line ×2, Text ×2(条件付き Line は除外) |
 | `icon_Inertia.json` | `Modelica.Mechanics.Rotational.Components.Inertia` | Rectangle ×4, Line ×9, Text ×2 |
 | `icon_InheritedBlock.json` | `InheritsBlockIcon`(`icon_InheritedBlock.mo`) | Rectangle, Text(親から継承) |
+
+
+## Diagram 観察(G12, 2026-11-04 実測)
+
+`Modelica.Electrical.Analog.Examples.CauerLowPassAnalog` と `Modelica.Blocks.Examples.PID_Controller`
+のインスタンス JSON を上記手順で取得し、`crates/omola-gui/tests/fixtures/instance_cauer.json`
+(18 components, 16 connections, 11 with `Placement`) と `instance_pid.json`
+(10 components, 9 connections, 9 with `Placement`) に保存した。
+
+- 部品の型: `element["type"]["name"]` (旧来の `typeName` は無い)。例: `Modelica.Electrical.Analog.Basic.Ground`
+- 配置: `element["annotation"]["Placement"]["transformation"]` は `extent` のみであることが多い
+  (`origin`/`rotation` がデフォルトの場合は省略される)
+- 結線: `connections[]` は `{"lhs": cref, "rhs": cref, "annotation": {"Line": {"points": [...], "color": [...]}}}`。
+  `lhs`/`rhs` は `{"$kind": "cref", "parts": [{"name": ...}]}` で、ドット連結して `from`/`to` とする
+- クラス自身の Diagram: `annotation.Diagram.coordinateSystem.extent` と `annotation.Diagram.graphics`
+  (例: CauerLowPassAnalog は extent `[[-120,-100],[120,100]]`、own graphics 6)

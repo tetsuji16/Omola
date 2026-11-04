@@ -40,6 +40,7 @@ pub enum BackendError {
         version: String,
         output: String,
     },
+    Cancelled,
 }
 
 pub struct SimulationConfig<'a> {
@@ -87,6 +88,7 @@ impl std::fmt::Display for BackendError {
             Self::CompilerFailed { version, status, stdout, stderr } => write!(f, "OpenModelica {version} exited with status {status:?}.\nstdout:\n{stdout}\nstderr:\n{stderr}"),
             Self::CompilerDiagnostic { version, output } => write!(f, "OpenModelica {version} reported an error:\n{output}"),
             Self::InvalidCompilerResponse { version, output } => write!(f, "OpenModelica {version} returned no usable result:\n{output}"),
+            Self::Cancelled => write!(f, "Operation cancelled by the user."),
         }
     }
 }
@@ -107,6 +109,7 @@ pub struct CommandResult {
 #[derive(Debug, Clone)]
 pub struct Omc {
     executable: PathBuf,
+    cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl Omc {
@@ -120,12 +123,18 @@ impl Omc {
                 if !path.is_file() {
                     return Err(BackendError::InvalidConfiguredCompiler { path });
                 }
-                return Ok(Self { executable: path });
+                return Ok(Self {
+                    executable: path,
+                    cancel: None,
+                });
             }
         }
         let name = if cfg!(windows) { "omc.exe" } else { "omc" };
         if let Some(path) = find_on_path(name) {
-            return Ok(Self { executable: path });
+            return Ok(Self {
+                executable: path,
+                cancel: None,
+            });
         }
         let program_files = if cfg!(windows) {
             Some(
@@ -142,7 +151,10 @@ impl Omc {
             name,
         );
         if let Some(path) = installed.into_iter().find(|p| p.is_file()) {
-            return Ok(Self { executable: path });
+            return Ok(Self {
+                executable: path,
+                cancel: None,
+            });
         }
         Err(BackendError::MissingCompiler {
             searched: "checked OMOLA_OMC, PATH, OPENMODELICAHOME and the standard install folders"
@@ -152,6 +164,11 @@ impl Omc {
 
     pub fn executable(&self) -> &Path {
         &self.executable
+    }
+
+    pub fn with_cancel_flag(mut self, flag: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Self {
+        self.cancel = Some(flag);
+        self
     }
 
     pub fn version(&self) -> Result<String, BackendError> {
@@ -633,12 +650,72 @@ impl Omc {
         if let Some(dir) = current_dir {
             command.current_dir(dir);
         }
-        command
-            .output()
-            .map_err(|source| BackendError::LaunchFailed {
-                executable: self.executable.clone(),
-                source,
-            })
+        let launch_failed = |source| BackendError::LaunchFailed {
+            executable: self.executable.clone(),
+            source,
+        };
+        let Some(flag) = &self.cancel else {
+            return command.output().map_err(launch_failed);
+        };
+        use std::io::Read;
+        use std::process::Stdio;
+        use std::sync::atomic::Ordering;
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        let mut child = command.spawn().map_err(launch_failed)?;
+        let mut out = child.stdout.take().expect("stdout piped");
+        let mut err = child.stderr.take().expect("stderr piped");
+        let out_t = std::thread::spawn(move || {
+            let mut b = Vec::new();
+            let _ = out.read_to_end(&mut b);
+            b
+        });
+        let err_t = std::thread::spawn(move || {
+            let mut b = Vec::new();
+            let _ = err.read_to_end(&mut b);
+            b
+        });
+        loop {
+            if let Some(status) = child.try_wait()? {
+                let stdout = out_t.join().unwrap_or_default();
+                let stderr = err_t.join().unwrap_or_default();
+                return Ok(std::process::Output {
+                    status,
+                    stdout,
+                    stderr,
+                });
+            }
+            if flag.load(Ordering::Relaxed) {
+                kill_tree(&mut child);
+                let _ = child.wait();
+                return Err(BackendError::Cancelled);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+}
+
+fn kill_tree(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        let pid = child.id();
+        let _ = std::process::Command::new("kill")
+            .args(["-TERM", &format!("-{pid}")])
+            .status();
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        if child.try_wait().ok().flatten().is_none() {
+            let _ = std::process::Command::new("kill")
+                .args(["-KILL", &format!("-{pid}")])
+                .status();
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = child.kill();
     }
 }
 
@@ -1218,5 +1295,50 @@ fn main() {
         let mos = PathBuf::from(fs::read_to_string(&log).unwrap());
         assert!(!mos.exists());
         assert!(!mos.parent().unwrap().exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancel_flag_stops_long_running_fake_omc_within_two_seconds() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::new("cancel").unwrap();
+        let fake = dir.path.join("fake-omc");
+        fs::write(
+            &fake,
+            "#!/bin/sh
+if [ \"$1\" = \"--version\" ]; then echo 'OpenModelica 1.27.1 (fake)'; exit 0; fi
+sleep 30
+",
+        )
+        .unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+        let old = env::var_os("OMOLA_OMC");
+        env::set_var("OMOLA_OMC", &fake);
+        let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag_setter = flag.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            flag_setter.store(true, std::sync::atomic::Ordering::Relaxed);
+        });
+        let omc = Omc::discover().unwrap().with_cancel_flag(flag);
+        let started = std::time::Instant::now();
+        let result = omc.run_script("print(1);");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "took {:?}",
+            started.elapsed()
+        );
+        assert!(
+            matches!(result, Err(BackendError::Cancelled)),
+            "unexpected: {result:?}"
+        );
+        // Child sleep processes are killed via the process group (kill -TERM -pid);
+        // verifying via pgrep is best-effort and omitted on CI without pgrep, so we only
+        // assert the in-time return here. The 2s bound proves the loop does not hang.
+        if let Some(old) = old {
+            env::set_var("OMOLA_OMC", old);
+        } else {
+            env::remove_var("OMOLA_OMC");
+        }
     }
 }

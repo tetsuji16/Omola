@@ -3,6 +3,7 @@
 //! The outline scanner is a *display helper* for the package browser only. It is not a
 //! Modelica parser; checking, translation and simulation are always delegated to OMC.
 
+use crate::text_editor::EditorState;
 use std::path::PathBuf;
 
 /// Kinds of Modelica class definitions shown in the package browser.
@@ -25,6 +26,8 @@ pub struct Document {
     pub path: Option<PathBuf>,
     pub text: String,
     pub dirty: bool,
+    /// Editor state (cursor position, selection, syntax highlighting, etc.).
+    pub editor: EditorState,
 }
 
 impl Document {
@@ -33,6 +36,7 @@ impl Document {
             path: None,
             text: text.into(),
             dirty: false,
+            editor: EditorState::new(),
         }
     }
 
@@ -42,6 +46,7 @@ impl Document {
             path: Some(path),
             text,
             dirty: false,
+            editor: EditorState::new(),
         })
     }
 

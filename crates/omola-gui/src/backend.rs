@@ -71,6 +71,11 @@ pub enum Job {
         class: String,
         context: ClassContext,
     },
+    /// Diagram graphics + component placement + connections, from instance JSON + icon annotations (G12).
+    LoadDiagram {
+        class: String,
+        context: ClassContext,
+    },
     Check {
         class: String,
         context: ClassContext,
@@ -146,6 +151,8 @@ pub enum Event {
     Instance(String, Result<Vec<crate::instance::ComponentNode>, String>),
     /// Icon graphics of a class; `Err` when the class has no usable Icon annotation.
     Icon(String, Result<crate::graphics::Icon, String>),
+    /// Diagram graphics + component placement + connections (G12).
+    Diagram(String, Result<crate::diagram::Diagram, String>),
     SimulationFinished(Box<SimulationOutcome>),
     /// `InstallLibraries` finished (`true` when the Modelica Standard Library is installed).
     LibrariesInstalled(bool),
@@ -157,6 +164,7 @@ const INSTANCE_DEPTH: usize = 4;
 pub struct Worker {
     jobs: Sender<Job>,
     events: Receiver<Event>,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Worker {
@@ -164,11 +172,14 @@ impl Worker {
     pub fn spawn(work_root: PathBuf, wake: impl Fn() + Send + 'static) -> Self {
         let (jobs, job_rx) = mpsc::channel::<Job>();
         let (event_tx, events) = mpsc::channel::<Event>();
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let cancel_worker = cancel.clone();
         thread::Builder::new()
             .name("omola-omc-worker".into())
             .spawn(move || {
                 let mut run_counter = 0u32;
                 for job in job_rx {
+                    cancel_worker.store(false, std::sync::atomic::Ordering::Relaxed);
                     let send = |event: Event| {
                         let _ = event_tx.send(event);
                         wake();
@@ -176,16 +187,25 @@ impl Worker {
                     send(Event::Busy(true));
                     run_counter += 1;
                     let run_dir = work_root.join(format!("run-{run_counter}"));
-                    run_job(job, &run_dir, &send);
+                    run_job(job, &run_dir, &cancel_worker, &send);
                     send(Event::Busy(false));
                 }
             })
             .expect("spawn OMC worker thread");
-        Self { jobs, events }
+        Self {
+            jobs,
+            events,
+            cancel,
+        }
     }
 
     pub fn submit(&self, job: Job) {
         let _ = self.jobs.send(job);
+    }
+
+    pub fn cancel(&self) {
+        self.cancel
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Drain all pending events without blocking.
@@ -208,8 +228,13 @@ fn pinned(libraries: &[LibrarySpec]) -> Vec<(String, String)> {
         .collect()
 }
 
-fn run_job(job: Job, run_dir: &Path, send: &dyn Fn(Event)) {
-    let omc = match Omc::discover() {
+fn run_job(
+    job: Job,
+    run_dir: &Path,
+    cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+    send: &dyn Fn(Event),
+) {
+    let omc = match Omc::discover().map(|omc| omc.with_cancel_flag(cancel.clone())) {
         Ok(omc) => omc,
         Err(error) => {
             send(Event::OmcVersion(None));
@@ -350,6 +375,93 @@ fn run_job(job: Job, run_dir: &Path, send: &dyn Fn(Event)) {
             }
             send(Event::Icon(class, result));
         }
+        Job::LoadDiagram { class, context } => {
+            // First load the instance JSON to get component placements and connections
+            let instance_result = with_user_file(run_dir, &class, &context, |file| {
+                let script = library::instance_script(&class, &context.libraries, file)
+                    .map_err(|e| e.to_string())?;
+                omc.run_query_script(&script)
+                    .map(|out| out.output)
+                    .map_err(|e| e.to_string())
+            });
+
+            let instance_json = match instance_result {
+                Ok(output) => {
+                    let sections = library::parse_sections(&output);
+                    let body = match sections
+                        .get("instance")
+                        .ok_or_else(|| format!("OMC returned no instance JSON for {class}"))
+                    {
+                        Ok(b) => b,
+                        Err(e) => {
+                            send(Event::Diagram(class.clone(), Err(e)));
+                            return;
+                        }
+                    };
+                    match crate::instance::extract_json(body)
+                        .ok_or_else(|| format!("OMC returned no instance JSON for {class}"))
+                    {
+                        Ok(j) => j.to_owned(),
+                        Err(e) => {
+                            send(Event::Diagram(class.clone(), Err(e)));
+                            return;
+                        }
+                    }
+                }
+                Err(e) => {
+                    send(Event::Diagram(class.clone(), Err(e)));
+                    return;
+                }
+            };
+
+            // Parse the instance JSON to get component types
+            let instance_value: serde_json::Value = match serde_json::from_str(&instance_json) {
+                Ok(v) => v,
+                Err(e) => {
+                    send(Event::Diagram(
+                        class.clone(),
+                        Err(format!("could not parse instance JSON: {e}")),
+                    ));
+                    return;
+                }
+            };
+
+            // Collect all component types that need icons
+            let mut component_types = std::collections::BTreeSet::new();
+            if let Some(elements) = instance_value.get("elements").and_then(|e| e.as_array()) {
+                for element in elements {
+                    if element.get("$kind").and_then(|k| k.as_str()) == Some("component") {
+                        if let Some(type_name) = element.get("typeName").and_then(|n| n.as_str()) {
+                            component_types.insert(type_name.to_owned());
+                        }
+                    }
+                }
+            }
+
+            // Load icons for all component types
+            let mut icons = std::collections::BTreeMap::new();
+            for type_name in component_types {
+                let icon_script = library::icon_script(&type_name, &context.libraries, None)
+                    .map_err(|e| e.to_string());
+                if let Ok(script) = icon_script {
+                    if let Ok(out) = omc.run_query_script(&script) {
+                        let sections = library::parse_sections(&out.output);
+                        let body = sections.get("icon").map(|s| s.trim()).unwrap_or("");
+                        if let Some(json_str) = crate::instance::extract_json(body) {
+                            if let Ok(value) = serde_json::from_str::<serde_json::Value>(json_str) {
+                                if let Ok(icon) = crate::graphics::parse_icon(&value) {
+                                    icons.insert(type_name, icon);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Now parse the diagram with the icons
+            let diagram = crate::diagram::parse_diagram(&instance_value, &icons);
+            send(Event::Diagram(class, diagram));
+        }
         Job::Check { class, context } => {
             send(Event::Log(
                 LogTab::Syntax,
@@ -462,6 +574,7 @@ fn fail_job(job: Job, message: String, send: &dyn Fn(Event)) {
         Job::LoadClassText { class, .. } => send(Event::ClassText(class, Err(message))),
         Job::LoadInstance { class, .. } => send(Event::Instance(class, Err(message))),
         Job::LoadIcon { class, .. } => send(Event::Icon(class, Err(message))),
+        Job::LoadDiagram { class, .. } => send(Event::Diagram(class, Err(message))),
         Job::Command { text, .. } => send(Event::Command(format!("{text}\n  {message}"))),
         Job::InstallLibraries => send(Event::LibrariesInstalled(false)),
         Job::Doctor | Job::Check { .. } | Job::Simulate { .. } => {}
@@ -534,6 +647,13 @@ fn simulate(
     );
     let result = match outcome {
         Ok(result) => result,
+        Err(omola_core::BackendError::Cancelled) => {
+            return send(Event::Log(
+                LogTab::Simulation,
+                LogLevel::Warning,
+                "Simulation stopped.".into(),
+            ))
+        }
         Err(error) => {
             return send(Event::Log(
                 LogTab::Translation,
