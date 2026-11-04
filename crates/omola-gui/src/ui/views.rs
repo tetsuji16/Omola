@@ -1,7 +1,7 @@
 //! Central views: model tabs + edit window (per layer) and the plot window.
 
 use super::widgets::{flat_tab, paint_icon};
-use crate::app::{Layer, Loadable, OmolaApp};
+use crate::app::{Layer, Loadable, OmolaApp, PlotSignal};
 use crate::theme;
 use egui::{Align2, Color32, FontId, RichText, Sense, Stroke, Vec2};
 use egui_material_icons::icons::*;
@@ -201,21 +201,171 @@ impl OmolaApp {
     }
 
     pub fn plot_window(&mut self, ui: &mut egui::Ui) {
-        let curves: Vec<Curve> = self
-            .plotted
+        let (panel, _) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
+        let painter = ui.painter_at(panel);
+        painter.rect_filled(panel, 0.0, Color32::WHITE);
+        // Collect the curves first so the borrow of `runs` ends before drawing.
+        let diagrams: Vec<Vec<Curve>> = self
+            .diagrams
+            .iter()
+            .map(|diagram| self.curves(&diagram.signals))
+            .collect();
+        if diagrams.is_empty() {
+            return;
+        }
+        if diagrams.iter().all(Vec::is_empty) {
+            painter.text(
+                panel.center(),
+                Align2::CENTER_CENTER,
+                "No curves. Tick a variable in the Variable Browser.",
+                FontId::proportional(12.5),
+                theme::TEXT_WEAK,
+            );
+        }
+        // Every diagram shares one time axis.
+        let x_range = self
+            .plot_x
+            .or_else(|| data_bounds(diagrams.iter().flatten()).map(|(x0, x1, _, _)| (x0, x1)));
+        let count = diagrams.len();
+        let slot_height = panel.height() / count as f32;
+        let cursor_enabled = self.cursor_enabled;
+        for (index, curves) in diagrams.iter().enumerate() {
+            let slot = egui::Rect::from_min_size(
+                egui::pos2(panel.left(), panel.top() + index as f32 * slot_height),
+                egui::vec2(panel.width(), slot_height),
+            );
+            let frame = egui::Rect::from_min_max(
+                egui::pos2(slot.left() + 53.0, slot.top() + 31.0),
+                egui::pos2(slot.right() - 24.0, slot.bottom() - 29.0),
+            );
+            if frame.width() < 40.0 || frame.height() < 40.0 {
+                continue;
+            }
+            // Legend above the frame.
+            let mut lx = frame.left() - 2.0;
+            for curve in curves {
+                let y = slot.top() + 16.5;
+                painter.hline(lx..=lx + 26.0, y, Stroke::new(1.0, curve.color));
+                let galley = painter.layout_no_wrap(
+                    curve.name.clone(),
+                    FontId::proportional(12.0),
+                    theme::TEXT,
+                );
+                let width = galley.size().x;
+                painter.galley(
+                    egui::pos2(lx + 31.0, y - galley.size().y / 2.0),
+                    galley,
+                    theme::TEXT,
+                );
+                lx += 31.0 + width + 18.0;
+            }
+            let active = index == self.active_diagram;
+            let border = if active {
+                theme::ACCENT
+            } else {
+                Color32::from_rgb(0x3A, 0x3A, 0x3A)
+            };
+            let Some((x0, x1)) = x_range else {
+                painter.rect_stroke(
+                    frame,
+                    0.0,
+                    Stroke::new(1.0, border),
+                    egui::StrokeKind::Inside,
+                );
+                continue;
+            };
+            // y: the diagram's own zoom, else fitted to its curves.
+            let fitted = data_bounds(curves.iter()).map(|(_, _, y0, y1)| {
+                let (y0, y1, step) = nice_range(y0, y1, frame.height() / 50.0);
+                ((y0, y1), step)
+            });
+            let y_step = fitted.map(|(_, step)| step);
+            let y_range = self.diagrams[index]
+                .y_view
+                .or(fitted.map(|(range, _)| range));
+            let Some(y_range) = y_range else {
+                painter.rect_stroke(
+                    frame,
+                    0.0,
+                    Stroke::new(1.0, border),
+                    egui::StrokeKind::Inside,
+                );
+                continue;
+            };
+            let map = Mapping {
+                frame,
+                x: sane(x0, x1),
+                y: sane(y_range.0, y_range.1),
+            };
+            draw_diagram(&painter, &map, curves, y_step);
+
+            // Interaction: click selects, drag a rectangle zooms, double-click resets.
+            let response = ui.interact(
+                frame,
+                ui.scope_id().with(("plot_diagram", index)),
+                Sense::click_and_drag(),
+            );
+            if response.clicked() {
+                self.active_diagram = index;
+            }
+            if response.double_clicked() {
+                self.plot_x = None;
+                self.diagrams[index].y_view = None;
+            }
+            let drag_id = ui.scope_id().with(("plot_drag", index));
+            if response.drag_started() {
+                if let Some(p) = response.interact_pointer_pos() {
+                    ui.ctx().data_mut(|d| d.insert_temp(drag_id, p));
+                }
+            }
+            if let (Some(start), Some(now)) = (
+                ui.ctx().data(|d| d.get_temp::<egui::Pos2>(drag_id)),
+                response.interact_pointer_pos(),
+            ) {
+                let r = egui::Rect::from_two_pos(start, now).intersect(frame);
+                if response.dragged() {
+                    painter.rect(
+                        r,
+                        0.0,
+                        Color32::from_rgba_unmultiplied(0x1F, 0x6F, 0xC8, 30),
+                        Stroke::new(1.0, theme::ACCENT),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+                if response.drag_stopped() {
+                    ui.ctx().data_mut(|d| d.remove::<egui::Pos2>(drag_id));
+                    if r.width() > 4.0 && r.height() > 4.0 {
+                        let (ax, ay) = map.to_data(r.left_bottom());
+                        let (bx, by) = map.to_data(r.right_top());
+                        // x is shared by every diagram; y belongs to this one.
+                        self.plot_x = Some((ax, bx));
+                        self.diagrams[index].y_view = Some((ay, by));
+                        self.active_diagram = index;
+                    }
+                }
+            }
+            if let Some(p) = response.hover_pos().filter(|p| frame.contains(*p)) {
+                let (t, v) = map.to_data(p);
+                if cursor_enabled {
+                    draw_cursor(&painter, &map, curves, t);
+                }
+                response.on_hover_text_at_pointer(format!(
+                    "t = {}\ny = {}",
+                    crate::ui::browsers_format(t),
+                    crate::ui::browsers_format(v)
+                ));
+            }
+        }
+    }
+
+    /// Curves of `signals`; the name carries the run label when several results exist.
+    fn curves(&self, signals: &[PlotSignal]) -> Vec<Curve> {
+        signals
             .iter()
             .enumerate()
-            .filter_map(|(i, signal)| {
+            .filter_map(|(index, signal)| {
                 let run = self.run(signal.run_id)?;
-                let series = run.outcome.result.series(&signal.variable)?;
-                let points = run
-                    .outcome
-                    .result
-                    .time
-                    .iter()
-                    .zip(series)
-                    .map(|(t, v)| [*t, *v])
-                    .collect();
+                let values = run.outcome.result.series(&signal.variable)?;
                 let name = if self.runs.len() > 1 {
                     format!("{}.{}", run.label, signal.variable)
                 } else {
@@ -223,195 +373,170 @@ impl OmolaApp {
                 };
                 Some(Curve {
                     name,
-                    color: CURVE_COLORS[i % CURVE_COLORS.len()],
-                    points,
+                    color: CURVE_COLORS[index % CURVE_COLORS.len()],
+                    time: run.outcome.result.time.clone(),
+                    values: values.to_vec(),
                 })
             })
-            .collect();
-        let (panel, response) =
-            ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
-        let painter = ui.painter_at(panel);
-        painter.rect_filled(panel, 0.0, Color32::WHITE);
-        let frame = egui::Rect::from_min_max(
-            egui::pos2(panel.left() + 53.0, panel.top() + 31.0),
-            egui::pos2(panel.right() - 24.0, panel.bottom() - 29.0),
-        );
-        if frame.width() < 40.0 || frame.height() < 40.0 {
-            return;
-        }
-        // Legend above the frame.
-        let mut lx = frame.left() - 2.0;
-        for c in &curves {
-            let y = panel.top() + 16.5;
-            painter.hline(lx..=lx + 26.0, y, Stroke::new(1.0, c.color));
-            let g = painter.layout_no_wrap(c.name.clone(), FontId::proportional(12.0), theme::TEXT);
-            let w = g.size().x;
-            painter.galley(egui::pos2(lx + 31.0, y - g.size().y / 2.0), g, theme::TEXT);
-            lx += 31.0 + w + 18.0;
-        }
-        let data = data_bounds(&curves);
-        let fitted = data.map(|(x0, x1, y0, y1)| {
-            let (y0, y1, step) = nice_range(y0, y1, frame.height() / 50.0);
-            ((x0, x1, y0, y1), step)
-        });
-        let view = self.plot_view.or(fitted.map(|f| f.0));
-        let Some((x0, x1, y0, y1)) = view else {
-            painter.rect_stroke(
-                frame,
-                0.0,
-                Stroke::new(1.0, Color32::from_rgb(0x3A, 0x3A, 0x3A)),
-                egui::StrokeKind::Inside,
-            );
-            return;
-        };
-        let (x0, x1) = if x1 > x0 {
-            (x0, x1)
-        } else {
-            (x0 - 1.0, x0 + 1.0)
-        };
-        let (y0, y1) = if y1 > y0 {
-            (y0, y1)
-        } else {
-            (y0 - 1.0, y0 + 1.0)
-        };
-        let to_screen = |x: f64, y: f64| {
-            egui::pos2(
-                frame.left() + ((x - x0) / (x1 - x0)) as f32 * frame.width(),
-                frame.bottom() - ((y - y0) / (y1 - y0)) as f32 * frame.height(),
-            )
-        };
-        let x_major = nice_step((x1 - x0) / (frame.width() / 130.0).max(1.0) as f64);
-        let y_major = match (self.plot_view, fitted) {
-            (None, Some((_, step))) => step,
-            _ => nice_step((y1 - y0) / (frame.height() / 50.0).max(1.0) as f64),
-        };
-        let grid = Stroke::new(1.0, Color32::from_rgb(0xEA, 0xEA, 0xEA));
-        let axis = Color32::from_rgb(0x3A, 0x3A, 0x3A);
-        for x in ticks(x0, x1, minor_step(x_major)) {
-            let p = to_screen(x, y0);
-            painter.vline(p.x.round() + 0.5, frame.y_range(), grid);
-        }
-        for y in ticks(y0, y1, minor_step(y_major)) {
-            let p = to_screen(x0, y);
-            let stroke = if y.abs() < y_major * 1e-6 {
-                Stroke::new(1.0, Color32::from_rgb(0xCA, 0xCA, 0xCA))
-            } else {
-                grid
-            };
-            painter.hline(frame.x_range(), p.y.round() + 0.5, stroke);
-            painter.hline(
-                (frame.left() - 4.0)..=frame.left(),
-                p.y.round() + 0.5,
-                Stroke::new(1.0, axis),
-            );
-        }
-        let label_font = FontId::proportional(11.5);
-        for x in ticks(x0, x1, x_major) {
-            let p = to_screen(x, y0);
-            painter.vline(
-                p.x.round() + 0.5,
-                frame.bottom()..=(frame.bottom() + 4.0),
-                Stroke::new(1.0, axis),
-            );
-            painter.text(
-                egui::pos2(p.x, frame.bottom() + 12.0),
-                Align2::CENTER_CENTER,
-                format_tick(x, x_major),
-                label_font.clone(),
-                theme::TEXT,
-            );
-        }
-        for y in ticks(y0, y1, y_major) {
-            let p = to_screen(x0, y);
-            painter.hline(
-                (frame.left() - 6.0)..=frame.left(),
-                p.y.round() + 0.5,
-                Stroke::new(1.0, axis),
-            );
-            painter.text(
-                egui::pos2(frame.left() - 8.0, p.y),
-                Align2::RIGHT_CENTER,
-                format_tick(y, y_major),
-                label_font.clone(),
-                theme::TEXT,
-            );
-        }
-        let clip = painter.with_clip_rect(frame);
-        for c in &curves {
-            let pts: Vec<egui::Pos2> = c.points.iter().map(|[x, y]| to_screen(*x, *y)).collect();
-            clip.add(egui::Shape::line(pts, Stroke::new(1.0, c.color)));
-        }
-        painter.rect_stroke(frame, 0.0, Stroke::new(1.0, axis), egui::StrokeKind::Inside);
+            .collect()
+    }
+}
 
-        // Interaction: drag a rectangle to zoom, double-click to reset.
-        if response.double_clicked() {
-            self.plot_view = None;
-        }
-        let drag_id = ui.scope_id().with("plot_drag_start");
-        if response.drag_started() {
-            if let Some(p) = response.interact_pointer_pos() {
-                ui.ctx().data_mut(|d| d.insert_temp(drag_id, p));
-            }
-        }
-        if let (Some(start), Some(now)) = (
-            ui.ctx().data(|d| d.get_temp::<egui::Pos2>(drag_id)),
-            response.interact_pointer_pos(),
-        ) {
-            let r = egui::Rect::from_two_pos(start, now).intersect(frame);
-            if response.dragged() {
-                painter.rect(
-                    r,
-                    0.0,
-                    Color32::from_rgba_unmultiplied(0x1F, 0x6F, 0xC8, 30),
-                    Stroke::new(1.0, theme::ACCENT),
-                    egui::StrokeKind::Inside,
-                );
-            }
-            if response.drag_stopped() {
-                ui.ctx().data_mut(|d| d.remove::<egui::Pos2>(drag_id));
-                if r.width() > 4.0 && r.height() > 4.0 {
-                    let from = |p: egui::Pos2| {
-                        (
-                            x0 + ((p.x - frame.left()) / frame.width()) as f64 * (x1 - x0),
-                            y0 + ((frame.bottom() - p.y) / frame.height()) as f64 * (y1 - y0),
-                        )
-                    };
-                    let (ax, ay) = from(r.left_bottom());
-                    let (bx, by) = from(r.right_top());
-                    self.plot_view = Some((ax, bx, ay, by));
-                }
-            }
-        }
-        if let Some(p) = response.hover_pos().filter(|p| frame.contains(*p)) {
-            let t = x0 + ((p.x - frame.left()) / frame.width()) as f64 * (x1 - x0);
-            let v = y0 + ((frame.bottom() - p.y) / frame.height()) as f64 * (y1 - y0);
-            response.on_hover_text_at_pointer(format!(
-                "t = {}\ny = {}",
-                crate::ui::browsers_format(t),
-                crate::ui::browsers_format(v)
-            ));
-        }
+/// Where a diagram puts its data: the frame on screen and the ranges inside it.
+struct Mapping {
+    frame: egui::Rect,
+    x: (f64, f64),
+    y: (f64, f64),
+}
+
+impl Mapping {
+    fn to_screen(&self, x: f64, y: f64) -> egui::Pos2 {
+        egui::pos2(
+            self.frame.left()
+                + ((x - self.x.0) / (self.x.1 - self.x.0)) as f32 * self.frame.width(),
+            self.frame.bottom()
+                - ((y - self.y.0) / (self.y.1 - self.y.0)) as f32 * self.frame.height(),
+        )
+    }
+
+    fn to_data(&self, p: egui::Pos2) -> (f64, f64) {
+        (
+            self.x.0
+                + ((p.x - self.frame.left()) / self.frame.width()) as f64 * (self.x.1 - self.x.0),
+            self.y.0
+                + ((self.frame.bottom() - p.y) / self.frame.height()) as f64
+                    * (self.y.1 - self.y.0),
+        )
+    }
+}
+
+/// Guard against a zero-width range so the mapping never divides by zero.
+fn sane(a: f64, b: f64) -> (f64, f64) {
+    if b > a {
+        (a, b)
+    } else {
+        (a - 1.0, a + 1.0)
+    }
+}
+
+/// Grid, tick labels and curves of one diagram.
+fn draw_diagram(painter: &egui::Painter, map: &Mapping, curves: &[Curve], y_step: Option<f64>) {
+    let frame = map.frame;
+    let (x0, x1) = map.x;
+    let (y0, y1) = map.y;
+    let x_major = nice_step((x1 - x0) / (frame.width() / 130.0).max(1.0) as f64);
+    let y_major =
+        y_step.unwrap_or_else(|| nice_step((y1 - y0) / (frame.height() / 50.0).max(1.0) as f64));
+    let grid = Stroke::new(1.0, Color32::from_rgb(0xEA, 0xEA, 0xEA));
+    let axis = Color32::from_rgb(0x3A, 0x3A, 0x3A);
+    for x in ticks(x0, x1, minor_step(x_major)) {
+        let p = map.to_screen(x, y0);
+        painter.vline(p.x.round() + 0.5, frame.y_range(), grid);
+    }
+    for y in ticks(y0, y1, minor_step(y_major)) {
+        let p = map.to_screen(x0, y);
+        let stroke = if y.abs() < y_major * 1e-6 {
+            Stroke::new(1.0, Color32::from_rgb(0xCA, 0xCA, 0xCA))
+        } else {
+            grid
+        };
+        painter.hline(frame.x_range(), p.y.round() + 0.5, stroke);
+        painter.hline(
+            (frame.left() - 4.0)..=frame.left(),
+            p.y.round() + 0.5,
+            Stroke::new(1.0, axis),
+        );
+    }
+    let label_font = FontId::proportional(11.5);
+    for x in ticks(x0, x1, x_major) {
+        let p = map.to_screen(x, y0);
+        painter.vline(
+            p.x.round() + 0.5,
+            frame.bottom()..=(frame.bottom() + 4.0),
+            Stroke::new(1.0, axis),
+        );
+        painter.text(
+            egui::pos2(p.x, frame.bottom() + 12.0),
+            Align2::CENTER_CENTER,
+            format_tick(x, x_major),
+            label_font.clone(),
+            theme::TEXT,
+        );
+    }
+    for y in ticks(y0, y1, y_major) {
+        let p = map.to_screen(x0, y);
+        painter.hline(
+            (frame.left() - 6.0)..=frame.left(),
+            p.y.round() + 0.5,
+            Stroke::new(1.0, axis),
+        );
+        painter.text(
+            egui::pos2(frame.left() - 8.0, p.y),
+            Align2::RIGHT_CENTER,
+            format_tick(y, y_major),
+            label_font.clone(),
+            theme::TEXT,
+        );
+    }
+    let clip = painter.with_clip_rect(frame);
+    for curve in curves {
+        let points: Vec<egui::Pos2> = curve
+            .time
+            .iter()
+            .zip(&curve.values)
+            .map(|(t, v)| map.to_screen(*t, *v))
+            .collect();
+        clip.add(egui::Shape::line(points, Stroke::new(1.0, curve.color)));
+    }
+    painter.rect_stroke(frame, 0.0, Stroke::new(1.0, axis), egui::StrokeKind::Inside);
+}
+
+/// Measurement cursor: a vertical line at `t` and `name = value` for every curve.
+fn draw_cursor(painter: &egui::Painter, map: &Mapping, curves: &[Curve], t: f64) {
+    let x = map.to_screen(t, map.y.0).x.round() + 0.5;
+    painter.vline(
+        x,
+        map.frame.y_range(),
+        Stroke::new(1.0, Color32::from_rgb(0x80, 0x80, 0x80)),
+    );
+    let font = FontId::proportional(11.5);
+    let mut y = map.frame.top() + 4.0;
+    for curve in curves {
+        let Some(value) = crate::series::value_at(&curve.time, &curve.values, t) else {
+            continue;
+        };
+        painter.text(
+            egui::pos2(map.frame.right() - 4.0, y),
+            Align2::RIGHT_TOP,
+            format!("{} = {}", curve.name, crate::ui::browsers_format(value)),
+            font.clone(),
+            curve.color,
+        );
+        y += 14.0;
     }
 }
 
 struct Curve {
     name: String,
     color: Color32,
-    points: Vec<[f64; 2]>,
+    time: Vec<f64>,
+    values: Vec<f64>,
 }
 
-fn data_bounds(curves: &[Curve]) -> Option<(f64, f64, f64, f64)> {
-    let mut b: Option<(f64, f64, f64, f64)> = None;
-    for [x, y] in curves.iter().flat_map(|c| c.points.iter()) {
-        if !x.is_finite() || !y.is_finite() {
-            continue;
+fn data_bounds<'a>(curves: impl Iterator<Item = &'a Curve>) -> Option<(f64, f64, f64, f64)> {
+    let mut bounds: Option<(f64, f64, f64, f64)> = None;
+    for curve in curves {
+        for (x, y) in curve.time.iter().zip(&curve.values) {
+            if !x.is_finite() || !y.is_finite() {
+                continue;
+            }
+            bounds = Some(match bounds {
+                None => (*x, *x, *y, *y),
+                Some((a, b, c, d)) => (a.min(*x), b.max(*x), c.min(*y), d.max(*y)),
+            });
         }
-        b = Some(match b {
-            None => (*x, *x, *y, *y),
-            Some((a, bb, c, d)) => (a.min(*x), bb.max(*x), c.min(*y), d.max(*y)),
-        });
     }
-    b
+    bounds
 }
 
 /// A "nice" step (1, 2, 2.5, 4, 5 x 10^k) not smaller than `raw`.
