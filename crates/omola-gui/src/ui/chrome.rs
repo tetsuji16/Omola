@@ -93,8 +93,13 @@ impl OmolaApp {
             {
                 self.simulate();
             }
-            icon_button(ui, ICON_CANCEL, DARK, 17.0, false, false)
-                .on_disabled_hover_text("Stop: issue G13");
+            if icon_button(ui, ICON_CANCEL, DARK, 17.0, self.busy, false)
+                .on_hover_text("Stop the running simulation")
+                .on_disabled_hover_text("Nothing is running")
+                .clicked()
+            {
+                self.cancel();
+            }
             icon_button(ui, ICON_ARROW_DROP_DOWN, DARK, 14.0, false, false);
             if super::custom_title_bar() {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -636,10 +641,14 @@ impl OmolaApp {
             if simulate.clicked() {
                 self.simulate();
             }
-            place(ui, o, (6.0, 56.0, 90.0, 22.0), |ui| {
-                small_button(ui, ICON_CANCEL, DARK, "Stop", false, false)
-                    .on_disabled_hover_text("Stopping a run: issue G13")
+            let stop = place(ui, o, (6.0, 56.0, 90.0, 22.0), |ui| {
+                small_button(ui, ICON_CANCEL, DARK, "Stop", self.busy, false)
+                    .on_hover_text("Stop the running simulation")
+                    .on_disabled_hover_text("Nothing is running")
             });
+            if stop.clicked() {
+                self.cancel();
+            }
             let sweep = place(ui, o, (97.0, 6.0, 125.0, 22.0), |ui| {
                 small_button(
                     ui,

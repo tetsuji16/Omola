@@ -1,7 +1,7 @@
 //! Bottom window (Logs / Commands) and the bottom bar (browser toggles, model tabs,
 //! status message, model layer toolbar).
 
-use super::widgets::{flat_tab, icon_button, paint_icon};
+use super::widgets::{flat_tab, icon_button, paint_icon, small_button};
 use crate::app::{BottomPane, Layer, OmolaApp, RibbonTab};
 use crate::backend::{LogLevel, LogTab};
 use crate::theme;
@@ -177,6 +177,12 @@ impl OmolaApp {
                     ui.add_space(12.0);
                     ui.spinner();
                     ui.label(RichText::new(" Running OpenModelica...").size(12.0));
+                    if small_button(ui, ICON_CANCEL, theme::TEXT, "Stop", true, false)
+                        .on_hover_text("Stop the running simulation")
+                        .clicked()
+                    {
+                        self.cancel();
+                    }
                 } else if self.omc_version.is_none() {
                     ui.add_space(12.0);
                     ui.label(

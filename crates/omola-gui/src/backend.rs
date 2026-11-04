@@ -4,10 +4,14 @@
 //! editor buffer to a private run directory, so user files are never modified by a run.
 
 use crate::library::{self, ClassDoc, LibrarySpec, LoadedLibrary};
-use omola_core::{mat, Omc, SimulationConfig};
+use omola_core::{mat, BackendError, Omc, SimulationConfig};
 use std::{
     path::{Path, PathBuf},
-    sync::mpsc::{self, Receiver, Sender, TryRecvError},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, Sender, TryRecvError},
+        Arc,
+    },
     thread,
     time::Instant,
 };
@@ -157,6 +161,8 @@ const INSTANCE_DEPTH: usize = 4;
 pub struct Worker {
     jobs: Sender<Job>,
     events: Receiver<Event>,
+    /// Shared with the worker thread; set by the Stop button and reset for every job.
+    cancel: Arc<AtomicBool>,
 }
 
 impl Worker {
@@ -164,6 +170,8 @@ impl Worker {
     pub fn spawn(work_root: PathBuf, wake: impl Fn() + Send + 'static) -> Self {
         let (jobs, job_rx) = mpsc::channel::<Job>();
         let (event_tx, events) = mpsc::channel::<Event>();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let thread_cancel = cancel.clone();
         thread::Builder::new()
             .name("omola-omc-worker".into())
             .spawn(move || {
@@ -173,19 +181,31 @@ impl Worker {
                         let _ = event_tx.send(event);
                         wake();
                     };
+                    // A Stop click that arrived while idle must not cancel the next job.
+                    thread_cancel.store(false, Ordering::Relaxed);
                     send(Event::Busy(true));
                     run_counter += 1;
                     let run_dir = work_root.join(format!("run-{run_counter}"));
-                    run_job(job, &run_dir, &send);
+                    run_job(job, &run_dir, &thread_cancel, &send);
                     send(Event::Busy(false));
                 }
             })
             .expect("spawn OMC worker thread");
-        Self { jobs, events }
+        Self {
+            jobs,
+            events,
+            cancel,
+        }
     }
 
     pub fn submit(&self, job: Job) {
         let _ = self.jobs.send(job);
+    }
+
+    /// Ask the job that is currently running to stop. The worker resets the flag when the
+    /// next job starts, so calling this while idle has no effect.
+    pub fn cancel(&self) {
+        self.cancel.store(true, Ordering::Relaxed);
     }
 
     /// Drain all pending events without blocking.
@@ -208,9 +228,9 @@ fn pinned(libraries: &[LibrarySpec]) -> Vec<(String, String)> {
         .collect()
 }
 
-fn run_job(job: Job, run_dir: &Path, send: &dyn Fn(Event)) {
+fn run_job(job: Job, run_dir: &Path, cancel: &Arc<AtomicBool>, send: &dyn Fn(Event)) {
     let omc = match Omc::discover() {
-        Ok(omc) => omc,
+        Ok(omc) => omc.with_cancel_flag(cancel.clone()),
         Err(error) => {
             send(Event::OmcVersion(None));
             if !matches!(job, Job::LoadLibrary(_)) {
@@ -534,6 +554,13 @@ fn simulate(
     );
     let result = match outcome {
         Ok(result) => result,
+        Err(BackendError::Cancelled) => {
+            return send(Event::Log(
+                LogTab::Simulation,
+                LogLevel::Warning,
+                "Simulation stopped.".into(),
+            ))
+        }
         Err(error) => {
             return send(Event::Log(
                 LogTab::Translation,

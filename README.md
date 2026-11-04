@@ -220,6 +220,8 @@ cargo run -p omola-gui -- examples/Pendulum.mo         # open a model file
 
 Checking, simulation and library queries are delegated to OMC (`omc` on PATH or `OMOLA_OMC`), and OpenModelica `.mat` results are read in-process by `omola_core::mat`. Library classes such as `Modelica.Blocks.Examples.PID_Controller` simulate directly; the `experiment` annotation sets the stop time. The real-OMC path (MSL index, documentation with images, simulation of a library example) is checked in CI.
 
+The GUI **Stop** button cancels the OMC process that is running. On Unix OMC starts in its own process group, so the simulation executable it spawned is stopped as well. On Windows only the OMC process is killed for now; the simulation executable may keep running until the Job Object support tracked separately is implemented. The CLI never installs a cancel flag, so its behavior is unchanged.
+
 Without OpenModelica you can exercise the UI with a demo result and a stand-in compiler (not a simulation; no compatibility evidence):
 
 ```sh

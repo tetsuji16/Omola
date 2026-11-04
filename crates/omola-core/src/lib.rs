@@ -8,8 +8,12 @@ use std::{
     ffi::OsString,
     fs, io,
     path::{Path, PathBuf},
-    process::{Command, Output},
-    time::{SystemTime, UNIX_EPOCH},
+    process::{Child, Command, Output, Stdio},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 #[derive(Debug)]
@@ -25,6 +29,8 @@ pub enum BackendError {
         source: io::Error,
     },
     Io(io::Error),
+    /// The caller set the cancellation flag before OMC finished.
+    Cancelled,
     InvalidInput(String),
     CompilerFailed {
         version: String,
@@ -83,6 +89,7 @@ impl std::fmt::Display for BackendError {
             Self::InvalidConfiguredCompiler { path } => write!(f, "OMOLA_OMC points to a missing or non-file path: {}", path.display()),
             Self::LaunchFailed { executable, source } => write!(f, "Could not launch OpenModelica at {}: {source}", executable.display()),
             Self::Io(source) => write!(f, "OMC adapter I/O failed: {source}"),
+            Self::Cancelled => write!(f, "Operation cancelled by the user."),
             Self::InvalidInput(message) => write!(f, "Invalid request: {message}"),
             Self::CompilerFailed { version, status, stdout, stderr } => write!(f, "OpenModelica {version} exited with status {status:?}.\nstdout:\n{stdout}\nstderr:\n{stderr}"),
             Self::CompilerDiagnostic { version, output } => write!(f, "OpenModelica {version} reported an error:\n{output}"),
@@ -107,6 +114,9 @@ pub struct CommandResult {
 #[derive(Debug, Clone)]
 pub struct Omc {
     executable: PathBuf,
+    /// Set by the GUI worker so a long OMC run can be stopped. `None` (the CLI path)
+    /// keeps the blocking `Command::output()` behavior.
+    cancel: Option<Arc<AtomicBool>>,
 }
 
 impl Omc {
@@ -120,12 +130,18 @@ impl Omc {
                 if !path.is_file() {
                     return Err(BackendError::InvalidConfiguredCompiler { path });
                 }
-                return Ok(Self { executable: path });
+                return Ok(Self {
+                    executable: path,
+                    cancel: None,
+                });
             }
         }
         let name = if cfg!(windows) { "omc.exe" } else { "omc" };
         if let Some(path) = find_on_path(name) {
-            return Ok(Self { executable: path });
+            return Ok(Self {
+                executable: path,
+                cancel: None,
+            });
         }
         let program_files = if cfg!(windows) {
             Some(
@@ -142,12 +158,24 @@ impl Omc {
             name,
         );
         if let Some(path) = installed.into_iter().find(|p| p.is_file()) {
-            return Ok(Self { executable: path });
+            return Ok(Self {
+                executable: path,
+                cancel: None,
+            });
         }
         Err(BackendError::MissingCompiler {
             searched: "checked OMOLA_OMC, PATH, OPENMODELICAHOME and the standard install folders"
                 .into(),
         })
+    }
+
+    /// Stop the current invocation when `flag` becomes true.
+    ///
+    /// Only the process started by this `Omc` value observes the flag; the GUI resets it
+    /// before every job. The CLI never installs a flag, so its behavior is unchanged.
+    pub fn with_cancel_flag(mut self, flag: Arc<AtomicBool>) -> Self {
+        self.cancel = Some(flag);
+        self
     }
 
     pub fn executable(&self) -> &Path {
@@ -628,17 +656,114 @@ impl Omc {
         I: IntoIterator<Item = S>,
         S: AsRef<std::ffi::OsStr>,
     {
+        if self.cancel.is_none() {
+            // CLI path: exactly the behavior before cancellation existed.
+            let mut command = Command::new(&self.executable);
+            command.args(args);
+            if let Some(dir) = current_dir {
+                command.current_dir(dir);
+            }
+            return command
+                .output()
+                .map_err(|source| BackendError::LaunchFailed {
+                    executable: self.executable.clone(),
+                    source,
+                });
+        }
+        let flag = self.cancel.as_ref().expect("checked above");
         let mut command = Command::new(&self.executable);
-        command.args(args);
+        command
+            .args(args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         if let Some(dir) = current_dir {
             command.current_dir(dir);
         }
-        command
-            .output()
+        // OMC starts the simulation executable as a child process. A separate process
+        // group lets `kill_tree` stop the whole tree on Unix.
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        let mut child = command
+            .spawn()
             .map_err(|source| BackendError::LaunchFailed {
                 executable: self.executable.clone(),
                 source,
-            })
+            })?;
+        // Drain both pipes on their own threads so a full pipe never blocks OMC.
+        let mut out = child
+            .stdout
+            .take()
+            .ok_or_else(|| BackendError::Io(io::Error::other("could not capture OMC stdout")))?;
+        let mut err = child
+            .stderr
+            .take()
+            .ok_or_else(|| BackendError::Io(io::Error::other("could not capture OMC stderr")))?;
+        let out_thread = std::thread::spawn(move || {
+            let mut buffer = Vec::new();
+            let _ = io::Read::read_to_end(&mut out, &mut buffer);
+            buffer
+        });
+        let err_thread = std::thread::spawn(move || {
+            let mut buffer = Vec::new();
+            let _ = io::Read::read_to_end(&mut err, &mut buffer);
+            buffer
+        });
+        let status = loop {
+            if let Some(status) = child.try_wait()? {
+                break status;
+            }
+            if flag.load(Ordering::Relaxed) {
+                kill_tree(&mut child);
+                let _ = child.wait();
+                return Err(BackendError::Cancelled);
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        let stdout = out_thread.join().unwrap_or_default();
+        let stderr = err_thread.join().unwrap_or_default();
+        Ok(Output {
+            status,
+            stdout,
+            stderr,
+        })
+    }
+}
+
+/// Stop a running OMC process and, on Unix, the simulation executable it spawned.
+///
+/// The process was started in its own group, so a negative PID reaches every process in
+/// it. Windows has no equivalent here: only the OMC process itself is killed, and a
+/// simulation executable it already started may keep running until the process exits.
+/// A Job Object based fix is tracked separately.
+fn kill_tree(child: &mut Child) {
+    #[cfg(unix)]
+    {
+        let pid = child.id();
+        let group = format!("-{pid}");
+        // `--` is required: without it, procps `kill` parses the negative process
+        // group ID as an option and can signal the caller instead.
+        let _ = Command::new("kill")
+            .args(["-TERM", "--", group.as_str()])
+            .status();
+        std::thread::sleep(Duration::from_millis(200));
+        if child.try_wait().ok().flatten().is_none() {
+            let killed = Command::new("kill")
+                .args(["-KILL", "--", group.as_str()])
+                .status()
+                .map(|status| status.success())
+                .unwrap_or(false);
+            if !killed {
+                // The group signal did not work; at least stop the OMC process itself.
+                let _ = child.kill();
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = child.kill();
     }
 }
 
@@ -1126,6 +1251,81 @@ mod tests {
                 )
                 .is_ok(),
                 "{method}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancel_flag_stops_a_running_script_and_its_child_process() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::time::Instant;
+
+        let fixture = TempDir::new("fake-cancel").unwrap();
+        let fake = fixture.path.join("fake omc");
+        let child_pid = fixture.path.join("child.pid");
+        fs::write(
+            &fake,
+            format!(
+                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'Fake OMC 1.0'; exit 0; fi\nsleep 30 &\nchild=$!\necho \"$child\" > '{}'\nwait \"$child\"\n",
+                child_pid.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let flag = Arc::new(AtomicBool::new(false));
+        let omc = Omc {
+            executable: fake,
+            cancel: None,
+        }
+        .with_cancel_flag(flag.clone());
+        let trigger = flag.clone();
+        let canceller = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            trigger.store(true, Ordering::Relaxed);
+        });
+
+        let started = Instant::now();
+        let result = omc.run_script("print(1);");
+        let elapsed = started.elapsed();
+        canceller.join().unwrap();
+        assert!(
+            matches!(result, Err(BackendError::Cancelled)),
+            "unexpected result: {result:?}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "cancellation took {elapsed:?}"
+        );
+
+        // The script starts its own `sleep 30`; cancellation must reach that grandchild
+        // too. Linux exposes it in /proc, which is enough for the CI platform. The
+        // grandchild may linger as a zombie until its new parent reaps it, so a `Z` state
+        // counts as stopped. Other Unix systems would need an extra tool to check it, so
+        // the assertion is Linux-only.
+        #[cfg(target_os = "linux")]
+        {
+            let pid = fs::read_to_string(&child_pid).unwrap().trim().to_owned();
+            let proc_path = format!("/proc/{pid}/stat");
+            let stopped = || {
+                fs::read_to_string(&proc_path)
+                    .map(|stat| {
+                        // "pid (name) state ..." - the name can contain spaces, so split
+                        // after the last ')'.
+                        stat.rsplit_once(')')
+                            .and_then(|(_, rest)| rest.split_whitespace().next())
+                            .is_none_or(|state| state == "Z")
+                    })
+                    .unwrap_or(true)
+            };
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while !stopped() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            assert!(
+                stopped(),
+                "the simulation child process {pid} survived cancellation"
             );
         }
     }

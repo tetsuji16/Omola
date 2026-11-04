@@ -864,6 +864,11 @@ impl OmolaApp {
         });
     }
 
+    /// Ask the worker to stop the job that is running (Stop button / status bar).
+    pub fn cancel(&mut self) {
+        self.worker.cancel();
+    }
+
     pub fn run_command(&mut self) {
         let text = self.command_input.trim().to_owned();
         if text.is_empty() {
