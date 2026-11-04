@@ -703,14 +703,32 @@ fn kill_tree(child: &mut std::process::Child) {
     #[cfg(unix)]
     {
         let pid = child.id();
-        let _ = std::process::Command::new("kill")
-            .args(["-TERM", &format!("-{pid}")])
-            .status();
+        // `kill` is usually a shell builtin; /bin/kill is the procps binary on Linux.
+        for prog in ["/bin/kill", "kill"] {
+            if std::process::Command::new(prog)
+                .args(["-TERM", &format!("-{pid}")])
+                .status()
+                .is_ok()
+            {
+                break;
+            }
+        }
         std::thread::sleep(std::time::Duration::from_millis(200));
         if child.try_wait().ok().flatten().is_none() {
-            let _ = std::process::Command::new("kill")
-                .args(["-KILL", &format!("-{pid}")])
-                .status();
+            for prog in ["/bin/kill", "kill"] {
+                if std::process::Command::new(prog)
+                    .args(["-KILL", &format!("-{pid}")])
+                    .status()
+                    .is_ok()
+                {
+                    break;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        // Fallback so we never hang if the group-kill binary is unavailable.
+        if child.try_wait().ok().flatten().is_none() {
+            let _ = child.kill();
         }
     }
     #[cfg(not(unix))]
