@@ -149,7 +149,7 @@ impl OmolaApp {
                 let r = ribbon_tab(ui, "Plot Options", false);
                 ui.ctx()
                     .data_mut(|d| d.insert_temp(egui::Id::NULL.with("plot_tab_x"), r.rect.left()));
-                r.on_hover_text("Plot options: issue G10");
+                r.on_hover_text("Plot options: use the Plot group of the Simulation tab");
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
@@ -715,12 +715,62 @@ impl OmolaApp {
                 });
             }
         });
+        fixed_group(ui, "Plot", 268.0, |ui, o| {
+            let new_diagram = place(ui, o, (6.0, 6.0, 120.0, 22.0), |ui| {
+                small_button(ui, ICON_ADD_CHART, BLUE, "New diagram", true, false)
+                    .on_hover_text("Stack another diagram under this one; the time axis is shared")
+            });
+            if new_diagram.clicked() {
+                self.new_diagram();
+            }
+            let remove = place(ui, o, (6.0, 31.0, 120.0, 22.0), |ui| {
+                small_button(
+                    ui,
+                    ICON_DELETE,
+                    DARK,
+                    "Remove diagram",
+                    self.diagrams.len() > 1,
+                    false,
+                )
+                .on_disabled_hover_text("The plot window always keeps one diagram")
+            });
+            if remove.clicked() {
+                self.remove_active_diagram();
+            }
+            let erase = place(ui, o, (6.0, 56.0, 120.0, 22.0), |ui| {
+                small_button(
+                    ui,
+                    ICON_REMOVE,
+                    DARK,
+                    "Erase curves",
+                    !self.active_signals().is_empty(),
+                    false,
+                )
+                .on_hover_text("Remove every curve of the active diagram")
+            });
+            if erase.clicked() {
+                self.erase_curves();
+            }
+            let cursor = place(ui, o, (132.0, 6.0, 120.0, 22.0), |ui| {
+                small_button(ui, ICON_HEIGHT, DARK, "Cursor", true, self.cursor_enabled)
+                    .on_hover_text("Show the value of every curve at the mouse position")
+            });
+            if cursor.clicked() {
+                self.cursor_enabled = !self.cursor_enabled;
+            }
+            let export = place(ui, o, (132.0, 31.0, 120.0, 22.0), |ui| {
+                small_button(ui, ICON_DOWNLOAD, BLUE, "Export CSV", true, false)
+                    .on_hover_text("Save the curves of the active diagram as CSV")
+            });
+            if export.clicked() {
+                self.request_export_csv();
+            }
+        });
         fixed_group(ui, "Tools", 95.0, |ui, o| {
             let icons = [
                 (7.0, 6.0, ICON_UPLOAD_FILE, BLUE, "Load Result: issue G14"),
                 (47.0, 6.0, ICON_VIEW_IN_AR, GREEN, "Animation"),
                 (72.0, 6.0, ICON_WARNING, ORANGE, "Messages"),
-                (7.0, 31.0, ICON_SHOW_CHART, BLUE, "New Plot: issue G10"),
                 (47.0, 31.0, ICON_MONITORING, DARK, "Visualize 3D"),
                 (7.0, 56.0, ICON_TABLE_CHART, BLUE, "New Table"),
                 (47.0, 56.0, ICON_DEPLOYED_CODE, BLUE, "3D View"),
@@ -732,6 +782,13 @@ impl OmolaApp {
                 if r.clicked() {
                     self.not_implemented(tip);
                 }
+            }
+            let new_plot = place(ui, o, (7.0, 31.0, 22.0, 22.0), |ui| {
+                icon_button(ui, ICON_SHOW_CHART, BLUE, 17.0, true, false)
+                    .on_hover_text("New diagram")
+            });
+            if new_plot.clicked() {
+                self.new_diagram();
             }
             place(ui, o, (31.0, 31.0, 12.0, 22.0), |ui| {
                 icon_button(ui, ICON_ARROW_DROP_DOWN, DARK, 10.0, true, false)

@@ -149,6 +149,7 @@ impl OmolaApp {
                 "Path to an OpenModelica script (.mos)",
                 t.clone(),
             ),
+            PathDialog::ExportCsv(t) => ("Export plot as CSV", "Path to a .csv file", t.clone()),
         };
         let mut keep_open = true;
         let mut submitted = false;
@@ -184,6 +185,7 @@ impl OmolaApp {
                     self.docks.bottom = true;
                     self.run_command();
                 }
+                PathDialog::ExportCsv(_) => self.export_csv(&path),
             }
         } else if !keep_open {
             self.path_dialog = None;
@@ -192,6 +194,7 @@ impl OmolaApp {
                 PathDialog::Open(_) => PathDialog::Open(text),
                 PathDialog::SaveAs(_) => PathDialog::SaveAs(text),
                 PathDialog::RunScript(_) => PathDialog::RunScript(text),
+                PathDialog::ExportCsv(_) => PathDialog::ExportCsv(text),
             });
         }
     }

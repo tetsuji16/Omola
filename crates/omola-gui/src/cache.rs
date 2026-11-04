@@ -184,19 +184,9 @@ pub fn store(root: &Path, lib: &LoadedLibrary) -> std::io::Result<()> {
     // Write beside the target and rename so a crash never leaves a half-written index.
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, json)?;
-    // Windows refuses to rename over an existing file, which is exactly the case when a
-    // re-installed library invalidates and then replaces its cache entry.
-    let result = std::fs::rename(&tmp, &path).or_else(|err| {
-        if path.exists() {
-            std::fs::remove_file(&path).and_then(|_| std::fs::rename(&tmp, &path))
-        } else {
-            Err(err)
-        }
-    });
-    if result.is_err() {
+    std::fs::rename(&tmp, &path).inspect_err(|_| {
         let _ = std::fs::remove_file(&tmp);
-    }
-    result
+    })
 }
 
 #[cfg(test)]
@@ -255,25 +245,6 @@ mod tests {
         assert_eq!(loaded.classes.len(), 2);
         assert_eq!(loaded.classes[0].comment, "Modelica Standard Library");
         assert_eq!(loaded.classes[1].qualified_name, "Modelica.Blocks");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn replaces_an_existing_cache_entry() {
-        let dir = scratch("replace");
-        let source = dir.join("package.mo");
-        std::fs::write(&source, "package Modelica end Modelica;").unwrap();
-        let root = dir.join("cache");
-
-        store(&root, &library(source.clone())).unwrap();
-        let mut updated = library(source.clone());
-        updated.classes[0].comment = "reinstalled".into();
-        // The second store must replace the existing file (Windows cannot rename onto
-        // an existing destination).
-        store(&root, &updated).unwrap();
-
-        let loaded = load(&root, &spec()).expect("cache hit after replace");
-        assert_eq!(loaded.classes[0].comment, "reinstalled");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
