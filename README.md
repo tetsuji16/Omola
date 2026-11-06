@@ -29,7 +29,7 @@ Then start the workbench with `target/release/omola-gui` (or `target\release\omo
 - `omola release verify --scorecard target/compatibility.json --manifest tests/compat/manifest.toml --gates docs/release-gates.toml` rejects stale, incomplete, failing, or below-threshold scorecards.
 - `omola bridge inventory --format markdown|json` reports the small documented Dymola scripting subset; `omola bridge call --function Dymola.simulateModel ...` runs only its declared partial mapping. Unsupported Dymola functions and unmapped simulation parameters return a capability-specific error.
 - `omola licenses check [--output REPORT.md]` compares the locked Cargo dependency closure, CI action references, and development/OMEdit container images and apt packages against the provenance inventory; it exits unsuccessfully on unrecorded or changed dependencies.
-- The core crate uses only the Rust standard library; the CLI uses Serde/TOML/JSON for versioned compatibility manifests and reports. OMC remains a separate process; no compiler code is embedded or copied.
+- The core crate uses the Rust standard library, plus `windows-sys` on Windows only (a job object that stops a running simulation together with the executable `omc` started; see G27); the CLI uses Serde/TOML/JSON for versioned compatibility manifests and reports. OMC remains a separate process; no compiler code is embedded or copied.
 
 ## Install prerequisites and run the smoke model
 

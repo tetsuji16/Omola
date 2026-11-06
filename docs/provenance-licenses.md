@@ -18,6 +18,8 @@ Since 2026-11-02 the GUI also uses `egui_extras` with the `image` (PNG/JPEG/GIF)
 
 Since 2026-11-02 the GUI enables eframe's `persistence` feature, which adds `enumn` (MIT OR Apache-2.0), `ron` (MIT OR Apache-2.0), and `typeid` (MIT OR Apache-2.0) to serialize window state across restarts. `serde` (MIT OR Apache-2.0) is also added directly for the persisted-state struct. All three are recorded in `licenses/inventory.toml`.
 
+Since 2026-11-07 `omola-core` depends on `windows-sys` 0.59 (MIT OR Apache-2.0) on Windows only, for the job object that stops a running simulation together with the executable `omc` started (G27). Version 0.59 was already in the locked graph through the GUI's `eframe`/`egui` dependencies, so this adds no new crate to `licenses/inventory.toml`.
+
 Since 2026-11-02 the GUI uses `rfd` 0.15 (MIT) with the `xdg-portal` and `async-std` features for native file dialogs on Windows, macOS, and Linux (via the XDG Desktop Portal; no GTK system dependency). This pulls in `ashpd` (MIT), `zbus`/`zvariant` (MIT), `url` (MIT OR Apache-2.0), ICU normalization crates (Unicode-3.0), `rand` (MIT OR Apache-2.0), and `tempfile` (MIT OR Apache-2.0) — 62 additional crates, all permissively licensed (MIT, Apache-2.0, Unicode-3.0). The `async-std` feature is required, not optional: without it `zbus` is built with neither `async-io` nor `tokio` and does not compile on Linux; it adds 12 more crates (`async-io`, `async-executor`, `async-fs`, `async-lock`, `async-net`, `async-process`, `async-signal`, `async-task`, `async-channel`, `blocking`, `piper`, `signal-hook-registry`), all MIT or Apache-2.0. All of them are recorded in `licenses/inventory.toml`.
 
 ### Setup scripts and release archives
