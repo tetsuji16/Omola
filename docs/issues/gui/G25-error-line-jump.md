@@ -62,3 +62,30 @@
 - [ ] `examples/BouncingBall.mo` に構文エラーを入れて Check → Text 層の該当行が赤くなり、Messages の行をクリックするとその行に移動する(**実 OMC で確認**。fake-omc では確認できないので、無理なら単体テストのみと明記)。
 - [ ] Windows のパスでも正しく動く(単体テストで可)。
 - [ ] テストが通る。README 共通コマンド 5 つが成功。
+
+## 実装メモ(2026-11-07、実 OMC 1.27.1 で確認)
+
+この issue を書いた時点の想定と、実際の OMC の出力が 3 点で違っていた。実装は実際の出力に合わせた。
+
+| 想定 | 実際 |
+|---|---|
+| `[C:\Users\u\BouncingBall.mo:12:3-12:20:writable]` | `[C:/Users/u/BouncingBall.mo:4:7-5:0:writable]`(フォワードスラッシュ。範囲は行をまたぐことがある) |
+| パスの大文字小文字はそのまま | Windows では**小文字化**される(`G25Test.mo` → `g25test.mo`) |
+| エラーはユーザーが開いたファイルを指す | `backend::write_source` がバッファを `<work root>/omola-gui/session-<pid>/run-<n>/<Class>.mo` に書いて OMC に渡すため、**その一時コピー**を指す |
+
+そのため照合は次の順で行う(`text_editor::location_is_for`)。
+
+1. `path` がある: `file_name()` の一致(Windows は大文字小文字を無視)。それでも一致しなければ、`file` が `.../omola-gui/session-*/run-*/` 配下で、拡張子を除いた名前が `class.replace('.', "_")`(`backend::write_source` と同じ規則)なら一致とみなす。
+2. `path` が `None`(Unnamed): `<interactive>`、または `.mo` で終わらないパス。
+
+`omc` での実測(PR に貼る):
+
+```sh
+echo 'loadString("model A\n Real x;\nequation\n x = ;\nend A;"); getErrorString();' > t.mos && omc t.mos
+# "[<interactive>:4:7-5:0:writable] Error: No viable alternative near token: ;"
+
+omc loadfile.mos   # loadFile("C:\\...\\Bad.mo")
+# "[C:/Users/.../Bad.mo:4:7-5:0:writable] Error: No viable alternative near token: ;"
+```
+
+また、`highlight_line` を外から設定しただけでは G23 のエディタはスクロールしなかったため、`EditorState::revealed_line` を追加し、`highlight_line` が変わったときに 1 回だけスクロールとキャレット移動を行うようにした。
