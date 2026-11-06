@@ -261,6 +261,38 @@ pub fn placement_transform(
     [rx, ry]
 }
 
+/// Bounding box of a placed component in diagram coordinates.
+///
+/// Modelica 3.6 §18.6.1.1 maps an icon point to `origin + R * S * p_icon`, where `S`
+/// takes the icon extent onto the placement extent. The four corners of the placement
+/// extent therefore land on `origin + R * corner`; their axis-aligned box is the area the
+/// view has to draw, hit-test and put the label under.
+///
+/// This is also what makes an omitted `origin` behave: the specification says it defaults
+/// to `{0, 0}` and the `extent` is then already in the parent's coordinates, so the box is
+/// the extent itself (`tests/fixtures/instance_cauer.json` has such a component, `G`).
+pub fn component_bounds(placement: &Placement) -> Extent {
+    let corners = [
+        [placement.extent.x1, placement.extent.y1],
+        [placement.extent.x2, placement.extent.y1],
+        [placement.extent.x2, placement.extent.y2],
+        [placement.extent.x1, placement.extent.y2],
+    ];
+    let mut x1 = f64::INFINITY;
+    let mut y1 = f64::INFINITY;
+    let mut x2 = f64::NEG_INFINITY;
+    let mut y2 = f64::NEG_INFINITY;
+    for corner in corners {
+        // `S` is the identity here: the placement extent is mapped onto itself.
+        let q = placement_transform(corner, &placement.extent, placement);
+        x1 = x1.min(q[0]);
+        y1 = y1.min(q[1]);
+        x2 = x2.max(q[0]);
+        y2 = y2.max(q[1]);
+    }
+    Extent { x1, y1, x2, y2 }
+}
+
 /// Parse a graphic entry (Rectangle, Line, Polygon, Ellipse, Text, Bitmap).
 fn parse_graphic(entry: &Value) -> Result<Option<Graphic>, String> {
     let name = entry
@@ -539,6 +571,84 @@ mod tests {
         // (0, 100) in icon coords -> y maps to bottom edge of flipped placement (-10) per issue G12
         let p = placement_transform([0.0, 100.0], &icon_extent, &placement);
         assert!((p[1] + 10.0).abs() < 1e-9, "{p:?}");
+    }
+
+    fn cauer() -> Diagram {
+        let json: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/instance_cauer.json")).unwrap();
+        parse_diagram(&json, &BTreeMap::new()).unwrap()
+    }
+
+    fn pid() -> Diagram {
+        let json: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/instance_pid.json")).unwrap();
+        parse_diagram(&json, &BTreeMap::new()).unwrap()
+    }
+
+    fn assert_bounds(p: &Placement, expected: (f64, f64, f64, f64)) {
+        let b = component_bounds(p);
+        let got = (b.x1, b.y1, b.x2, b.y2);
+        assert!(
+            (got.0 - expected.0).abs() < 1e-9
+                && (got.1 - expected.1).abs() < 1e-9
+                && (got.2 - expected.2).abs() < 1e-9
+                && (got.3 - expected.3).abs() < 1e-9,
+            "bounds {got:?} != {expected:?}"
+        );
+    }
+
+    #[test]
+    fn component_bounds_without_origin_is_the_extent() {
+        // `G` in the Cauer fixture has `extent=[[-10,-90],[10,-70]]` and no `origin`, so
+        // the box is that extent in the diagram's coordinates (not the origin).
+        let diagram = cauer();
+        let g = diagram
+            .components
+            .iter()
+            .find(|c| c.name == "G")
+            .expect("G");
+        assert_eq!(g.placement.origin, [0.0, 0.0]);
+        assert_bounds(&g.placement, (-10.0, -90.0, 10.0, -70.0));
+    }
+
+    #[test]
+    fn component_bounds_of_the_pid_controller() {
+        // `PI` in the PID fixture: `extent=[[-56,-20],[-36,0]]`, no `origin`.
+        let diagram = pid();
+        let pi = diagram
+            .components
+            .iter()
+            .find(|c| c.name == "PI")
+            .expect("PI");
+        assert_bounds(&pi.placement, (-56.0, -20.0, -36.0, 0.0));
+    }
+
+    #[test]
+    fn component_bounds_applies_origin_and_rotation() {
+        // Cauer `C1`: origin [-60,-20], extent [-10,-10]..[10,10], rotation 270.
+        let diagram = cauer();
+        let c1 = diagram
+            .components
+            .iter()
+            .find(|c| c.name == "C1")
+            .expect("C1");
+        assert_bounds(&c1.placement, (-70.0, -30.0, -50.0, -10.0));
+    }
+
+    #[test]
+    fn component_bounds_of_a_rotated_rectangle() {
+        // A non-square box shows the rotation: 20 high becomes 20 wide at 90 degrees.
+        let placement = Placement {
+            extent: Extent {
+                x1: 0.0,
+                y1: 0.0,
+                x2: 10.0,
+                y2: 20.0,
+            },
+            origin: [100.0, 0.0],
+            rotation_deg: 90.0,
+        };
+        assert_bounds(&placement, (80.0, 0.0, 100.0, 10.0));
     }
 
     #[test]
