@@ -11,6 +11,7 @@ use crate::backend::{
 use crate::html::{self, Block};
 use crate::library::{self, ClassDoc, LibrarySpec, LoadedLibrary};
 use crate::model::{default_class, scan_classes, ClassEntry as UserClass, Document};
+use crate::text_editor::{location_is_for, parse_omc_locations, SourceLocation};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
@@ -271,6 +272,12 @@ pub struct OmolaApp {
     /// Shared x range of every diagram (x0, x1); `None` = fit to the data.
     pub plot_x: Option<(f64, f64)>,
     pub logs: Vec<LogEntry>,
+    /// Source positions parsed from the log entries of the current Check / Simulate (G25).
+    pub error_locations: Vec<SourceLocation>,
+    /// `logs.len()` when [`Self::error_locations`] was built; `None` = rebuild next frame.
+    error_locations_log_len: Option<usize>,
+    /// Index of the first log entry written by the current Check / Simulate.
+    error_from_log_index: usize,
     pub log_tab: LogTab,
     pub bottom_pane: BottomPane,
     pub command_input: String,
@@ -378,6 +385,9 @@ impl OmolaApp {
             pending_overrides: BTreeMap::new(),
             plot_x: None,
             logs: Vec::new(),
+            error_locations: Vec::new(),
+            error_locations_log_len: None,
+            error_from_log_index: 0,
             log_tab: LogTab::Version,
             bottom_pane: BottomPane::Logs,
             command_input: String::new(),
@@ -841,6 +851,7 @@ impl OmolaApp {
             return self.error(LogTab::Syntax, "No model is open.".into());
         };
         self.log_tab = LogTab::Syntax;
+        self.start_error_scan();
         self.worker.submit(Job::Check {
             context: self.context_for(&class),
             class: class.clone(),
@@ -886,6 +897,7 @@ impl OmolaApp {
         }
         self.log_tab = LogTab::Translation;
         self.bottom_pane = BottomPane::Logs;
+        self.start_error_scan();
         self.worker.submit(Job::Simulate {
             context: self.context_for(&class),
             class,
@@ -904,6 +916,72 @@ impl OmolaApp {
             text,
             libraries: self.loaded_specs(),
         });
+    }
+
+    /// Re-parse the source positions of the current Check / Simulate when the log grew.
+    ///
+    /// Only the entries written since the current run started are looked at, so a fix and
+    /// a re-check clear the markers of the previous run. Runs once per new log entry, not
+    /// once per frame.
+    fn refresh_error_locations(&mut self) {
+        let len = self.logs.len();
+        if self.error_locations_log_len == Some(len) {
+            return;
+        }
+        let from = match self.error_locations_log_len {
+            // The pane was cleared (G22): parse everything that is left.
+            Some(previous) if previous > len => 0,
+            _ => self.error_from_log_index.min(len),
+        };
+        self.error_locations_log_len = Some(len);
+        self.error_locations = self.logs[from..]
+            .iter()
+            .filter(|entry| {
+                matches!(
+                    entry.tab,
+                    LogTab::Syntax | LogTab::Translation | LogTab::Simulation
+                )
+            })
+            .flat_map(|entry| parse_omc_locations(&entry.text))
+            .collect();
+    }
+
+    /// Forget the locations of the previous run when a new Check / Simulate starts.
+    fn start_error_scan(&mut self) {
+        self.error_from_log_index = self.logs.len();
+        self.error_locations_log_len = None;
+        self.error_locations.clear();
+    }
+
+    /// Open the document a log location belongs to, show the Text layer and mark the line.
+    ///
+    /// G23 makes the editor scroll to `highlight_line` and put the caret on it.
+    pub fn jump_to_location(&mut self, location: &SourceLocation) {
+        // A user model is checked through a private copy named after its class, so the
+        // class has to be part of the match.
+        let document = (0..self.documents.len()).find(|&i| {
+            let class = self.first_class_of(i);
+            location_is_for(
+                &location.file,
+                self.documents[i].path.as_deref(),
+                class.as_deref(),
+            )
+        });
+        let class = document.and_then(|i| {
+            self.user_classes
+                .iter()
+                .zip(&self.user_class_doc)
+                .find(|(_, doc)| **doc == i)
+                .map(|(class, _)| (i, class.qualified_name.clone()))
+        });
+        let Some((i, class)) = class else {
+            let tab = self.log_tab;
+            self.info(tab, format!("{} is not open.", location.file));
+            return;
+        };
+        self.open_class(&class);
+        self.select_tab(RibbonTab::Text);
+        self.documents[i].editor.highlight_line = Some(location.line);
     }
 
     pub fn info(&mut self, tab: LogTab, text: String) {
@@ -1474,6 +1552,7 @@ pub fn merge_overrides(
 impl eframe::App for OmolaApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.handle_events();
+        self.refresh_error_locations();
         self.poll_dialog();
         self.handle_shortcuts(ui);
         let title = self.window_title();
@@ -1897,6 +1976,78 @@ mod tests {
         app.open_class("Unnamed");
         app.open_file(file.clone());
         assert_eq!(app.recent_files.len(), 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- G25 error locations ---
+
+    #[test]
+    fn error_locations_are_rebuilt_only_from_the_current_run() {
+        let mut app = app();
+        app.logs.push(LogEntry {
+            tab: LogTab::Syntax,
+            level: LogLevel::Error,
+            text: "[A.mo:3:1-3:2:writable] Error: old".into(),
+        });
+        app.refresh_error_locations();
+        assert_eq!(app.error_locations.len(), 1);
+
+        // A new Check must not keep the markers of the previous run.
+        app.start_error_scan();
+        app.logs.push(LogEntry {
+            tab: LogTab::Syntax,
+            level: LogLevel::Error,
+            text: "[A.mo:9:1-9:2:writable] Error: new".into(),
+        });
+        app.refresh_error_locations();
+        assert_eq!(app.error_locations.len(), 1);
+        assert_eq!(app.error_locations[0].line, 9);
+
+        // Without a new entry the cache is not rebuilt (and nothing is duplicated).
+        app.refresh_error_locations();
+        assert_eq!(app.error_locations.len(), 1);
+    }
+
+    #[test]
+    fn jump_to_location_opens_the_text_layer_on_the_error_line() {
+        let dir = std::env::temp_dir().join(format!("omola-g25-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("Jump.mo");
+        std::fs::write(
+            &file,
+            "model Jump\n  Real x;\nequation\n  x = ;\nend Jump;\n",
+        )
+        .unwrap();
+
+        let mut app = app();
+        app.open_file(file.clone());
+        app.tab = RibbonTab::Graphics;
+
+        // OMC echoes the path it was given, which may use another directory and slashes.
+        app.jump_to_location(&SourceLocation {
+            file: "C:/elsewhere/Jump.mo".into(),
+            line: 4,
+            column: 7,
+        });
+        assert_eq!(app.tab, RibbonTab::Text);
+        assert_eq!(app.active.as_deref(), Some("Jump"));
+        let doc = app
+            .documents
+            .iter()
+            .find(|d| d.path.as_deref() == Some(file.as_path()))
+            .unwrap();
+        assert_eq!(doc.editor.highlight_line, Some(4));
+
+        // A file that is not open only produces a message.
+        let before = app.logs.len();
+        app.jump_to_location(&SourceLocation {
+            file: "/nope/Missing.mo".into(),
+            line: 1,
+            column: 1,
+        });
+        assert_eq!(app.logs.len(), before + 1);
+        assert!(app.logs.last().unwrap().text.contains("is not open"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }
