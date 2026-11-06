@@ -2,8 +2,7 @@
 
 use super::widgets::{flat_tab, paint_icon};
 use crate::app::{Layer, Loadable, OmolaApp, PlotSignal};
-use crate::backend::LogTab;
-use crate::text_editor::{draw_text_editor, extract_error_lines};
+use crate::text_editor::{draw_text_editor, lines_for_file};
 use crate::theme;
 use egui::{Align2, Color32, FontId, RichText, Sense, Stroke, Vec2};
 use egui_material_icons::icons::*;
@@ -134,15 +133,14 @@ impl OmolaApp {
 
     fn text_layer(&mut self, ui: &mut egui::Ui, class: &str) {
         if let Some(i) = self.doc_of(class) {
+            // Check reports to Syntax, translation errors to Translation and simulation
+            // errors to Simulation; `error_locations` already covers all three (G25).
+            let error_lines = lines_for_file(
+                &self.error_locations,
+                self.documents[i].path.as_deref(),
+                Some(class),
+            );
             let doc = &mut self.documents[i];
-
-            // Extract error lines from OMC output for this file
-            let error_lines =
-                if let Some(log_tab) = self.logs.iter().find(|l| l.tab == LogTab::Simulation) {
-                    extract_error_lines(&log_tab.text, doc.path.as_ref())
-                } else {
-                    Vec::new()
-                };
 
             let changed = draw_text_editor(
                 ui,

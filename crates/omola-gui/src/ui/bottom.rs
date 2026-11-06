@@ -4,6 +4,7 @@
 use super::widgets::{flat_tab, icon_button, paint_icon};
 use crate::app::{BottomPane, Layer, OmolaApp, RibbonTab};
 use crate::backend::{LogLevel, LogTab};
+use crate::text_editor::{parse_omc_locations, SourceLocation};
 use crate::theme;
 use egui::{Align2, Color32, FontId, RichText, Sense, Stroke, Vec2};
 use egui_material_icons::icons::*;
@@ -79,19 +80,37 @@ impl OmolaApp {
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
                             ui.spacing_mut().item_spacing.y = 0.0;
+                            // A click is handled after the loop so that `self.logs` is no
+                            // longer borrowed when the document is opened.
+                            let mut jump: Option<SourceLocation> = None;
                             for entry in self.logs.iter().filter(|e| e.tab == self.log_tab) {
                                 let color = match entry.level {
                                     LogLevel::Info => theme::TEXT,
                                     LogLevel::Warning => Color32::from_rgb(0xA0, 0x60, 0x00),
                                     LogLevel::Error => Color32::from_rgb(0xC6, 0x28, 0x28),
                                 };
-                                ui.label(
-                                    RichText::new(&entry.text)
-                                        .monospace()
-                                        .size(12.0)
-                                        .color(color),
-                                );
+                                let text = RichText::new(&entry.text)
+                                    .monospace()
+                                    .size(12.0)
+                                    .color(color);
+                                let locations = parse_omc_locations(&entry.text);
+                                if locations.is_empty() {
+                                    ui.label(text);
+                                } else {
+                                    // The message names a source line: clicking it shows
+                                    // that line in the Text layer (G25).
+                                    let response = ui
+                                        .add(egui::Label::new(text).sense(Sense::click()))
+                                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                        .on_hover_text("Click to show this line in the Text layer");
+                                    if response.clicked() {
+                                        jump = locations.into_iter().next();
+                                    }
+                                }
                                 ui.add_space(12.0);
+                            }
+                            if let Some(location) = jump {
+                                self.jump_to_location(&location);
                             }
                         });
                 });
