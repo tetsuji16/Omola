@@ -18,6 +18,16 @@ pub const CURVE_COLORS: [Color32; 6] = [
     Color32::from_rgb(0xD0, 0x7A, 0x00),
 ];
 
+/// Label of a model tab: the short class name, plus `*` while the document has unsaved edits.
+pub fn tab_label(qualified_name: &str, dirty: bool) -> String {
+    let name = crate::library::short_name(qualified_name);
+    if dirty {
+        format!("{name}*")
+    } else {
+        name.to_owned()
+    }
+}
+
 impl OmolaApp {
     /// Tabs of open models: `Name x` ... `+`.
     pub fn model_tabs_strip(&mut self, ui: &mut egui::Ui) {
@@ -27,10 +37,12 @@ impl OmolaApp {
             ui.spacing_mut().item_spacing.x = 0.0;
             for class in self.model_tabs.clone() {
                 let selected = self.active.as_deref() == Some(class.as_str());
-                let label = crate::library::short_name(&class);
+                // A `*` marks unsaved edits, the same marker `Document::title()` uses.
+                let dirty = self.doc_of(&class).is_some_and(|i| self.documents[i].dirty);
+                let label = tab_label(&class, dirty);
                 let font = FontId::proportional(12.5);
                 let tw = ui.ctx().fonts_mut(|f| {
-                    f.layout_no_wrap(label.into(), font.clone(), theme::TEXT)
+                    f.layout_no_wrap(label.clone(), font.clone(), theme::TEXT)
                         .size()
                         .x
                 });
@@ -755,7 +767,15 @@ fn canvas_sheet(ui: &mut egui::Ui) -> (egui::Rect, egui::Rect) {
 
 #[cfg(test)]
 mod tests {
-    use super::format_tick;
+    use super::{format_tick, tab_label};
+
+    #[test]
+    fn tab_label_marks_unsaved_documents() {
+        assert_eq!(tab_label("BouncingBall", false), "BouncingBall");
+        assert_eq!(tab_label("BouncingBall", true), "BouncingBall*");
+        // Nested classes show the short name only.
+        assert_eq!(tab_label("Modelica.Blocks.Gain", true), "Gain*");
+    }
 
     #[test]
     fn tick_labels_follow_the_step() {
