@@ -1,5 +1,5 @@
 //! Read-only diagram painting (G12).
-use crate::diagram::{placement_transform, Diagram, PlacedComponent};
+use crate::diagram::{component_bounds, placement_transform, Diagram, PlacedComponent, Placement};
 use crate::graphics::{Extent, Graphic, Shape, Style};
 use egui::{Align2, Color32, FontId, Painter, Pos2, Rect, Shape as EguiShape, Stroke, Vec2};
 
@@ -231,21 +231,9 @@ pub fn paint_diagram(painter: &Painter, rect: Rect, diagram: &Diagram, zoom: f32
                 &comp.type_name,
             );
         } else {
-            let a = to_screen(
-                [comp.placement.extent.x1, comp.placement.extent.y1],
-                extent,
-                rect,
-                zoom,
-                pan,
-            );
-            let b = to_screen(
-                [comp.placement.extent.x2, comp.placement.extent.y2],
-                extent,
-                rect,
-                zoom,
-                pan,
-            );
-            let r = Rect::from_two_pos(a, b);
+            // No icon: the placement box is all there is to draw. It already includes the
+            // `origin` (and the rotation), so the box must not be offset again.
+            let r = bounds_screen_rect(&comp.placement, extent, rect, zoom, pan);
             painter.rect_stroke(
                 r,
                 0.0,
@@ -253,11 +241,16 @@ pub fn paint_diagram(painter: &Painter, rect: Rect, diagram: &Diagram, zoom: f32
                 egui::StrokeKind::Inside,
             );
         }
-        let center = to_screen(comp.placement.origin, extent, rect, zoom, pan);
-        let half_h =
-            ((comp.placement.extent.y2 - comp.placement.extent.y1).abs() / 2.0) as f32 * scale;
+        let bounds = component_bounds(&comp.placement);
+        let bottom = to_screen(
+            [(bounds.x1 + bounds.x2) / 2.0, bounds.y1],
+            extent,
+            rect,
+            zoom,
+            pan,
+        );
         painter.text(
-            Pos2::new(center.x, center.y + half_h + 8.0),
+            Pos2::new(bottom.x, bottom.y + 8.0),
             Align2::CENTER_TOP,
             comp.name.clone(),
             FontId::proportional(11.0),
@@ -272,13 +265,22 @@ pub fn component_screen_rect(
     pan: Vec2,
     comp: &PlacedComponent,
 ) -> Rect {
-    let extent = &diagram.coordinate_extent;
-    let pts = [
-        [comp.placement.extent.x1, comp.placement.extent.y1],
-        [comp.placement.extent.x2, comp.placement.extent.y1],
-        [comp.placement.extent.x2, comp.placement.extent.y2],
-        [comp.placement.extent.x1, comp.placement.extent.y2],
-    ];
+    bounds_screen_rect(&comp.placement, &diagram.coordinate_extent, rect, zoom, pan)
+}
+
+/// Screen rectangle of a placement's bounding box.
+///
+/// `component_bounds` already applies `origin` and `rotation`, so nothing is added here;
+/// doing so would move a component twice.
+fn bounds_screen_rect(
+    placement: &Placement,
+    extent: &Extent,
+    rect: Rect,
+    zoom: f32,
+    pan: Vec2,
+) -> Rect {
+    let b = component_bounds(placement);
+    let pts = [[b.x1, b.y1], [b.x2, b.y1], [b.x2, b.y2], [b.x1, b.y2]];
     let screen: Vec<Pos2> = pts
         .iter()
         .map(|p| to_screen(*p, extent, rect, zoom, pan))
