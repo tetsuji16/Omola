@@ -667,6 +667,12 @@ impl Omc {
             command.process_group(0);
         }
         let mut child = command.spawn().map_err(launch_failed)?;
+        // `omc` starts the simulation executable as a child of its own, and `Child::kill()`
+        // stops only `omc`. A job object that kills on close lets the cancel path end the
+        // whole tree (G27). Failing to set it up is not fatal: `kill_tree` still stops
+        // `omc` itself.
+        #[cfg(windows)]
+        let job = JobHandle::create().filter(|job| job.assign(&child));
         let mut out = child.stdout.take().expect("stdout piped");
         let mut err = child.stderr.take().expect("stderr piped");
         let out_t = std::thread::spawn(move || {
@@ -690,11 +696,83 @@ impl Omc {
                 });
             }
             if flag.load(Ordering::Relaxed) {
+                #[cfg(windows)]
+                if let Some(job) = &job {
+                    job.terminate();
+                }
                 kill_tree(&mut child);
                 let _ = child.wait();
                 return Err(BackendError::Cancelled);
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+}
+
+/// A Windows job object that owns `omc` and every process it starts (G27).
+#[cfg(windows)]
+struct JobHandle(windows_sys::Win32::Foundation::HANDLE);
+
+#[cfg(windows)]
+impl JobHandle {
+    /// Create a job that terminates its processes when the handle is closed.
+    fn create() -> Option<Self> {
+        use windows_sys::Win32::System::JobObjects::{
+            CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        };
+        // SAFETY: both arguments are null, so the call reads nothing from this process.
+        let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        if handle.is_null() {
+            return None;
+        }
+        let job = Self(handle);
+        // SAFETY: the structure is plain old data, and zeroing it is how the default
+        // (no limits) is expressed before setting the one flag that is needed.
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        // SAFETY: `job` is an open job handle and `info` is a valid structure whose size
+        // is passed exactly.
+        let ok = unsafe {
+            SetInformationJobObject(
+                job.0,
+                JobObjectExtendedLimitInformation,
+                std::ptr::addr_of!(info).cast(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+        };
+        if ok == 0 {
+            // `job` is dropped here; no process has been assigned, so closing it is safe.
+            return None;
+        }
+        Some(job)
+    }
+
+    /// Put `child`, and so everything it starts later, into the job.
+    fn assign(&self, child: &std::process::Child) -> bool {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
+        // SAFETY: `self.0` is an open job handle and the raw handle of a running child.
+        unsafe { AssignProcessToJobObject(self.0, child.as_raw_handle() as _) != 0 }
+    }
+
+    /// Terminate every process in the job.
+    fn terminate(&self) {
+        use windows_sys::Win32::System::JobObjects::TerminateJobObject;
+        // SAFETY: `self.0` is an open job handle.
+        unsafe {
+            TerminateJobObject(self.0, 1);
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for JobHandle {
+    fn drop(&mut self) {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        // SAFETY: the handle came from `CreateJobObjectW` and is closed exactly once.
+        unsafe {
+            CloseHandle(self.0);
         }
     }
 }
@@ -731,7 +809,13 @@ fn kill_tree(child: &mut std::process::Child) {
             let _ = child.kill();
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        // The job object has already terminated `omc` and its simulation executable when
+        // it could be set up; this only covers the case where it could not (G27).
+        let _ = child.kill();
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = child.kill();
     }
@@ -1313,6 +1397,60 @@ fn main() {
         let mos = PathBuf::from(fs::read_to_string(&log).unwrap());
         assert!(!mos.exists());
         assert!(!mos.parent().unwrap().exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn cancel_flag_stops_the_whole_process_tree_on_windows() {
+        // The fake `omc` starts `ping` as a child of its own, the way `omc` starts the
+        // simulation executable. `Child::kill()` would leave `ping` running; the job
+        // object must take the whole tree down (G27).
+        let dir = TempDir::new("cancel-win").unwrap();
+        let fake = dir.path.join("fake-omc.bat");
+        fs::write(
+            &fake,
+            "@echo off\r\n\
+             if \"%~1\"==\"--version\" goto version\r\n\
+             ping -n 30 127.0.0.1 > NUL\r\n\
+             exit /b 0\r\n\
+             :version\r\n\
+             echo OpenModelica 1.27.1 (fake)\r\n\
+             exit /b 0\r\n",
+        )
+        .unwrap();
+        let old = env::var_os("OMOLA_OMC");
+        env::set_var("OMOLA_OMC", &fake);
+        let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag_setter = flag.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            flag_setter.store(true, std::sync::atomic::Ordering::Relaxed);
+        });
+        let omc = Omc::discover().unwrap().with_cancel_flag(flag);
+        let started = std::time::Instant::now();
+        let result = omc.run_script("print(1);");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "took {:?}",
+            started.elapsed()
+        );
+        assert!(
+            matches!(result, Err(BackendError::Cancelled)),
+            "unexpected: {result:?}"
+        );
+        // Windows needs a moment to remove a terminated process from the task list.
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let output = std::process::Command::new("tasklist")
+            .args(["/FI", "IMAGENAME eq PING.EXE", "/NH"])
+            .output()
+            .expect("tasklist");
+        let listing = String::from_utf8_lossy(&output.stdout).to_uppercase();
+        assert!(!listing.contains("PING.EXE"), "ping survived:\n{listing}");
+        if let Some(old) = old {
+            env::set_var("OMOLA_OMC", old);
+        } else {
+            env::remove_var("OMOLA_OMC");
+        }
     }
 
     #[cfg(unix)]

@@ -7,3 +7,14 @@ license.workspace = true
 [lib]
 name = "omola_core"
 path = "src/lib.rs"
+
+# `omc` starts the simulation executable as its own child. On Windows `Child::kill()`
+# only stops `omc`, so the cancel path puts both in a job object and terminates that
+# (G27). `windows-sys` 0.59 is already in Cargo.lock through eframe/egui.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
