@@ -1,5 +1,7 @@
 # G14: 結果の読み込み・保持/破棄・エクスポート
 
+> **2026-11-06 再オープン:** issue #42 は閉じられていましたが、`ResultRun.kept` / `Job::LoadResult` / 結果ノードの右クリックメニューはいずれも main に存在しません(未実装)。本文どおりに実装してください。Tools リボンの `Load Result: issue G14` アイコン(`ui/chrome.rs`)もこの issue で有効にします。G22 と同時に進める場合は `app.rs` の衝突に注意。
+
 - 難易度: 易 / 依存: なし(G03 があればファイルダイアログを使う) / 触るファイル: `src/backend.rs`, `src/app.rs`, `src/ui/browsers.rs`, `src/ui/chrome.rs`, `src/ui/dialogs.rs`
 - 先に `docs/issues/gui/README.md` と `docs/reference/dymola-gui.md` の R8 を読むこと。
 

@@ -123,13 +123,43 @@ Dymola 風レイアウト(タイトル行・リボン・ブラウザ・モデル
 | [G11](G11-text-editor.md) | テキストエディタ(シンタックスハイライト・行番号・エラー行ジャンプ) | 中 | — |
 | [G12](G12-diagram-layer-readonly.md) | Diagram 層の読み取り専用表示(部品配置と結線) | 難 | G06, G07 |
 | [G13](G13-cancel-simulation.md) | 実行中のシミュレーションの中断 | 中 | — |
-| [G14](G14-result-management.md) | 結果の読み込み・保持/破棄・エクスポート | 易 | — |
+| [G14](G14-result-management.md) | 結果の読み込み・保持/破棄・エクスポート | 易 | — (#42 を再オープン。未実装) |
+| [G15](G15-repo-housekeeping.md) | リポジトリ整理(不要ファイル削除・改行コード固定・ドキュメントの現状反映) | 易 | — |
+| [G16](G16-frame-time-stats.md) | フレーム時間の計測機能(性能改善 #60 の物差し) | 易 | — |
+| [G17](G17-build-profile.md) | 開発ビルドでも依存クレートを最適化する + release 実行の明記 | 易 | (G16) |
+| [G18](G18-library-index.md) | ライブラリのクラス索引(class / children / has_children を O(1) に) | 易〜中 | — |
+| [G19](G19-package-browser-per-frame.md) | Package Browser の毎フレームの無駄をなくす | 中 | G18 |
+| [G20](G20-variable-browser-cache.md) | Variable Browser の木を毎フレーム作り直さない | 中 | — |
+| [G21](G21-plot-no-copy-decimate.md) | プロットで曲線データを毎フレーム複製しない + 画素幅で間引く | 中 | — |
+| [G22](G22-log-pane-limits.md) | ログ窓の上限と、見えている行だけの描画 | 易 | — |
+| [G23](G23-text-editor-editable.md) | 【不具合・最優先】Text 層でユーザーモデルが編集できない(G11 の回帰)を直す | 中 | — |
+| [G24](G24-modelica-tokenizer.md) | Modelica 専用のトークナイザで色分けする | 中 | G23 |
+| [G25](G25-error-line-jump.md) | 【不具合】OMC のエラー行の抽出を直し、Messages からエラー行へジャンプ | 中 | G23 |
+| [G26](G26-diagram-placement-origin.md) | 【不具合】Diagram 層: origin が省略された部品が原点に重なる | 易 | — |
+| [G27](G27-windows-job-object-cancel.md) | Windows でシミュレーション中断時に子プロセスまで止める(Job Object) | 中 | — |
+| [G28](G28-model-edit-backend.md) | モデル編集の基盤(OMC の編集 API を通してテキストを書き換える Job) | 中 | G23 |
+| [G29](G29-diagram-select-move.md) | Diagram 層で部品を選択・移動・回転する | 中 | G28, G26 |
+| [G30](G30-diagram-add-component.md) | Package Browser から Diagram 層へドラッグして部品を追加する | 中 | G28 |
+| [G31](G31-diagram-delete-rename.md) | Diagram 層で部品を削除・名前変更する | 易〜中 | G28, G29 |
+| [G32](G32-diagram-connect.md) | Diagram 層でコネクタ間をドラッグして結線する / 結線を削除する | 中〜難 | G28, G29 |
+| [G33](G33-component-parameter-dialog.md) | 部品のパラメータダイアログ | 中 | G28 |
+| [G34](G34-undo-redo.md) | モデル編集の Undo / Redo | 易〜中 | G28 |
 
 並行して進めてよいもの: G02, G03, G09, G10, G11, G13, G14 は互いに独立。
+
+### 2026-11-06 以降の進め方(G14〜G34)
+
+1. **最初に**: G15(整理)と G16(計測)。G16 の PR に載せる基準値を、性能 issue すべてが比較に使う。
+2. **#60「GUI が重い」の対策**: G17 → G18 → G19、並行して G20 / G21 / G22。
+3. **不具合**: G23 を最優先(ユーザーモデルが編集できない)。G23 の後に G24・G25。G26 は独立。
+4. **残り機能**: G14(再)・G27 は独立。
+5. **Diagram 編集**: G28 → (G29, G30, G33, G34) → G31, G32。
+
+同じファイルを触るため、同時に進めると衝突しやすい組み合わせ: G19/G20(`browsers.rs`)、G20/G22/G14(`app.rs`)、G23/G24/G25(`text_editor.rs`)、G29〜G32(`views.rs` の `diagram_layer`)。
 **同じファイルを触る issue を同時に進めると衝突します。** PR は小さく、1 issue = 1 PR にしてください。
 
 ## 7. PR の書き方
 
-- タイトル: `GUI G0X: <issue タイトル>`
+- タイトル: `GUI GXX: <issue タイトル>`(例: `GUI G18: ...`)
 - 本文: 何を変えたか / 受け入れ条件のチェックリスト(すべてに [x] と根拠)/ 実行したコマンドと結果 / スクリーンショット(UI 変更時)/ 未対応のこと
 - 実 OMC で確認していない場合は「fake-omc でのみ確認」と**明記**する。
