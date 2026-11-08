@@ -181,6 +181,32 @@ pub struct LogEntry {
     pub text: String,
 }
 
+/// One row of the Package Browser search (G19).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchHit {
+    pub name: String,
+    pub restriction: String,
+    pub comment: String,
+}
+
+/// Hits of the last Package Browser search.
+///
+/// The search used to lower-case every class name of the MSL on every frame. It is now
+/// computed once per query and kept until the query or the class lists change (G19).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageSearch {
+    /// Lower-case query these hits belong to.
+    pub query: String,
+    pub hits: Vec<SearchHit>,
+    /// More classes matched than [`MAX_SEARCH_HITS`]; the list stops there.
+    pub truncated: bool,
+    /// Bumped whenever the hits are rebuilt (used by the tests).
+    pub generation: u64,
+}
+
+/// Upper bound for one search, so a one-letter query cannot build a list of thousands.
+pub const MAX_SEARCH_HITS: usize = 500;
+
 /// Serializable subset of [`OmolaApp`] persisted across restarts via eframe storage.
 ///
 /// `OmolaApp` itself is not serialized (it contains a worker thread, channels, etc.).
@@ -208,6 +234,8 @@ pub struct OmolaApp {
     pub libraries: Vec<LibraryState>,
     pub expanded: BTreeSet<String>,
     pub package_filter: String,
+    /// Hits of [`Self::package_filter`], rebuilt only when the query changes (G19).
+    pub package_search_cache: Option<PackageSearch>,
     /// Open model tabs (qualified class names) and the active one.
     pub model_tabs: Vec<String>,
     pub active: Option<String>,
@@ -349,6 +377,7 @@ impl OmolaApp {
             libraries: Vec::new(),
             expanded: BTreeSet::new(),
             package_filter: String::new(),
+            package_search_cache: None,
             model_tabs: Vec::new(),
             active: None,
             history: Vec::new(),
@@ -540,6 +569,98 @@ impl OmolaApp {
                 _ => None,
             })
             .unwrap_or_default()
+    }
+
+    /// Whether `class` has children, without building the child list (G19).
+    ///
+    /// User classes are few and are scanned; library classes use the O(1) index from
+    /// G18, so a collapsed row costs a hash lookup instead of a `Vec` per frame.
+    pub fn has_children_of(&self, class: &str) -> bool {
+        if self.is_user_class(class) {
+            return self
+                .user_classes
+                .iter()
+                .any(|c| library::parent_name(&c.qualified_name) == Some(class));
+        }
+        self.libraries
+            .iter()
+            .find_map(|l| match l {
+                LibraryState::Loaded(lib)
+                    if class.split('.').next() == Some(lib.spec.name.as_str()) =>
+                {
+                    Some(lib.has_children(class))
+                }
+                _ => None,
+            })
+            .unwrap_or(false)
+    }
+
+    /// Hits of the Package Browser search, rebuilt only when the query changes (G19).
+    pub fn search_hits(&mut self, query: &str) -> &PackageSearch {
+        let query = query.trim().to_lowercase();
+        let stale = self
+            .package_search_cache
+            .as_ref()
+            .is_none_or(|cache| cache.query != query);
+        if stale {
+            let (hits, truncated) = self.search_classes(&query);
+            let generation = self
+                .package_search_cache
+                .as_ref()
+                .map_or(1, |cache| cache.generation + 1);
+            self.package_search_cache = Some(PackageSearch {
+                query,
+                hits,
+                truncated,
+                generation,
+            });
+        }
+        self.package_search_cache
+            .as_ref()
+            .expect("the search cache was just filled")
+    }
+
+    /// All matches for a lower-case query, at most [`MAX_SEARCH_HITS`] of them.
+    ///
+    /// A user class matches on its qualified name (like before); a library class matches
+    /// on its short name, which is what the search box used to compare.
+    fn search_classes(&self, query: &str) -> (Vec<SearchHit>, bool) {
+        let mut hits: Vec<SearchHit> = Vec::new();
+        for c in &self.user_classes {
+            if !c.qualified_name.to_lowercase().contains(query) {
+                continue;
+            }
+            if hits.len() >= MAX_SEARCH_HITS {
+                return (hits, true);
+            }
+            hits.push(SearchHit {
+                name: c.qualified_name.clone(),
+                restriction: c.kind.clone(),
+                comment: c.description.clone().unwrap_or_default(),
+            });
+        }
+        for lib in &self.libraries {
+            let LibraryState::Loaded(lib) = lib else {
+                continue;
+            };
+            for c in &lib.classes {
+                if !library::short_name(&c.qualified_name)
+                    .to_lowercase()
+                    .contains(query)
+                {
+                    continue;
+                }
+                if hits.len() >= MAX_SEARCH_HITS {
+                    return (hits, true);
+                }
+                hits.push(SearchHit {
+                    name: c.qualified_name.clone(),
+                    restriction: c.restriction.clone(),
+                    comment: c.comment.clone(),
+                });
+            }
+        }
+        (hits, false)
     }
 
     /// Show a class in the edit window (new tab if needed) and record history.
@@ -820,6 +941,8 @@ impl OmolaApp {
                 self.user_class_doc.push(i);
             }
         }
+        // The search results depend on the user classes.
+        self.package_search_cache = None;
     }
 
     /// Text of document `doc` was edited in the Text layer.
@@ -1087,6 +1210,8 @@ impl OmolaApp {
                         Some(slot) => *slot = state,
                         None => self.libraries.push(state),
                     }
+                    // The search results depend on the library index.
+                    self.package_search_cache = None;
                     // Re-request documentation that waited for this index.
                     if let Some(active) = self.active.clone() {
                         if !self.docs.contains_key(&active) {
@@ -2068,6 +2193,81 @@ mod tests {
         assert!(app.logs.last().unwrap().text.contains("is not open"));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- G19 package browser ---
+
+    fn library_with(classes: &[&str]) -> LibraryState {
+        use crate::library::ClassEntry;
+        let entries = classes
+            .iter()
+            .map(|name| ClassEntry {
+                qualified_name: (*name).to_owned(),
+                restriction: "package".into(),
+                comment: String::new(),
+            })
+            .collect();
+        LibraryState::Loaded(LoadedLibrary::new(
+            LibrarySpec::new("Modelica", Some("4.1.0")),
+            "4.1.0".into(),
+            PathBuf::from("/lib/Modelica/package.mo"),
+            entries,
+        ))
+    }
+
+    #[test]
+    fn has_children_of_knows_library_and_user_classes() {
+        let mut app = app();
+        app.libraries = vec![library_with(&[
+            "Modelica",
+            "Modelica.Blocks",
+            "Modelica.Blocks.Gain",
+        ])];
+        assert!(app.has_children_of("Modelica"));
+        assert!(app.has_children_of("Modelica.Blocks"));
+        assert!(!app.has_children_of("Modelica.Blocks.Gain"));
+
+        app.documents.push(Document::new_untitled(
+            "package P\n  model M end M;\nend P;\n".to_owned(),
+        ));
+        app.refresh_outline();
+        assert!(app.has_children_of("P"));
+        assert!(!app.has_children_of("P.M"));
+        assert!(!app.has_children_of("Nope"));
+    }
+
+    #[test]
+    fn the_search_is_rebuilt_only_when_the_query_changes() {
+        let mut app = app();
+        app.libraries = vec![library_with(&["Modelica", "Modelica.Blocks.Gain"])];
+        let generation = |app: &OmolaApp| app.package_search_cache.as_ref().unwrap().generation;
+
+        assert_eq!(app.search_hits("gain").hits.len(), 1);
+        assert_eq!(generation(&app), 1);
+        // The same query twice does not rebuild the list.
+        assert_eq!(app.search_hits("  Gain ").hits.len(), 1);
+        assert_eq!(generation(&app), 1, "the query was rebuilt");
+        // A different query does.
+        app.search_hits("blocks");
+        assert_eq!(generation(&app), 2);
+        assert_eq!(app.search_hits("nothing-matches").hits.len(), 0);
+
+        // A changed outline (a user file was edited) invalidates the cached hits.
+        app.refresh_outline();
+        assert!(app.package_search_cache.is_none());
+    }
+
+    #[test]
+    fn the_search_stops_at_five_hundred_hits() {
+        let mut app = app();
+        let names: Vec<String> = (0..MAX_SEARCH_HITS + 20)
+            .map(|i| format!("Modelica.M{i}"))
+            .collect();
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        app.libraries = vec![library_with(&names)];
+        let hits = app.search_hits("m");
+        assert_eq!(hits.hits.len(), MAX_SEARCH_HITS);
+        assert!(hits.truncated, "the list says it was cut");
     }
 
     // --- G04 library index cache ---

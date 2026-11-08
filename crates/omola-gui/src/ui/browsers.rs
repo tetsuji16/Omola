@@ -36,6 +36,9 @@ struct RowAction {
 }
 
 /// One tree row: expander, icon box, label. Returns what the user did.
+///
+/// `tooltip` is only called while the row is hovered, so a row that is merely visible
+/// does not build a string (G19).
 #[allow(clippy::too_many_arguments)]
 fn tree_row(
     ui: &mut egui::Ui,
@@ -45,7 +48,7 @@ fn tree_row(
     selected: bool,
     icon: (MaterialIcon, Color32),
     label: &str,
-    tooltip: &str,
+    tooltip: Option<&dyn Fn() -> String>,
 ) -> RowAction {
     let width = ui.available_width().max(120.0);
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, ROW), Sense::click());
@@ -111,8 +114,10 @@ fn tree_row(
         action.toggle = expandable;
         action.open_new_tab = !expandable;
     }
-    if !tooltip.is_empty() {
-        response.on_hover_text(tooltip);
+    if let Some(tooltip) = tooltip {
+        response.on_hover_ui(|ui| {
+            ui.label(tooltip());
+        });
     }
     action
 }
@@ -155,6 +160,7 @@ fn component_rows(
     };
     let has_children = !node.children.is_empty();
     let open = expanded.contains(&key);
+    let tooltip = || node.comment.clone();
     let action = tree_row(
         ui,
         depth,
@@ -163,7 +169,7 @@ fn component_rows(
         false,
         component_icon(node),
         &label,
-        &node.comment,
+        (!node.comment.is_empty()).then_some(&tooltip as &dyn Fn() -> String),
     );
     if action.toggle {
         toggles.push(key.clone());
@@ -251,20 +257,22 @@ impl OmolaApp {
         });
         let footer = 26.0;
         let height = (ui.available_height() - footer).max(60.0);
+        let searching = !self.package_filter.trim().is_empty();
         Self::browser_frame(ui, |ui| {
-            egui::ScrollArea::both()
-                .id_salt("package_tree")
-                .max_height(height)
-                .min_scrolled_height(height)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.y = 0.0;
-                    if self.package_filter.trim().is_empty() {
+            if searching {
+                // The search owns its scroll area: it draws only the rows in view.
+                self.package_search(ui, height);
+            } else {
+                egui::ScrollArea::both()
+                    .id_salt("package_tree")
+                    .max_height(height)
+                    .min_scrolled_height(height)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 0.0;
                         self.package_tree(ui);
-                    } else {
-                        self.package_search(ui);
-                    }
-                });
+                    });
+            }
         });
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 1.0;
@@ -302,31 +310,18 @@ impl OmolaApp {
 
     fn package_tree(&mut self, ui: &mut egui::Ui) {
         let mut actions: Vec<(String, RowAction)> = Vec::new();
-        // User classes first-level entries (the open file).
-        let user_roots: Vec<(String, String, String)> = self
-            .user_classes
-            .iter()
-            .filter(|c| c.depth == 0)
-            .map(|c| {
-                (
-                    c.qualified_name.clone(),
-                    c.kind.clone(),
-                    c.description.clone().unwrap_or_default(),
-                )
-            })
-            .collect();
         for lib in &self.libraries {
             match lib {
                 LibraryState::Loaded(l) => {
-                    let root = l.root().map(|c| {
-                        (
-                            c.qualified_name.clone(),
-                            c.restriction.clone(),
-                            c.comment.clone(),
-                        )
-                    });
-                    if let Some(root) = root {
-                        self.tree_node(ui, 0, root, &mut actions);
+                    if let Some(root) = l.root() {
+                        self.tree_node(
+                            ui,
+                            0,
+                            &root.qualified_name,
+                            &root.restriction,
+                            &root.comment,
+                            &mut actions,
+                        );
                     }
                 }
                 LibraryState::Loading(spec) => {
@@ -338,11 +333,16 @@ impl OmolaApp {
                         false,
                         (ICON_HOURGLASS_EMPTY, theme::TEXT_WEAK),
                         &format!("{} (loading...)", spec.name),
-                        "",
+                        None,
                     );
                 }
                 LibraryState::Failed(spec, message) => {
-                    let _ = tree_row(
+                    let tooltip = || {
+                        format!(
+                            "{message}\n\nInstall it with Tools > Install Libraries, or run scripts/setup-* (docs/install.md)."
+                        )
+                    };
+                    tree_row(
                         ui,
                         0,
                         false,
@@ -350,53 +350,98 @@ impl OmolaApp {
                         false,
                         (ICON_ERROR, Color32::from_rgb(0xC6, 0x28, 0x28)),
                         &format!("{} (not installed)", spec.name),
-                        &format!(
-                            "{message}\n\nInstall it with Tools > Install Libraries, or run scripts/setup-* (docs/install.md)."
-                        ),
+                        Some(&tooltip as &dyn Fn() -> String),
                     );
                 }
             }
         }
-        for root in user_roots {
-            self.tree_node(ui, 0, root, &mut actions);
+        // User classes first-level entries (the open file).
+        for c in self.user_classes.iter().filter(|c| c.depth == 0) {
+            self.tree_node(
+                ui,
+                0,
+                &c.qualified_name,
+                &c.kind,
+                c.description.as_deref().unwrap_or(""),
+                &mut actions,
+            );
         }
         self.apply_tree_actions(actions);
     }
 
+    /// Draw one class and, when expanded, its direct children.
+    ///
+    /// Names are borrowed instead of cloned, and a collapsed row only asks
+    /// [`OmolaApp::has_children_of`] instead of building the child list (G19).
     fn tree_node(
         &self,
         ui: &mut egui::Ui,
         depth: usize,
-        (name, restriction, comment): (String, String, String),
+        name: &str,
+        restriction: &str,
+        comment: &str,
         actions: &mut Vec<(String, RowAction)>,
     ) {
-        let children = self.children_of(&name);
-        let expandable = !children.is_empty();
-        let expanded = self.expanded.contains(&name);
-        let label = crate::library::short_name(&name).to_owned();
-        let tooltip = if comment.is_empty() {
-            name.clone()
-        } else {
-            format!("{name}\n{comment}")
+        let expandable = self.has_children_of(name);
+        let expanded = self.expanded.contains(name);
+        let tooltip = || {
+            if comment.is_empty() {
+                name.to_owned()
+            } else {
+                format!("{name}\n{comment}")
+            }
         };
         let action = tree_row(
             ui,
             depth,
             expandable,
             expanded,
-            self.active.as_deref() == Some(name.as_str()),
-            class_icon(&restriction, &name),
-            &label,
-            &tooltip,
+            self.active.as_deref() == Some(name),
+            class_icon(restriction, name),
+            crate::library::short_name(name),
+            Some(&tooltip as &dyn Fn() -> String),
         );
         if action.toggle || action.open || action.open_new_tab {
-            actions.push((name.clone(), action));
+            actions.push((name.to_owned(), action));
         }
-        if expanded {
-            for child in children {
-                self.tree_node(ui, depth + 1, child, actions);
+        if !expanded {
+            return;
+        }
+        if self.is_user_class(name) {
+            let children = self.children_of(name);
+            for (child, child_restriction, child_comment) in &children {
+                self.tree_node(
+                    ui,
+                    depth + 1,
+                    child,
+                    child_restriction,
+                    child_comment,
+                    actions,
+                );
+            }
+            return;
+        }
+        if let Some(lib) = self.library_of(name) {
+            for child in lib.children_iter(name) {
+                self.tree_node(
+                    ui,
+                    depth + 1,
+                    &child.qualified_name,
+                    &child.restriction,
+                    &child.comment,
+                    actions,
+                );
             }
         }
+    }
+
+    /// The loaded library whose top-level class owns `class`.
+    fn library_of(&self, class: &str) -> Option<&crate::library::LoadedLibrary> {
+        let top = class.split('.').next()?;
+        self.libraries.iter().find_map(|l| match l {
+            LibraryState::Loaded(lib) if lib.spec.name == top => Some(lib),
+            _ => None,
+        })
     }
 
     fn apply_tree_actions(&mut self, actions: Vec<(String, RowAction)>) {
@@ -412,52 +457,51 @@ impl OmolaApp {
         }
     }
 
-    fn package_search(&mut self, ui: &mut egui::Ui) {
-        let query = self.package_filter.trim().to_lowercase();
-        let mut hits: Vec<(String, String, String)> = Vec::new();
-        for c in &self.user_classes {
-            if c.qualified_name.to_lowercase().contains(&query) {
-                hits.push((
-                    c.qualified_name.clone(),
-                    c.kind.clone(),
-                    c.description.clone().unwrap_or_default(),
-                ));
-            }
-        }
-        for lib in &self.libraries {
-            if let LibraryState::Loaded(l) = lib {
-                for c in &l.classes {
-                    if hits.len() >= 300 {
-                        break;
+    /// Search results, drawn only for the rows in view.
+    ///
+    /// The hits come from [`OmolaApp::search_hits`], which lower-cases the class names
+    /// once per query instead of once per frame (G19).
+    fn package_search(&mut self, ui: &mut egui::Ui, height: f32) {
+        let query = self.package_filter.clone();
+        self.search_hits(&query);
+        let mut actions: Vec<(String, RowAction)> = Vec::new();
+        {
+            let Some(cache) = self.package_search_cache.as_ref() else {
+                return;
+            };
+            let rows = cache.hits.len() + usize::from(cache.truncated);
+            egui::ScrollArea::both()
+                .id_salt("package_search")
+                .max_height(height)
+                .min_scrolled_height(height)
+                .auto_shrink([false, false])
+                .show_rows(ui, ROW, rows, |ui, range| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    for i in range {
+                        let Some(hit) = cache.hits.get(i) else {
+                            ui.label(
+                                RichText::new("... more results, refine the search")
+                                    .small()
+                                    .color(theme::TEXT_WEAK),
+                            );
+                            continue;
+                        };
+                        let tooltip = || hit.comment.clone();
+                        let action = tree_row(
+                            ui,
+                            0,
+                            false,
+                            false,
+                            self.active.as_deref() == Some(hit.name.as_str()),
+                            class_icon(&hit.restriction, &hit.name),
+                            &hit.name,
+                            (!hit.comment.is_empty()).then_some(&tooltip as &dyn Fn() -> String),
+                        );
+                        if action.open || action.open_new_tab {
+                            actions.push((hit.name.clone(), action));
+                        }
                     }
-                    if crate::library::short_name(&c.qualified_name)
-                        .to_lowercase()
-                        .contains(&query)
-                    {
-                        hits.push((
-                            c.qualified_name.clone(),
-                            c.restriction.clone(),
-                            c.comment.clone(),
-                        ));
-                    }
-                }
-            }
-        }
-        let mut actions = Vec::new();
-        for (name, restriction, comment) in hits {
-            let a = tree_row(
-                ui,
-                0,
-                false,
-                false,
-                self.active.as_deref() == Some(name.as_str()),
-                class_icon(&restriction, &name),
-                &name,
-                &comment,
-            );
-            if a.open || a.open_new_tab {
-                actions.push((name, a));
-            }
+                });
         }
         self.apply_tree_actions(actions);
     }

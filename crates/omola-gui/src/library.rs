@@ -111,10 +111,7 @@ impl LoadedLibrary {
     }
 
     /// [`Self::children`] without the allocation, for the per-frame tree drawing.
-    pub fn children_iter<'a>(
-        &'a self,
-        parent: &str,
-    ) -> impl Iterator<Item = &'a ClassEntry> + 'a {
+    pub fn children_iter<'a>(&'a self, parent: &str) -> impl Iterator<Item = &'a ClassEntry> + 'a {
         let indices: &'a [usize] = self
             .by_name
             .get(parent)
@@ -568,7 +565,8 @@ mod tests {
     }
 
     #[test]
-    fn reports_missing_library() {        let err =
+    fn reports_missing_library() {
+        let err =
             parse_library_index(&msl(), "OMOLA_LOAD_FAILED\nError: no such library\n").unwrap_err();
         assert!(err.contains("Modelica 4.1.0"), "{err}");
     }

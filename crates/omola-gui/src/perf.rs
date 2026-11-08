@@ -46,10 +46,6 @@ impl FrameStats {
         }
     }
 
-    pub fn enabled(&self) -> bool {
-        self.enabled
-    }
-
     /// Record one frame. Returns a [`Summary`] and starts a new window once a second
     /// has passed since the last one.
     ///
@@ -98,7 +94,7 @@ mod tests {
     fn disabled_records_nothing() {
         let start = Instant::now();
         let mut stats = FrameStats::disabled();
-        assert!(!stats.enabled());
+        assert!(!stats.enabled);
         assert_eq!(
             stats.record(Duration::from_secs(5), start + Duration::from_secs(5)),
             None
@@ -131,16 +127,25 @@ mod tests {
         let mut stats = enabled_at(start);
         stats.record(Duration::from_millis(2), start + Duration::from_millis(600));
         let first = stats
-            .record(Duration::from_millis(2), start + Duration::from_millis(1100))
+            .record(
+                Duration::from_millis(2),
+                start + Duration::from_millis(1100),
+            )
             .expect("first window");
         assert_eq!(first.frames, 2);
         // The next window counts from the summary, not from the start.
         assert_eq!(
-            stats.record(Duration::from_millis(3), start + Duration::from_millis(1500)),
+            stats.record(
+                Duration::from_millis(3),
+                start + Duration::from_millis(1500)
+            ),
             None
         );
         let second = stats
-            .record(Duration::from_millis(3), start + Duration::from_millis(2200))
+            .record(
+                Duration::from_millis(3),
+                start + Duration::from_millis(2200),
+            )
             .expect("second window");
         assert_eq!(second.frames, 2);
         assert!((second.max_ms - 3.0).abs() < 1e-9, "{second:?}");
