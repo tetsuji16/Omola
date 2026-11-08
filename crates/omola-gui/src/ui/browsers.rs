@@ -10,6 +10,8 @@ use egui_material_icons::MaterialIcon;
 
 const ROW: f32 = 20.0;
 const INDENT: f32 = 16.0;
+/// Rows of a filtered variable list that are drawn; the rest is summarised.
+const MAX_VARIABLE_ROWS: usize = 500;
 
 /// Icon and colour for a class restriction.
 fn class_icon(restriction: &str, name: &str) -> (MaterialIcon, Color32) {
@@ -589,9 +591,13 @@ impl OmolaApp {
         let mut expand: Vec<(String, bool)> = Vec::new();
         let mut reset: Vec<String> = Vec::new();
         self.variable_time_row(ui);
-        let filter = self.variable_filter.to_lowercase();
         let latest = self.runs.last().map(|r| r.id);
         let time = self.variable_time;
+        // Build the trees before drawing: the rows below only borrow them.
+        let run_ids: Vec<u64> = self.runs.iter().map(|r| r.id).collect();
+        for id in &run_ids {
+            self.var_tree_for(*id);
+        }
         Self::browser_frame(ui, |ui| {
             egui::ScrollArea::both()
                 .id_salt("variable_tree")
@@ -684,46 +690,49 @@ impl OmolaApp {
                             overrides: &self.pending_overrides,
                             expanded: &self.variable_expanded,
                         };
-                        let names: Vec<(usize, &str)> = variable_order(self, run)
-                            .into_iter()
-                            .filter_map(|i| {
-                                let var = &result.variables[i];
-                                if var.name == "time" {
-                                    return None;
-                                }
-                                let shown = if var.is_parameter {
-                                    self.variable_show_parameters
-                                } else {
-                                    self.variable_show_time_varying
-                                };
-                                if !shown {
-                                    return None;
-                                }
-                                if !filter.is_empty() && !var.name.to_lowercase().contains(&filter)
-                                {
-                                    return None;
-                                }
-                                Some((i, var.name.as_str()))
-                            })
-                            .collect();
+                        let names = match self.var_tree_cache.get(&run.id) {
+                            Some(cache) => cache,
+                            None => continue,
+                        };
                         let mut actions = VarActions::default();
-                        if filter.is_empty() {
-                            let tree = crate::var_tree::build_variable_tree(&names);
-                            variable_rows(ui, &tree, 0, "", &ctx, result, widths, &mut actions);
+                        if names.key.filter.is_empty() {
+                            variable_rows(
+                                ui,
+                                &names.tree,
+                                0,
+                                "",
+                                &ctx,
+                                result,
+                                widths,
+                                &mut actions,
+                            );
                         } else {
-                            // A search shows matching variables as a flat list.
-                            for (i, name) in &names {
+                            // A search shows matching variables as a flat list. Only the
+                            // first 500 are drawn, so a one-letter filter stays cheap.
+                            let shown = names.flat.len().min(MAX_VARIABLE_ROWS);
+                            for &i in &names.flat[..shown] {
+                                let name = &result.variables[i].name;
                                 variable_row(
                                     ui,
                                     0,
                                     name,
-                                    Some(*i),
+                                    Some(i),
                                     None,
                                     name,
                                     &ctx,
                                     result,
                                     widths,
                                     &mut actions,
+                                );
+                            }
+                            if names.flat.len() > shown {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "  ... {} more, refine the filter",
+                                        names.flat.len() - shown
+                                    ))
+                                    .small()
+                                    .color(theme::TEXT_WEAK),
                                 );
                             }
                         }
@@ -1096,48 +1105,6 @@ fn variable_row(
     }
 }
 
-/// Display order: declaration order in the user's source when available, else file order.
-fn variable_order(app: &OmolaApp, run: &crate::app::ResultRun) -> Vec<usize> {
-    let vars = &run.outcome.result.variables;
-    let mut order: Vec<usize> = (0..vars.len()).collect();
-    let text = app
-        .is_user_class(&run.outcome.class)
-        .then(|| {
-            app.doc_of(&run.outcome.class)
-                .map(|i| app.documents[i].text.as_str())
-        })
-        .flatten();
-    if let Some(text) = text {
-        let key = |i: &usize| -> (usize, usize) {
-            let name = &vars[*i].name;
-            let (base, is_der) = match name.strip_prefix("der(").and_then(|n| n.strip_suffix(')')) {
-                Some(inner) => (inner, 1),
-                None => (name.as_str(), 0),
-            };
-            let leaf = base.split('.').next().unwrap_or(base);
-            (find_identifier(text, leaf).unwrap_or(usize::MAX), is_der)
-        };
-        order.sort_by_key(key);
-    }
-    order
-}
-
-fn find_identifier(text: &str, ident: &str) -> Option<usize> {
-    let bytes = text.as_bytes();
-    let mut from = 0;
-    while let Some(pos) = text[from..].find(ident) {
-        let at = from + pos;
-        let before = at.checked_sub(1).map(|i| bytes[i]);
-        let after = bytes.get(at + ident.len()).copied();
-        let is_ident = |b: Option<u8>| b.is_some_and(|b| b == b'_' || b.is_ascii_alphanumeric());
-        if !is_ident(before) && !is_ident(after) {
-            return Some(at);
-        }
-        from = at + ident.len();
-    }
-    None
-}
-
 /// OpenModelica appends ` [unit]` to some descriptions; show it in the Unit column.
 pub fn split_unit(description: &str) -> (&str, &str) {
     let d = description.trim_end();
@@ -1184,13 +1151,5 @@ mod tests {
         assert_eq!(format_value(0.1), "0.1");
         assert_eq!(format_value(0.0), "0");
         assert_eq!(format_value(-0.25), "-0.25");
-    }
-
-    #[test]
-    fn identifiers_match_whole_words() {
-        let text = "parameter Real m=1; parameter Real mm=2; Real phi;";
-        assert_eq!(find_identifier(text, "m"), Some(15));
-        assert_eq!(find_identifier(text, "phi"), Some(46));
-        assert_eq!(find_identifier(text, "x"), None);
     }
 }

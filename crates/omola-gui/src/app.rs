@@ -207,6 +207,26 @@ pub struct PackageSearch {
 /// Upper bound for one search, so a one-letter query cannot build a list of thousands.
 pub const MAX_SEARCH_HITS: usize = 500;
 
+/// Variable tree of one result for one set of browser filters (G20).
+pub struct VarTreeCache {
+    pub key: VarTreeKey,
+    pub tree: crate::var_tree::VarNode,
+    /// Matching variable indices when a text filter is active (flat list).
+    pub flat: Vec<usize>,
+    /// Bumped whenever the tree is rebuilt (used by the tests).
+    pub generation: u64,
+}
+
+/// What a [`VarTreeCache`] was built from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VarTreeKey {
+    pub run_id: u64,
+    /// Lower-case filter text (already trimmed).
+    pub filter: String,
+    pub show_parameters: bool,
+    pub show_time_varying: bool,
+}
+
 /// Serializable subset of [`OmolaApp`] persisted across restarts via eframe storage.
 ///
 /// `OmolaApp` itself is not serialized (it contains a worker thread, channels, etc.).
@@ -276,6 +296,8 @@ pub struct OmolaApp {
     pub recent_files: Vec<PathBuf>,
     pub runs: Vec<ResultRun>,
     pub next_run_id: u64,
+    /// Variable trees, one per result, rebuilt only when the filters change (G20).
+    pub var_tree_cache: BTreeMap<u64, VarTreeCache>,
     pub keep_results: usize,
     pub variable_filter: String,
     /// Time shown in the Value column; `None` = the last sample of the newest result.
@@ -404,6 +426,7 @@ impl OmolaApp {
             recent_files: Vec::new(),
             runs: Vec::new(),
             next_run_id: 1,
+            var_tree_cache: BTreeMap::new(),
             keep_results: 2,
             variable_filter: String::new(),
             variable_time: None,
@@ -1347,6 +1370,7 @@ impl OmolaApp {
         self.runs.push(ResultRun { id, label, outcome });
         while self.runs.len() > self.keep_results.max(1) {
             let removed = self.runs.remove(0);
+            self.var_tree_cache.remove(&removed.id);
             for diagram in &mut self.diagrams {
                 diagram.signals.retain(|s| s.run_id != removed.id);
             }
@@ -1359,6 +1383,83 @@ impl OmolaApp {
 
     pub fn run(&self, id: u64) -> Option<&ResultRun> {
         self.runs.iter().find(|r| r.id == id)
+    }
+
+    /// The variable tree of `run_id` for the current browser filters (G20).
+    ///
+    /// The tree used to be rebuilt for every result on every frame: all names were
+    /// lower-cased, filtered and inserted into a fresh tree. It is now kept until the
+    /// filter or the run changes; the expand/collapse state is not part of it.
+    pub fn var_tree_for(&mut self, run_id: u64) -> &VarTreeCache {
+        let key = VarTreeKey {
+            run_id,
+            filter: self.variable_filter.trim().to_lowercase(),
+            show_parameters: self.variable_show_parameters,
+            show_time_varying: self.variable_show_time_varying,
+        };
+        let stale = self
+            .var_tree_cache
+            .get(&run_id)
+            .is_none_or(|cache| cache.key != key);
+        if stale {
+            let generation = self
+                .var_tree_cache
+                .get(&run_id)
+                .map_or(1, |cache| cache.generation + 1);
+            let (tree, flat) = self.build_var_tree(&key);
+            self.var_tree_cache.insert(
+                run_id,
+                VarTreeCache {
+                    key,
+                    tree,
+                    flat,
+                    generation,
+                },
+            );
+        }
+        self.var_tree_cache
+            .get(&run_id)
+            .expect("the tree cache was just filled")
+    }
+
+    /// Tree (no filter) or flat list (filter) of the variables of one result.
+    fn build_var_tree(&self, key: &VarTreeKey) -> (crate::var_tree::VarNode, Vec<usize>) {
+        let Some(run) = self.run(key.run_id) else {
+            return (crate::var_tree::VarNode::default(), Vec::new());
+        };
+        let vars = &run.outcome.result.variables;
+        let source = self
+            .doc_of(&run.outcome.class)
+            .map(|i| self.documents[i].text.as_str());
+        let mut names: Vec<(usize, &str)> = Vec::new();
+        let mut flat: Vec<usize> = Vec::new();
+        for i in variable_order(vars, source) {
+            let var = &vars[i];
+            if var.name == "time" {
+                continue;
+            }
+            let shown = if var.is_parameter {
+                key.show_parameters
+            } else {
+                key.show_time_varying
+            };
+            if !shown {
+                continue;
+            }
+            if !key.filter.is_empty() && !var.name.to_lowercase().contains(&key.filter) {
+                continue;
+            }
+            if !key.filter.is_empty() {
+                flat.push(i);
+            }
+            names.push((i, var.name.as_str()));
+        }
+        if key.filter.is_empty() {
+            (crate::var_tree::build_variable_tree(&names), flat)
+        } else {
+            // A search shows a flat list; the tree is not needed.
+            (crate::var_tree::VarNode::default(), flat)
+        }
     }
 
     // ---------------------------------------------------------------- plot diagrams
@@ -1676,6 +1777,42 @@ pub fn merge_overrides(
             .map(|(n, v)| (n.clone(), v.trim().to_owned())),
     );
     out
+}
+
+/// Display order of the variables: declaration order in the user's source when
+/// available, else the order the result file lists them.
+fn variable_order(vars: &[omola_core::mat::ResultVariable], source: Option<&str>) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..vars.len()).collect();
+    if let Some(text) = source {
+        let key = |i: &usize| -> (usize, usize) {
+            let name = &vars[*i].name;
+            let (base, is_der) = match name.strip_prefix("der(").and_then(|n| n.strip_suffix(')')) {
+                Some(inner) => (inner, 1),
+                None => (name.as_str(), 0),
+            };
+            let leaf = base.split('.').next().unwrap_or(base);
+            (find_identifier(text, leaf).unwrap_or(usize::MAX), is_der)
+        };
+        order.sort_by_key(key);
+    }
+    order
+}
+
+/// Byte offset of `ident` in `text` as a whole word, if it appears.
+fn find_identifier(text: &str, ident: &str) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let mut from = 0;
+    while let Some(pos) = text[from..].find(ident) {
+        let at = from + pos;
+        let before = at.checked_sub(1).map(|i| bytes[i]);
+        let after = bytes.get(at + ident.len()).copied();
+        let is_ident = |b: Option<u8>| b.is_some_and(|b| b == b'_' || b.is_ascii_alphanumeric());
+        if !is_ident(before) && !is_ident(after) {
+            return Some(at);
+        }
+        from = at + ident.len();
+    }
+    None
 }
 
 impl eframe::App for OmolaApp {
@@ -2268,6 +2405,100 @@ mod tests {
         let hits = app.search_hits("m");
         assert_eq!(hits.hits.len(), MAX_SEARCH_HITS);
         assert!(hits.truncated, "the list says it was cut");
+    }
+
+    // --- G20 variable browser cache ---
+
+    /// A result with the variables the variable browser tests use.
+    fn inertia_outcome() -> SimulationOutcome {
+        let var = |name: &str, p: bool| ResultVariable {
+            name: name.into(),
+            description: String::new(),
+            is_parameter: p,
+        };
+        SimulationOutcome {
+            class: "Inertia".into(),
+            result_file: PathBuf::from("x_res.mat"),
+            result: TrajectoryResult {
+                variables: vec![
+                    var("time", false),
+                    var("inertia1.w", false),
+                    var("der(inertia1.w)", false),
+                    var("inertia1.J", true),
+                    var("inertia2.w", false),
+                ],
+                time: vec![0.0, 1.0],
+                values: vec![vec![0.0, 1.0]; 5],
+            },
+            elapsed_seconds: 0.0,
+        }
+    }
+
+    #[test]
+    fn the_variable_tree_is_built_once_per_state() {
+        let mut app = app();
+        app.add_run(inertia_outcome());
+        let id = app.runs[0].id;
+        assert_eq!(app.var_tree_for(id).generation, 1);
+        assert_eq!(
+            app.var_tree_for(id).generation,
+            1,
+            "rebuilt without a change"
+        );
+
+        // A new filter rebuilds it.
+        app.variable_filter = "w".into();
+        assert_eq!(app.var_tree_for(id).generation, 2);
+        // Toggling parameters away rebuilds it too.
+        app.variable_show_parameters = false;
+        assert_eq!(app.var_tree_for(id).generation, 3);
+        // Whitespace around the same filter is not a change.
+        app.variable_filter = "  w ".into();
+        assert_eq!(app.var_tree_for(id).generation, 3);
+    }
+
+    #[test]
+    fn a_filtered_tree_lists_the_matching_variables() {
+        let mut app = app();
+        app.add_run(inertia_outcome());
+        let id = app.runs[0].id;
+        app.variable_filter = "w".into();
+        let indices = app.var_tree_for(id).flat.clone();
+        let names: Vec<String> = indices
+            .iter()
+            .map(|&i| app.runs[0].outcome.result.variables[i].name.clone())
+            .collect();
+        assert_eq!(names, ["inertia1.w", "der(inertia1.w)", "inertia2.w"]);
+
+        // A parameter filter without the Parameters toggle stays empty.
+        app.variable_show_parameters = false;
+        app.variable_filter = "j".into();
+        assert!(app.var_tree_for(id).flat.is_empty());
+        // `time` is never listed.
+        app.variable_filter = "time".into();
+        assert!(app.var_tree_for(id).flat.is_empty());
+    }
+
+    #[test]
+    fn dropping_a_result_drops_its_tree() {
+        let mut app = app();
+        app.keep_results = 1;
+        app.add_run(inertia_outcome());
+        let oldest = app.runs[0].id;
+        app.var_tree_for(oldest);
+        app.add_run(inertia_outcome());
+        let newest = app.runs[0].id;
+        app.var_tree_for(newest);
+        assert!(!app.var_tree_cache.contains_key(&oldest));
+        assert!(app.var_tree_cache.contains_key(&newest));
+    }
+
+    #[test]
+    fn identifiers_match_whole_words() {
+        let text = "parameter Real m=1; parameter Real mm=2; Real phi;";
+        assert_eq!(find_identifier(text, "m"), Some(15));
+        assert_eq!(find_identifier(text, "phi"), Some(46));
+        assert_eq!(find_identifier(text, "x"), None);
     }
 
     // --- G04 library index cache ---
