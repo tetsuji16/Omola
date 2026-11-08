@@ -28,7 +28,14 @@ pub struct Document {
     pub dirty: bool,
     /// Editor state (cursor position, selection, syntax highlighting, etc.).
     pub editor: EditorState,
+    /// The text before each model edit, oldest first (G34).
+    pub undo: Vec<String>,
+    /// The text each Undo removed, oldest first (G34).
+    pub redo: Vec<String>,
 }
+
+/// How many text snapshots a document keeps for Undo.
+pub const MAX_UNDO: usize = 100;
 
 impl Document {
     pub fn new_untitled(text: impl Into<String>) -> Self {
@@ -37,6 +44,8 @@ impl Document {
             text: text.into(),
             dirty: false,
             editor: EditorState::new(),
+            undo: Vec::new(),
+            redo: Vec::new(),
         }
     }
 
@@ -47,7 +56,45 @@ impl Document {
             text,
             dirty: false,
             editor: EditorState::new(),
+            undo: Vec::new(),
+            redo: Vec::new(),
         })
+    }
+
+    /// Remember the current text as the state Undo returns to, and drop the redo stack.
+    ///
+    /// Called right before a model edit replaces the text, so an Undo restores exactly what
+    /// was on screen — including anything typed by hand since the last edit.
+    pub fn push_undo(&mut self) {
+        if self.undo.last() != Some(&self.text) {
+            self.undo.push(self.text.clone());
+            let excess = self.undo.len().saturating_sub(MAX_UNDO);
+            self.undo.drain(..excess);
+        }
+        self.redo.clear();
+    }
+
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+
+    /// Move one snapshot from one stack to the other; `false` when there is nothing to move.
+    pub fn step_history(&mut self, back: bool) -> bool {
+        let (from, to) = if back {
+            (&mut self.undo, &mut self.redo)
+        } else {
+            (&mut self.redo, &mut self.undo)
+        };
+        let Some(restored) = from.pop() else {
+            return false;
+        };
+        let current = std::mem::replace(&mut self.text, restored);
+        to.push(current);
+        true
     }
 
     pub fn save(&mut self) -> std::io::Result<()> {

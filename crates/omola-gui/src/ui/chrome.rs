@@ -85,8 +85,18 @@ impl OmolaApp {
             {
                 self.save();
             }
-            icon_button(ui, ICON_UNDO, DARK, 16.0, false, false);
-            icon_button(ui, ICON_REDO, DARK, 16.0, false, false);
+            if icon_button(ui, ICON_UNDO, DARK, 16.0, self.can_undo(), false)
+                .on_hover_text("Undo (Ctrl+Z)")
+                .clicked()
+            {
+                self.undo();
+            }
+            if icon_button(ui, ICON_REDO, DARK, 16.0, self.can_redo(), false)
+                .on_hover_text("Redo (Ctrl+Y)")
+                .clicked()
+            {
+                self.redo();
+            }
             if icon_button(ui, ICON_PLAY_CIRCLE, DARK, 17.0, !self.busy, false)
                 .on_hover_text("Simulate (F9)")
                 .clicked()
@@ -380,8 +390,12 @@ impl OmolaApp {
         });
         group(ui, "History", |ui| {
             column(ui, |ui| {
-                small_button(ui, ICON_UNDO, DARK, "Undo", false, false);
-                small_button(ui, ICON_REDO, DARK, "Redo", false, false);
+                if small_button(ui, ICON_UNDO, DARK, "Undo", self.can_undo(), false).clicked() {
+                    self.undo();
+                }
+                if small_button(ui, ICON_REDO, DARK, "Redo", self.can_redo(), false).clicked() {
+                    self.redo();
+                }
             });
         });
         clipboard_group(ui);
@@ -565,8 +579,12 @@ impl OmolaApp {
         self.model_group(ui, false);
         group(ui, "History", |ui| {
             column(ui, |ui| {
-                small_button(ui, ICON_UNDO, DARK, "Undo", false, false);
-                small_button(ui, ICON_REDO, DARK, "Redo", false, false);
+                if small_button(ui, ICON_UNDO, DARK, "Undo", self.can_undo(), false).clicked() {
+                    self.undo();
+                }
+                if small_button(ui, ICON_REDO, DARK, "Redo", self.can_redo(), false).clicked() {
+                    self.redo();
+                }
             });
         });
         clipboard_group(ui);

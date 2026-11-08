@@ -1086,13 +1086,21 @@ impl OmolaApp {
                 format!("{class} is no longer open; the edit was dropped."),
             );
         };
-        if let Err(message) =
-            crate::model::replace_class_text(&mut self.documents[doc].text, class, &text)
-        {
+        // Replace into a copy first: a rejected replacement must not add a snapshot.
+        let mut updated = self.documents[doc].text.clone();
+        if let Err(message) = crate::model::replace_class_text(&mut updated, class, &text) {
             return self.error(LogTab::Syntax, message);
         }
+        let document = &mut self.documents[doc];
+        document.push_undo();
+        document.text = updated;
         self.user_text_changed(doc);
-        // Everything derived from the old text has to be fetched again.
+        self.forget_class(class);
+        self.info(LogTab::Syntax, format!("Updated {class}."));
+    }
+
+    /// Drop everything derived from the text of `class`, so it is fetched again.
+    fn forget_class(&mut self, class: &str) {
         self.model_diagrams.remove(class);
         self.icons.remove(class);
         self.texts.remove(class);
@@ -1100,7 +1108,58 @@ impl OmolaApp {
             self.components = None;
             self.components_pending = None;
         }
-        self.info(LogTab::Syntax, format!("Updated {class}."));
+    }
+
+    /// Undo the last model edit of the active document (G34).
+    ///
+    /// Hand edits made in the Text layer are not snapshots of their own, but the snapshot
+    /// taken right before an edit contains them, so an Undo keeps them.
+    pub fn undo(&mut self) {
+        let Some(doc) = self.active_doc() else {
+            return;
+        };
+        if !self.documents[doc].step_history(true) {
+            return;
+        }
+        self.after_history_step(doc);
+    }
+
+    /// Redo the edit the last [`Self::undo`] removed (G34).
+    pub fn redo(&mut self) {
+        let Some(doc) = self.active_doc() else {
+            return;
+        };
+        if !self.documents[doc].step_history(false) {
+            return;
+        }
+        self.after_history_step(doc);
+    }
+
+    /// Whether the active document has a model edit to undo.
+    pub fn can_undo(&self) -> bool {
+        self.active_doc()
+            .is_some_and(|doc| self.documents[doc].can_undo())
+    }
+
+    /// Whether the active document has an undone edit to redo.
+    pub fn can_redo(&self) -> bool {
+        self.active_doc()
+            .is_some_and(|doc| self.documents[doc].can_redo())
+    }
+
+    fn after_history_step(&mut self, doc: usize) {
+        self.user_text_changed(doc);
+        // An undo may have restored any class of the document, so every class of it is stale.
+        let classes: Vec<String> = self
+            .user_classes
+            .iter()
+            .zip(&self.user_class_doc)
+            .filter(|(_, d)| **d == doc)
+            .map(|(c, _)| c.qualified_name.clone())
+            .collect();
+        for class in &classes {
+            self.forget_class(class);
+        }
     }
 
     // ---------------------------------------------------------------- check & simulate
@@ -1998,6 +2057,9 @@ impl OmolaApp {
         let save = KeyboardShortcut::new(Modifiers::COMMAND, Key::S);
         let simulate = KeyboardShortcut::new(Modifiers::NONE, Key::F9);
         let find = KeyboardShortcut::new(Modifiers::COMMAND, Key::F);
+        let undo = KeyboardShortcut::new(Modifiers::COMMAND, Key::Z);
+        let redo = KeyboardShortcut::new(Modifiers::COMMAND, Key::Y);
+        let redo_shift = KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
         if ui.input_mut(|i| i.consume_shortcut(&save)) {
             self.save();
         }
@@ -2006,6 +2068,19 @@ impl OmolaApp {
         }
         if ui.input_mut(|i| i.consume_shortcut(&find)) {
             self.find_open = true;
+        }
+        // A focused text box keeps its own undo history (the Text layer, the command line),
+        // so Ctrl+Z there must not step the model history.
+        let typing = ui.ctx().memory(|m| m.focused()).is_some();
+        if !typing {
+            if ui.input_mut(|i| i.consume_shortcut(&undo)) {
+                self.undo();
+            }
+            let forward = ui.input_mut(|i| i.consume_shortcut(&redo))
+                || ui.input_mut(|i| i.consume_shortcut(&redo_shift));
+            if forward {
+                self.redo();
+            }
         }
     }
 }
@@ -2796,5 +2871,72 @@ mod tests {
             .logs
             .iter()
             .any(|e| e.level == LogLevel::Error && e.text.contains("library class")));
+    }
+
+    /// An app with one document `A` that is the active model.
+    fn app_with_model(text: &str) -> OmolaApp {
+        let mut app = app();
+        app.documents.push(Document::new_untitled(text.to_owned()));
+        app.refresh_outline();
+        app.active = Some("A".into());
+        app
+    }
+
+    #[test]
+    fn undo_steps_back_through_model_edits() {
+        let mut app = app_with_model("model A\nend A;\n");
+        app.model_edited("A", Ok("model A\n  Real x;\nend A;".into()));
+        app.model_edited("A", Ok("model A\n  Real x;\n  Real y;\nend A;".into()));
+        assert_eq!(
+            app.documents[0].text,
+            "model A\n  Real x;\n  Real y;\nend A;\n"
+        );
+
+        app.undo();
+        assert_eq!(app.documents[0].text, "model A\n  Real x;\nend A;\n");
+        app.undo();
+        assert_eq!(app.documents[0].text, "model A\nend A;\n");
+        assert!(!app.can_undo(), "the history is used up");
+
+        app.redo();
+        assert_eq!(app.documents[0].text, "model A\n  Real x;\nend A;\n");
+        assert!(app.can_redo());
+    }
+
+    #[test]
+    fn a_new_edit_after_undo_drops_the_redo_stack() {
+        let mut app = app_with_model("model A\nend A;\n");
+        app.model_edited("A", Ok("model A\n  Real x;\nend A;".into()));
+        app.undo();
+        assert!(app.can_redo());
+        app.model_edited("A", Ok("model A\n  Real z;\nend A;".into()));
+        assert!(!app.can_redo(), "the redo stack was dropped");
+        assert_eq!(app.documents[0].text, "model A\n  Real z;\nend A;\n");
+    }
+
+    #[test]
+    fn the_undo_history_keeps_the_newest_hundred_states() {
+        let mut app = app_with_model("model A\nend A;\n");
+        for i in 0..101 {
+            app.model_edited("A", Ok(format!("model A\n  Real x{i};\nend A;")));
+        }
+        assert_eq!(app.documents[0].undo.len(), crate::model::MAX_UNDO);
+        // The oldest snapshot is the 101st edit, not the untouched document.
+        assert_eq!(app.documents[0].undo[0], "model A\n  Real x0;\nend A;\n");
+    }
+
+    #[test]
+    fn an_undo_keeps_the_hand_edits_that_came_before_the_model_edit() {
+        let mut app = app_with_model("model A\nend A;\n");
+        // Typed in the Text layer: not a snapshot of its own.
+        app.documents[0].text = "model A\n  Real hand;\nend A;\n".to_owned();
+        app.user_text_changed(0);
+        // Then a component was moved in the Diagram layer.
+        app.model_edited(
+            "A",
+            Ok("model A\n  Real hand;\n  Real moved;\nend A;".into()),
+        );
+        app.undo();
+        assert_eq!(app.documents[0].text, "model A\n  Real hand;\nend A;\n");
     }
 }
