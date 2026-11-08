@@ -313,7 +313,8 @@ impl OmolaApp {
         let (panel, _) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
         let painter = ui.painter_at(panel);
         painter.rect_filled(panel, 0.0, Color32::WHITE);
-        // Collect the curves first so the borrow of `runs` ends before drawing.
+        // The curves borrow the results instead of copying them (G21), so every change
+        // to the app state is collected here and applied after the drawing loop.
         let diagrams: Vec<Vec<Curve>> = self
             .diagrams
             .iter()
@@ -332,12 +333,19 @@ impl OmolaApp {
             );
         }
         // Every diagram shares one time axis.
-        let x_range = self
-            .plot_x
-            .or_else(|| data_bounds(diagrams.iter().flatten()).map(|(x0, x1, _, _)| (x0, x1)));
+        let x_range = self.plot_x.or_else(|| {
+            diagrams
+                .iter()
+                .filter_map(|curves| data_bounds(curves))
+                .reduce(|a, b| (a.0.min(b.0), a.1.max(b.1), a.2.min(b.2), a.3.max(b.3)))
+                .map(|(x0, x1, _, _)| (x0, x1))
+        });
         let count = diagrams.len();
         let slot_height = panel.height() / count as f32;
         let cursor_enabled = self.cursor_enabled;
+        let mut set_active: Option<usize> = None;
+        let mut set_x: Option<Option<(f64, f64)>> = None;
+        let mut set_y: Vec<(usize, Option<(f64, f64)>)> = Vec::new();
         for (index, curves) in diagrams.iter().enumerate() {
             let slot = egui::Rect::from_min_size(
                 egui::pos2(panel.left(), panel.top() + index as f32 * slot_height),
@@ -384,7 +392,7 @@ impl OmolaApp {
                 continue;
             };
             // y: the diagram's own zoom, else fitted to its curves.
-            let fitted = data_bounds(curves.iter()).map(|(_, _, y0, y1)| {
+            let fitted = data_bounds(curves).map(|(_, _, y0, y1)| {
                 let (y0, y1, step) = nice_range(y0, y1, frame.height() / 50.0);
                 ((y0, y1), step)
             });
@@ -415,11 +423,11 @@ impl OmolaApp {
                 Sense::click_and_drag(),
             );
             if response.clicked() {
-                self.active_diagram = index;
+                set_active = Some(index);
             }
             if response.double_clicked() {
-                self.plot_x = None;
-                self.diagrams[index].y_view = None;
+                set_x = Some(None);
+                set_y.push((index, None));
             }
             let drag_id = ui.scope_id().with(("plot_drag", index));
             if response.drag_started() {
@@ -447,9 +455,9 @@ impl OmolaApp {
                         let (ax, ay) = map.to_data(r.left_bottom());
                         let (bx, by) = map.to_data(r.right_top());
                         // x is shared by every diagram; y belongs to this one.
-                        self.plot_x = Some((ax, bx));
-                        self.diagrams[index].y_view = Some((ay, by));
-                        self.active_diagram = index;
+                        set_x = Some(Some((ax, bx)));
+                        set_y.push((index, Some((ay, by))));
+                        set_active = Some(index);
                     }
                 }
             }
@@ -465,10 +473,25 @@ impl OmolaApp {
                 ));
             }
         }
+        // The borrow of the curves ends with the loop; now the state can change.
+        if let Some(index) = set_active {
+            self.active_diagram = index.min(self.diagrams.len().saturating_sub(1));
+        }
+        if let Some(x) = set_x {
+            self.plot_x = x;
+        }
+        for (index, y) in set_y {
+            if let Some(diagram) = self.diagrams.get_mut(index) {
+                diagram.y_view = y;
+            }
+        }
     }
 
     /// Curves of `signals`; the name carries the run label when several results exist.
-    fn curves(&self, signals: &[PlotSignal]) -> Vec<Curve> {
+    ///
+    /// The time axis and the values are borrowed from the result instead of being
+    /// copied on every frame (G21).
+    fn curves<'a>(&'a self, signals: &'a [PlotSignal]) -> Vec<Curve<'a>> {
         signals
             .iter()
             .enumerate()
@@ -483,8 +506,8 @@ impl OmolaApp {
                 Some(Curve {
                     name,
                     color: CURVE_COLORS[index % CURVE_COLORS.len()],
-                    time: run.outcome.result.time.clone(),
-                    values: values.to_vec(),
+                    time: &run.outcome.result.time,
+                    values,
                 })
             })
             .collect()
@@ -588,12 +611,13 @@ fn draw_diagram(painter: &egui::Painter, map: &Mapping, curves: &[Curve], y_step
         );
     }
     let clip = painter.with_clip_rect(frame);
+    // One column per pixel is all the screen can show (G21).
+    let columns = frame.width().ceil().max(1.0) as usize;
     for curve in curves {
-        let points: Vec<egui::Pos2> = curve
-            .time
+        let indices = crate::decimate::min_max_indices(curve.time, curve.values, x0, x1, columns);
+        let points: Vec<egui::Pos2> = indices
             .iter()
-            .zip(&curve.values)
-            .map(|(t, v)| map.to_screen(*t, *v))
+            .map(|&i| map.to_screen(curve.time[i], curve.values[i]))
             .collect();
         clip.add(egui::Shape::line(points, Stroke::new(1.0, curve.color)));
     }
@@ -611,7 +635,8 @@ fn draw_cursor(painter: &egui::Painter, map: &Mapping, curves: &[Curve], t: f64)
     let font = FontId::proportional(11.5);
     let mut y = map.frame.top() + 4.0;
     for curve in curves {
-        let Some(value) = crate::series::value_at(&curve.time, &curve.values, t) else {
+        // The cursor value comes from the full data, not from the decimated line.
+        let Some(value) = crate::series::value_at(curve.time, curve.values, t) else {
             continue;
         };
         painter.text(
@@ -625,17 +650,17 @@ fn draw_cursor(painter: &egui::Painter, map: &Mapping, curves: &[Curve], t: f64)
     }
 }
 
-struct Curve {
+struct Curve<'a> {
     name: String,
     color: Color32,
-    time: Vec<f64>,
-    values: Vec<f64>,
+    time: &'a [f64],
+    values: &'a [f64],
 }
 
-fn data_bounds<'a>(curves: impl Iterator<Item = &'a Curve>) -> Option<(f64, f64, f64, f64)> {
+fn data_bounds(curves: &[Curve<'_>]) -> Option<(f64, f64, f64, f64)> {
     let mut bounds: Option<(f64, f64, f64, f64)> = None;
     for curve in curves {
-        for (x, y) in curve.time.iter().zip(&curve.values) {
+        for (x, y) in curve.time.iter().zip(curve.values) {
             if !x.is_finite() || !y.is_finite() {
                 continue;
             }
