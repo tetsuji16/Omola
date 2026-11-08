@@ -25,6 +25,32 @@ pub const CONTEXT_TAB: Color32 = Color32::from_rgb(0x71, 0xBE, 0x59);
 pub const FILE_BLUE: Color32 = Color32::from_rgb(0x19, 0x79, 0xCA);
 pub const FIELD_BORDER: Color32 = Color32::from_rgb(0xBD, 0xBD, 0xBD);
 
+/// Syntax colours of the Modelica editor (G24).
+///
+/// These are ordinary editor colours for a light background, not a copy of another
+/// tool's palette.
+pub const SYNTAX_KEYWORD: Color32 = Color32::from_rgb(0x00, 0x00, 0xFF);
+pub const SYNTAX_TYPE: Color32 = Color32::from_rgb(0x00, 0x80, 0x80);
+pub const SYNTAX_BUILTIN: Color32 = Color32::from_rgb(0x80, 0x00, 0x80);
+pub const SYNTAX_COMMENT: Color32 = Color32::from_rgb(0x00, 0x80, 0x00);
+pub const SYNTAX_STRING: Color32 = Color32::from_rgb(0xA3, 0x15, 0x15);
+pub const SYNTAX_NUMBER: Color32 = Color32::from_rgb(0x09, 0x86, 0x58);
+pub const SYNTAX_PLAIN: Color32 = Color32::from_rgb(0x00, 0x00, 0x00);
+
+/// Colour of one token kind.
+pub fn syntax_color(kind: crate::highlight::TokenKind) -> Color32 {
+    use crate::highlight::TokenKind;
+    match kind {
+        TokenKind::Keyword => SYNTAX_KEYWORD,
+        TokenKind::Type => SYNTAX_TYPE,
+        TokenKind::Builtin => SYNTAX_BUILTIN,
+        TokenKind::Comment => SYNTAX_COMMENT,
+        TokenKind::String => SYNTAX_STRING,
+        TokenKind::Number => SYNTAX_NUMBER,
+        TokenKind::QuotedIdent | TokenKind::Operator | TokenKind::Plain => SYNTAX_PLAIN,
+    }
+}
+
 /// Font family names used by the documentation renderer.
 pub const BOLD: &str = "omola-bold";
 pub const ITALIC: &str = "omola-italic";

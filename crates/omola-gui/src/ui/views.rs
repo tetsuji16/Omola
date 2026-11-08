@@ -155,6 +155,16 @@ impl OmolaApp {
             }
             return;
         }
+        // A library class's text never changes, so its coloured layout is built once and
+        // keyed by the class name (G24).
+        if !self.text_layouts.contains_key(class) {
+            if let Some(Loadable::Ready(text)) = self.texts.get(class) {
+                self.text_layouts.insert(
+                    class.to_owned(),
+                    crate::text_editor::highlight_job(text, &egui::FontId::monospace(13.0)),
+                );
+            }
+        }
         match self.texts.get(class) {
             None | Some(Loadable::Loading) => {
                 ui.add_space(8.0);
@@ -171,7 +181,14 @@ impl OmolaApp {
                 ui.label(RichText::new(e).color(theme::TEXT_WEAK));
             }
             Some(Loadable::Ready(text)) => {
+                // The text of a library class does not change: colour it once (G24).
+                let job = self.text_layouts.get(class).cloned();
                 let mut text = text.as_str();
+                let mut layouter = move |ui: &egui::Ui, _buf: &dyn egui::TextBuffer, _w: f32| {
+                    let mut job = job.clone().unwrap_or_default();
+                    job.wrap.max_width = f32::INFINITY;
+                    ui.ctx().fonts_mut(|f| f.layout_job(job))
+                };
                 egui::ScrollArea::both()
                     .id_salt(("lib_text", class))
                     .auto_shrink([false, false])
@@ -180,7 +197,8 @@ impl OmolaApp {
                             egui::TextEdit::multiline(&mut text)
                                 .code_editor()
                                 .frame(egui::Frame::NONE)
-                                .desired_width(f32::INFINITY),
+                                .desired_width(f32::INFINITY)
+                                .layouter(&mut layouter),
                         );
                     });
             }

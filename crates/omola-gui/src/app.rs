@@ -288,6 +288,9 @@ pub struct OmolaApp {
     pub history_pos: usize,
     pub docs: BTreeMap<String, Loadable<DocPage>>,
     pub texts: BTreeMap<String, Loadable<String>>,
+    /// Highlighted layout of a library class's text; it never changes, so it is built
+    /// once per class (G24).
+    pub text_layouts: BTreeMap<String, egui::text::LayoutJob>,
     /// Component tree of the active class (`getModelInstance`, G06).
     pub components: Option<(String, Vec<crate::instance::ComponentNode>)>,
     /// Component nodes the user expanded, as dotted paths from the active class.
@@ -431,6 +434,7 @@ impl OmolaApp {
             history_pos: 0,
             docs: BTreeMap::new(),
             texts: BTreeMap::new(),
+            text_layouts: BTreeMap::new(),
             components: None,
             component_expanded: BTreeSet::new(),
             components_pending: None,

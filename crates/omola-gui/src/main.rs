@@ -10,6 +10,7 @@ mod decimate;
 mod diagram;
 mod diagram_view;
 mod graphics;
+mod highlight;
 mod html;
 mod instance;
 mod library;
