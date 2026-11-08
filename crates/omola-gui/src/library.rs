@@ -62,31 +62,76 @@ pub struct LoadedLibrary {
     pub source_file: PathBuf,
     /// All classes including the top-level one, in declaration order.
     pub classes: Vec<ClassEntry>,
+    /// qualified name -> index into `classes` (the first occurrence wins).
+    by_name: std::collections::HashMap<String, usize>,
+    /// `children[i]` = indices of the direct children of `classes[i]`, in declaration order.
+    children: Vec<Vec<usize>>,
 }
 
 impl LoadedLibrary {
+    /// Build a library and its index.
+    ///
+    /// The index makes `class` / `children` / `has_children` O(1) instead of a linear
+    /// scan over several thousand classes, which the Package Browser calls for every
+    /// visible row of every frame (G18).
+    pub fn new(
+        spec: LibrarySpec,
+        version: String,
+        source_file: PathBuf,
+        classes: Vec<ClassEntry>,
+    ) -> Self {
+        let mut by_name = std::collections::HashMap::with_capacity(classes.len());
+        for (i, class) in classes.iter().enumerate() {
+            by_name.entry(class.qualified_name.clone()).or_insert(i);
+        }
+        let mut children = vec![Vec::new(); classes.len()];
+        for (i, class) in classes.iter().enumerate() {
+            let parent = parent_name(&class.qualified_name).and_then(|p| by_name.get(p));
+            if let Some(&p) = parent {
+                children[p].push(i);
+            }
+        }
+        Self {
+            spec,
+            version,
+            source_file,
+            classes,
+            by_name,
+            children,
+        }
+    }
+
     pub fn root(&self) -> Option<&ClassEntry> {
         self.classes.first()
     }
 
     /// Direct children of `parent` in declaration order.
     pub fn children(&self, parent: &str) -> Vec<&ClassEntry> {
-        self.classes
-            .iter()
-            .filter(|c| parent_name(&c.qualified_name) == Some(parent))
-            .collect()
+        self.children_iter(parent).collect()
+    }
+
+    /// [`Self::children`] without the allocation, for the per-frame tree drawing.
+    pub fn children_iter<'a>(
+        &'a self,
+        parent: &str,
+    ) -> impl Iterator<Item = &'a ClassEntry> + 'a {
+        let indices: &'a [usize] = self
+            .by_name
+            .get(parent)
+            .map(|&p| self.children[p].as_slice())
+            .unwrap_or(&[]);
+        indices.iter().map(move |&i| &self.classes[i])
     }
 
     pub fn class(&self, qualified: &str) -> Option<&ClassEntry> {
-        self.classes.iter().find(|c| c.qualified_name == qualified)
+        self.by_name.get(qualified).map(|&i| &self.classes[i])
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn has_children(&self, parent: &str) -> bool {
-        let prefix = format!("{parent}.");
-        self.classes
-            .iter()
-            .any(|c| c.qualified_name.starts_with(&prefix))
+        self.by_name
+            .get(parent)
+            .is_some_and(|&p| !self.children[p].is_empty())
     }
 }
 
@@ -173,15 +218,15 @@ pub fn parse_library_index(spec: &LibrarySpec, output: &str) -> Result<LoadedLib
     if classes.first().map(|c| c.qualified_name.as_str()) != Some(spec.name.as_str()) {
         return Err(format!("OMC returned no class index for {}", spec.name));
     }
-    Ok(LoadedLibrary {
-        spec: spec.clone(),
-        version: sections
+    Ok(LoadedLibrary::new(
+        spec.clone(),
+        sections
             .get("version")
             .map(|v| v.trim().to_owned())
             .unwrap_or_default(),
         source_file,
         classes,
-    })
+    ))
 }
 
 /// Documentation of one class.
@@ -523,8 +568,7 @@ mod tests {
     }
 
     #[test]
-    fn reports_missing_library() {
-        let err =
+    fn reports_missing_library() {        let err =
             parse_library_index(&msl(), "OMOLA_LOAD_FAILED\nError: no such library\n").unwrap_err();
         assert!(err.contains("Modelica 4.1.0"), "{err}");
     }
@@ -614,5 +658,82 @@ mod tests {
             resolve_link("modelica://Other/x.png", "Modelica", &roots),
             LinkTarget::Unsupported(_)
         ));
+    }
+
+    // --- G18: class index ---
+
+    fn entry(name: &str) -> ClassEntry {
+        ClassEntry {
+            qualified_name: name.into(),
+            restriction: "package".into(),
+            comment: String::new(),
+        }
+    }
+
+    fn small_library() -> LoadedLibrary {
+        LoadedLibrary::new(
+            msl(),
+            "4.1.0".into(),
+            PathBuf::from("/lib/Modelica/package.mo"),
+            vec![
+                entry("Modelica"),
+                entry("Modelica.Blocks"),
+                entry("Modelica.Blocks.Continuous"),
+                entry("Modelica.Blocks.Sources"),
+                entry("Modelica.Electrical"),
+            ],
+        )
+    }
+
+    #[test]
+    fn the_index_answers_class_and_children() {
+        let lib = small_library();
+        assert_eq!(
+            lib.class("Modelica.Blocks.Sources").map(|c| c.short_name()),
+            Some("Sources")
+        );
+        let children: Vec<&str> = lib
+            .children("Modelica.Blocks")
+            .iter()
+            .map(|c| c.short_name())
+            .collect();
+        assert_eq!(children, ["Continuous", "Sources"], "declaration order");
+        // The allocation-free iterator agrees with `children`.
+        assert_eq!(lib.children_iter("Modelica.Blocks").count(), 2);
+        assert_eq!(
+            lib.children("Modelica")
+                .iter()
+                .map(|c| c.short_name())
+                .collect::<Vec<_>>(),
+            ["Blocks", "Electrical"]
+        );
+        assert!(lib.has_children("Modelica.Blocks"));
+        assert!(!lib.has_children("Modelica.Blocks.Sources"));
+        assert!(!lib.has_children("Modelica.Missing"));
+    }
+
+    #[test]
+    fn unknown_names_are_empty_and_do_not_panic() {
+        let lib = small_library();
+        assert!(lib.class("Modelica.Nope").is_none());
+        assert!(lib.children("Modelica.Nope").is_empty());
+        assert!(lib.children_iter("Modelica.Nope").next().is_none());
+        assert!(lib.children("").is_empty());
+    }
+
+    #[test]
+    fn a_child_of_a_missing_parent_belongs_to_no_node() {
+        // `getClassNames(recursive=true)` always lists the intermediate classes, but a
+        // hand-written index may not: such a child must simply not be reachable.
+        let lib = LoadedLibrary::new(
+            msl(),
+            "4.1.0".into(),
+            PathBuf::from("/lib/Modelica/package.mo"),
+            vec![entry("Modelica"), entry("Modelica.A.B")],
+        );
+        assert!(lib.children("Modelica").is_empty());
+        assert!(lib.children("Modelica.A").is_empty());
+        assert!(lib.class("Modelica.A.B").is_some());
+        assert!(!lib.has_children("Modelica"));
     }
 }
