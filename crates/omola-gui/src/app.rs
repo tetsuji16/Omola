@@ -207,6 +207,31 @@ pub struct PackageSearch {
 /// Upper bound for one search, so a one-letter query cannot build a list of thousands.
 pub const MAX_SEARCH_HITS: usize = 500;
 
+/// Maximum number of log entries kept; the oldest are dropped (G22).
+pub const MAX_LOG_ENTRIES: usize = 2000;
+
+/// Maximum characters of one log entry; the head is dropped with a marker (G22).
+pub const MAX_LOG_ENTRY_CHARS: usize = 200_000;
+
+/// Marker put in front of a log entry that was cut.
+pub const LOG_TRUNCATED_MARKER: &str = "... (earlier output truncated)\n";
+
+/// Cut `entry` down to [`MAX_LOG_ENTRY_CHARS`] characters, on a character boundary.
+fn truncate_log_entry(mut entry: LogEntry) -> LogEntry {
+    let chars = entry.text.chars().count();
+    if chars > MAX_LOG_ENTRY_CHARS {
+        let cut = entry
+            .text
+            .char_indices()
+            .nth(chars - MAX_LOG_ENTRY_CHARS)
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        let tail = entry.text[cut..].to_owned();
+        entry.text = format!("{LOG_TRUNCATED_MARKER}{tail}");
+    }
+    entry
+}
+
 /// Variable tree of one result for one set of browser filters (G20).
 pub struct VarTreeCache {
     pub key: VarTreeKey,
@@ -1135,7 +1160,7 @@ impl OmolaApp {
     }
 
     pub fn info(&mut self, tab: LogTab, text: String) {
-        self.logs.push(LogEntry {
+        self.push_log(LogEntry {
             tab,
             level: LogLevel::Info,
             text,
@@ -1144,7 +1169,7 @@ impl OmolaApp {
 
     pub fn error(&mut self, tab: LogTab, text: String) {
         self.log_tab = tab;
-        self.logs.push(LogEntry {
+        self.push_log(LogEntry {
             tab,
             level: LogLevel::Error,
             text,
@@ -1152,11 +1177,39 @@ impl OmolaApp {
     }
 
     pub fn warn(&mut self, tab: LogTab, text: String) {
-        self.logs.push(LogEntry {
+        self.push_log(LogEntry {
             tab,
             level: LogLevel::Warning,
             text,
         });
+    }
+
+    /// Append one log entry, keeping the log bounded (G22).
+    ///
+    /// A single entry is cut to its last [`MAX_LOG_ENTRY_CHARS`] characters (on a `char`
+    /// boundary, so multi-byte text cannot panic) and the log keeps at most
+    /// [`MAX_LOG_ENTRIES`] entries; the oldest are dropped first.
+    pub fn push_log(&mut self, entry: LogEntry) {
+        self.logs.push(truncate_log_entry(entry));
+        if self.logs.len() > MAX_LOG_ENTRIES {
+            let excess = self.logs.len() - MAX_LOG_ENTRIES;
+            self.logs.drain(..excess);
+        }
+    }
+
+    /// Text of the entries of `tab`, for `Copy All`.
+    pub fn log_text(&self, tab: LogTab) -> String {
+        self.logs
+            .iter()
+            .filter(|e| e.tab == tab)
+            .map(|e| e.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Remove the entries of `tab` (`Clear` in the log window).
+    pub fn clear_log(&mut self, tab: LogTab) {
+        self.logs.retain(|e| e.tab != tab);
     }
 
     /// Seed the Simulation Setup dialog from a class's `experiment` annotation.
@@ -1204,14 +1257,14 @@ impl OmolaApp {
                     } else if matches!(tab, LogTab::Translation | LogTab::Simulation) {
                         self.log_tab = tab;
                     }
-                    self.logs.push(LogEntry { tab, level, text });
+                    self.push_log(LogEntry { tab, level, text });
                 }
                 Event::Command(text) => self.command_history.push(text),
                 Event::OmcVersion(version) => {
                     if version.is_none() && self.omc_version.is_none() && !self.omc_hint_shown {
                         self.omc_hint_shown = true;
                         self.log_tab = LogTab::Version;
-                        self.logs.push(LogEntry {
+                        self.push_log(LogEntry {
                             tab: LogTab::Version,
                             level: LogLevel::Warning,
                             text: OMC_SETUP_HINT.into(),
@@ -2499,6 +2552,50 @@ mod tests {
         assert_eq!(find_identifier(text, "m"), Some(15));
         assert_eq!(find_identifier(text, "phi"), Some(46));
         assert_eq!(find_identifier(text, "x"), None);
+    }
+
+    // --- G22 log limits ---
+
+    #[test]
+    fn the_log_keeps_only_the_newest_entries() {
+        let mut app = app();
+        for i in 0..MAX_LOG_ENTRIES + 1 {
+            app.info(LogTab::Syntax, format!("line {i}"));
+        }
+        assert_eq!(app.logs.len(), MAX_LOG_ENTRIES);
+        assert_eq!(app.logs[0].text, "line 1", "the oldest entry was dropped");
+        assert_eq!(
+            app.logs.last().unwrap().text,
+            format!("line {MAX_LOG_ENTRIES}")
+        );
+    }
+
+    #[test]
+    fn a_huge_entry_is_cut_at_a_character_boundary() {
+        let mut app = app();
+        // One character over the limit, with multi-byte characters throughout.
+        let text: String = "あ".repeat(MAX_LOG_ENTRY_CHARS + 1);
+        app.info(LogTab::Translation, text);
+        let stored = &app.logs.last().unwrap().text;
+        assert!(stored.starts_with(LOG_TRUNCATED_MARKER), "no marker");
+        assert_eq!(
+            stored[LOG_TRUNCATED_MARKER.len()..].chars().count(),
+            MAX_LOG_ENTRY_CHARS
+        );
+        // A short entry is left alone.
+        app.info(LogTab::Translation, "short".into());
+        assert_eq!(app.logs.last().unwrap().text, "short");
+    }
+
+    #[test]
+    fn clearing_a_tab_keeps_the_other_tabs() {
+        let mut app = app();
+        app.info(LogTab::Syntax, "a".into());
+        app.info(LogTab::Simulation, "b".into());
+        app.clear_log(LogTab::Syntax);
+        assert_eq!(app.logs.len(), 1);
+        assert_eq!(app.logs[0].tab, LogTab::Simulation);
+        assert_eq!(app.log_text(LogTab::Simulation), "b");
     }
 
     // --- G04 library index cache ---
