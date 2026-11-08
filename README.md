@@ -14,7 +14,7 @@ scripts/setup-linux.sh                                               # Debian / 
 scripts/setup-docker.sh                                              # macOS or any Docker host
 ```
 
-Then start the workbench with `target/release/omola-gui` (or `target\release\omola-gui.exe`). Omola finds `omc` through `OMOLA_OMC`, `PATH`, `OPENMODELICAHOME`, or the standard `C:\Program Files\OpenModelica*` folder. OpenModelica and MSL are downloaded from their official sources and are never bundled with Omola.
+Then start the workbench with `target/release/omola-gui` (or `target\release\omola-gui.exe`). When building from source, use `cargo run --release -p omola-gui`; debug builds are much slower to draw. Omola finds `omc` through `OMOLA_OMC`, `PATH`, `OPENMODELICAHOME`, or the standard `C:\Program Files\OpenModelica*` folder. OpenModelica and MSL are downloaded from their official sources and are never bundled with Omola.
 
 ## Current skeleton
 

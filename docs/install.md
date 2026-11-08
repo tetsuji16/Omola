@@ -16,6 +16,8 @@ target/release/omola-gui                      # Windows: target\release\omola-gu
 target/release/omola-gui examples/Pendulum.mo
 ```
 
+ソースから動かすときは `cargo run --release -p omola-gui` を使ってください。debug ビルドは描画が非常に遅く、GUI が重く感じます(依存クレートは `[profile.dev.package."*"]` で最適化していますが、release には及びません)。
+
 起動すると MSL の Documentation が開きます。Package Browser から `Modelica > Blocks > Examples > PID_Controller` などを選び、Simulation タブの **Simulate** を押すと計算され、Variable Browser で変数を選ぶとプロットされます。
 
 ## スクリプトが行うこと
