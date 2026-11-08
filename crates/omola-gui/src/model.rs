@@ -83,24 +83,39 @@ pub struct ClassEntry {
     pub depth: usize,
     /// Optional description string directly after the name.
     pub description: Option<String>,
+    /// Byte range of the whole definition: from a leading `partial`/`encapsulated` prefix to
+    /// the `;` of `end <Name>;` (inclusive), or to the `;` of a short definition
+    /// (`type P = Real;`). Used to replace exactly one class in the buffer (G28).
+    pub byte_range: std::ops::Range<usize>,
 }
+
+/// Prefixes that `list()` keeps in front of the class keyword, so a replaced range must
+/// include them (`partial model X`).
+const CLASS_PREFIXES: &[&str] = &["partial", "encapsulated", "expandable", "pure", "impure"];
 
 /// Find class definitions (`model X`, `package P` ... `end P;`) with their nesting.
 ///
 /// Comments and string literals are skipped. `end X;` pops the nesting stack.
 pub fn scan_classes(text: &str) -> Vec<ClassEntry> {
     let tokens = tokenize(text);
-    let mut stack: Vec<String> = Vec::new();
-    let mut out = Vec::new();
+    // A definition that has not reached its `end <Name>;` yet.
+    struct Open {
+        name: String,
+        /// Index of its entry in `out`, whose `byte_range.end` is filled in on close.
+        entry: usize,
+    }
+    let mut stack: Vec<Open> = Vec::new();
+    let mut out: Vec<ClassEntry> = Vec::new();
     let mut i = 0;
     while i < tokens.len() {
-        let token = tokens[i].as_str();
+        let token = tokens[i].text.as_str();
         // Skip prefixes like `partial`, `encapsulated`, `expandable`, `pure`, `impure`.
         if token == "end" {
             if let Some(next) = tokens.get(i + 1) {
-                if stack.last().is_some_and(|top| top == next) {
-                    stack.pop();
-                    i += 2;
+                if let Some(closed) = stack.pop_if(|top| top.name == next.text) {
+                    let semicolon = tokens.get(i + 2).filter(|t| t.text == ";");
+                    out[closed.entry].byte_range.end = semicolon.map_or(next.end, |t| t.end);
+                    i += if semicolon.is_some() { 3 } else { 2 };
                     continue;
                 }
             }
@@ -112,39 +127,108 @@ pub fn scan_classes(text: &str) -> Vec<ClassEntry> {
             let mut kind = token.to_owned();
             let mut j = i + 1;
             while let Some(next) = tokens.get(j) {
-                if CLASS_KEYWORDS.contains(&next.as_str()) {
-                    kind = next.clone();
+                if CLASS_KEYWORDS.contains(&next.text.as_str()) {
+                    kind = next.text.clone();
                     j += 1;
                 } else {
                     break;
                 }
             }
             let Some(name) = tokens.get(j) else { break };
-            if !is_identifier(name) {
+            if !is_identifier(&name.text) {
                 i = j;
                 continue;
             }
             // `type X = Real(...)` and `model X = Y(...)` are short class definitions: no `end`.
-            let short = tokens.get(j + 1).is_some_and(|t| t == "=");
+            let short = tokens.get(j + 1).is_some_and(|t| t.text == "=");
             let description = tokens
                 .get(j + 1)
-                .and_then(|t| t.strip_prefix('"'))
+                .and_then(|t| t.text.strip_prefix('"'))
                 .map(|t| t.trim_end_matches('"').to_owned());
-            let mut qualified = stack.clone();
-            qualified.push(name.clone());
+            // `partial model X`: `list()` keeps the prefix, so the range must start there.
+            let mut start = tokens[i].start;
+            let mut prefix = i;
+            while prefix > 0 && CLASS_PREFIXES.contains(&tokens[prefix - 1].text.as_str()) {
+                prefix -= 1;
+                start = tokens[prefix].start;
+            }
+            let mut qualified: Vec<String> = stack.iter().map(|o| o.name.clone()).collect();
+            qualified.push(name.text.clone());
+            let end = if short {
+                // A short definition has no `end`: it ends at the `;` that closes it.
+                tokens[j + 1..]
+                    .iter()
+                    .find(|t| t.text == ";")
+                    .map_or(text.len(), |t| t.end)
+            } else {
+                // Filled in when `end <Name>;` is seen; an unterminated class takes the rest.
+                start
+            };
+            let entry = out.len();
             out.push(ClassEntry {
                 kind,
                 qualified_name: qualified.join("."),
                 depth: stack.len(),
                 description,
+                byte_range: start..end,
             });
             if !short {
-                stack.push(name.clone());
+                stack.push(Open {
+                    name: name.text.clone(),
+                    entry,
+                });
             }
             i = j + 1;
             continue;
         }
         i += 1;
+    }
+    for open in stack {
+        out[open.entry].byte_range.end = text.len();
+    }
+    out
+}
+
+/// Replace the definition of `class` in `text` with `new_text`, re-applying the indentation of
+/// a nested class.
+///
+/// Everything outside the class — the `within` clause, leading comments, other classes — is
+/// left byte for byte unchanged. `new_text` is what OMC's `list()` returned, which is not
+/// indented at all.
+pub fn replace_class_text(text: &mut String, class: &str, new_text: &str) -> Result<(), String> {
+    let entry = scan_classes(text)
+        .into_iter()
+        .find(|e| e.qualified_name == class && !e.byte_range.is_empty())
+        .ok_or_else(|| format!("{class} is not defined in this document"))?;
+    let indent = line_indent(text, entry.byte_range.start);
+    let replacement = reindent(new_text, &indent);
+    text.replace_range(entry.byte_range, &replacement);
+    Ok(())
+}
+
+/// Leading whitespace of the line that contains byte `at`.
+fn line_indent(text: &str, at: usize) -> String {
+    let line_start = text[..at].rfind('\n').map_or(0, |i| i + 1);
+    text[line_start..at]
+        .chars()
+        .take_while(|c| *c == ' ' || *c == '\t')
+        .collect()
+}
+
+/// Indent every line of `new_text` except the first, which already follows `indent`.
+fn reindent(new_text: &str, indent: &str) -> String {
+    if indent.is_empty() {
+        return new_text.to_owned();
+    }
+    let mut out = String::with_capacity(new_text.len() + new_text.len() / 8);
+    for (i, line) in new_text.split('\n').enumerate() {
+        if i > 0 {
+            out.push('\n');
+            if !line.trim().is_empty() {
+                out.push_str(indent);
+            }
+        }
+        out.push_str(line);
     }
     out
 }
@@ -164,45 +248,65 @@ fn is_identifier(token: &str) -> bool {
         && chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
 }
 
-/// Split into identifiers, string literals (kept with quotes) and single punctuation chars.
-fn tokenize(text: &str) -> Vec<String> {
-    let chars: Vec<char> = text.chars().collect();
+/// One lexeme and where it sits in the source text.
+struct Token {
+    text: String,
+    start: usize,
+    end: usize,
+}
+
+impl Token {
+    fn new(text: &str, range: std::ops::Range<usize>) -> Self {
+        Self {
+            text: text[range.clone()].to_owned(),
+            start: range.start,
+            end: range.end,
+        }
+    }
+}
+
+/// Split into identifiers, string literals (kept with quotes) and single punctuation chars,
+/// each with its byte range so [`scan_classes`] can report where a class starts and ends.
+fn tokenize(text: &str) -> Vec<Token> {
+    let bytes = text.as_bytes();
     let mut out = Vec::new();
     let mut i = 0;
-    while i < chars.len() {
-        let c = chars[i];
-        if c.is_whitespace() {
+    while i < bytes.len() {
+        let c = bytes[i];
+        if c.is_ascii_whitespace() {
             i += 1;
-        } else if c == '/' && chars.get(i + 1) == Some(&'/') {
-            while i < chars.len() && chars[i] != '\n' {
+        } else if c == b'/' && bytes.get(i + 1) == Some(&b'/') {
+            while i < bytes.len() && bytes[i] != b'\n' {
                 i += 1;
             }
-        } else if c == '/' && chars.get(i + 1) == Some(&'*') {
+        } else if c == b'/' && bytes.get(i + 1) == Some(&b'*') {
             i += 2;
-            while i + 1 < chars.len() && !(chars[i] == '*' && chars[i + 1] == '/') {
+            while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
                 i += 1;
             }
-            i += 2;
-        } else if c == '"' {
+            i = (i + 2).min(bytes.len());
+        } else if c == b'"' {
             let start = i;
             i += 1;
-            while i < chars.len() && chars[i] != '"' {
-                if chars[i] == '\\' {
+            while i < bytes.len() && bytes[i] != b'"' {
+                if bytes[i] == b'\\' {
                     i += 1;
                 }
                 i += 1;
             }
-            i = (i + 1).min(chars.len());
-            out.push(chars[start..i].iter().collect());
-        } else if c == '_' || c.is_ascii_alphanumeric() {
+            i = (i + 1).min(bytes.len());
+            out.push(Token::new(text, start..i));
+        } else if c == b'_' || c.is_ascii_alphanumeric() {
             let start = i;
-            while i < chars.len() && (chars[i] == '_' || chars[i].is_ascii_alphanumeric()) {
+            while i < bytes.len() && (bytes[i] == b'_' || bytes[i].is_ascii_alphanumeric()) {
                 i += 1;
             }
-            out.push(chars[start..i].iter().collect());
+            out.push(Token::new(text, start..i));
         } else {
-            out.push(c.to_string());
-            i += 1;
+            // One whole UTF-8 character, so every token boundary stays a char boundary.
+            let len = text[i..].chars().next().map_or(1, char::len_utf8);
+            out.push(Token::new(text, i..i + len));
+            i += len;
         }
     }
     out
@@ -258,5 +362,68 @@ end Top;
     fn reads_description_strings() {
         let entries = scan_classes("model A \"Desc\" end A;");
         assert_eq!(entries[0].description.as_deref(), Some("Desc"));
+    }
+
+    #[test]
+    fn the_byte_range_covers_the_whole_definition() {
+        let text = "// head\nmodel A\n  Real x;\nend A;\n\nmodel B\nend B;\n";
+        let entries = scan_classes(text);
+        assert_eq!(
+            &text[entries[0].byte_range.clone()],
+            "model A\n  Real x;\nend A;"
+        );
+        assert_eq!(&text[entries[1].byte_range.clone()], "model B\nend B;");
+    }
+
+    #[test]
+    fn a_short_class_definition_ends_at_its_semicolon() {
+        let text = "type P = Real(unit=\"Pa\");\nmodel M\nend M;\n";
+        let entries = scan_classes(text);
+        assert_eq!(
+            &text[entries[0].byte_range.clone()],
+            "type P = Real(unit=\"Pa\");"
+        );
+        assert_eq!(&text[entries[1].byte_range.clone()], "model M\nend M;");
+    }
+
+    #[test]
+    fn replacing_one_class_leaves_the_rest_untouched() {
+        let mut text =
+            "// header\nmodel A\n  Real x;\nend A;\n\nmodel B\n  Real y;\nend B;\n".to_owned();
+        replace_class_text(&mut text, "A", "model A\n  Real z;\nend A;").unwrap();
+        assert_eq!(
+            text,
+            "// header\nmodel A\n  Real z;\nend A;\n\nmodel B\n  Real y;\nend B;\n"
+        );
+    }
+
+    #[test]
+    fn a_nested_class_keeps_its_indentation() {
+        let mut text =
+            "package P\n  model M\n    Real x;\n  end M;\n  model N\n  end N;\nend P;\n".to_owned();
+        replace_class_text(&mut text, "P.M", "model M\n  Real x;\n  Real y;\nend M;").unwrap();
+        assert_eq!(
+            text,
+            "package P\n  model M\n    Real x;\n    Real y;\n  end M;\n  model N\n  end N;\nend P;\n"
+        );
+    }
+
+    #[test]
+    fn a_partial_model_is_replaced_with_its_prefix() {
+        let mut text = "partial model A\n  Real x;\nend A;\n".to_owned();
+        replace_class_text(
+            &mut text,
+            "A",
+            "partial model A\n  Real x;\n  Real y;\nend A;",
+        )
+        .unwrap();
+        assert_eq!(text, "partial model A\n  Real x;\n  Real y;\nend A;\n");
+    }
+
+    #[test]
+    fn replacing_a_class_that_is_not_there_is_an_error() {
+        let mut text = "model A\nend A;\n".to_owned();
+        assert!(replace_class_text(&mut text, "B", "model B\nend B;").is_err());
+        assert_eq!(text, "model A\nend A;\n");
     }
 }

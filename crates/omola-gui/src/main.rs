@@ -9,6 +9,7 @@ mod cache;
 mod decimate;
 mod diagram;
 mod diagram_view;
+mod edit;
 mod graphics;
 mod highlight;
 mod html;

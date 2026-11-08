@@ -147,6 +147,27 @@ fn load_statement(spec: &LibrarySpec, flag: &str) -> Result<String, BackendError
     })
 }
 
+/// `loadModel` for every library, then `loadFile` for the editor buffer when one is given.
+///
+/// Every script that queries a class starts with this: the libraries are loaded in order and
+/// the user file last, so the buffer wins over a same-named library class.
+pub fn load_prefix(
+    libraries: &[LibrarySpec],
+    user_file: Option<&Path>,
+) -> Result<String, BackendError> {
+    let mut script = String::new();
+    for (i, spec) in libraries.iter().enumerate() {
+        script.push_str(&load_statement(spec, &format!("omolaLib{i}"))?);
+    }
+    if let Some(file) = user_file {
+        script.push_str(&format!(
+            "omolaUser := loadFile(\"{}\");\n",
+            escape_modelica_string(&file.to_string_lossy())
+        ));
+    }
+    Ok(script)
+}
+
 /// Load one library and print its full class index.
 pub fn library_index_script(spec: &LibrarySpec) -> Result<String, BackendError> {
     let name = &spec.name;
@@ -274,16 +295,7 @@ pub fn class_doc_script(
     user_file: Option<&Path>,
 ) -> Result<String, BackendError> {
     validate_class_name(class)?;
-    let mut script = String::new();
-    for (i, spec) in libraries.iter().enumerate() {
-        script.push_str(&load_statement(spec, &format!("omolaLib{i}"))?);
-    }
-    if let Some(file) = user_file {
-        script.push_str(&format!(
-            "omolaUser := loadFile(\"{}\");\n",
-            escape_modelica_string(&file.to_string_lossy())
-        ));
-    }
+    let mut script = load_prefix(libraries, user_file)?;
     let top = class.split('.').next().unwrap_or(class);
     script.push_str(&format!(
         r#"print("OMOLA_BEGIN root\n" + getSourceFile({top}) + "\nOMOLA_END root\n");
@@ -335,10 +347,7 @@ pub fn parse_class_doc(class: &str, output: &str) -> Result<ClassDoc, String> {
 /// Script printing the Modelica text of `class` (`list`).
 pub fn class_text_script(class: &str, libraries: &[LibrarySpec]) -> Result<String, BackendError> {
     validate_class_name(class)?;
-    let mut script = String::new();
-    for (i, spec) in libraries.iter().enumerate() {
-        script.push_str(&load_statement(spec, &format!("omolaLib{i}"))?);
-    }
+    let mut script = load_prefix(libraries, None)?;
     script.push_str(&format!(
         "print(\"OMOLA_BEGIN text\\n\" + list({class}) + \"\\nOMOLA_END text\\n\");\n"
     ));
@@ -352,16 +361,7 @@ pub fn instance_script(
     user_file: Option<&Path>,
 ) -> Result<String, BackendError> {
     validate_class_name(class)?;
-    let mut script = String::new();
-    for (i, spec) in libraries.iter().enumerate() {
-        script.push_str(&load_statement(spec, &format!("omolaLib{i}"))?);
-    }
-    if let Some(file) = user_file {
-        script.push_str(&format!(
-            "omolaUser := loadFile(\"{}\");\n",
-            escape_modelica_string(&file.to_string_lossy())
-        ));
-    }
+    let mut script = load_prefix(libraries, user_file)?;
     script.push_str(&format!(
         "print(\"OMOLA_BEGIN instance\\n\" + getModelInstance({class}, prettyPrint=true) + \"\\nOMOLA_END instance\\n\");\n"
     ));
@@ -379,16 +379,7 @@ pub fn icon_script(
     user_file: Option<&Path>,
 ) -> Result<String, BackendError> {
     validate_class_name(class)?;
-    let mut script = String::new();
-    for (i, spec) in libraries.iter().enumerate() {
-        script.push_str(&load_statement(spec, &format!("omolaLib{i}"))?);
-    }
-    if let Some(file) = user_file {
-        script.push_str(&format!(
-            "omolaUser := loadFile(\"{}\");\n",
-            escape_modelica_string(&file.to_string_lossy())
-        ));
-    }
+    let mut script = load_prefix(libraries, user_file)?;
     script.push_str(&format!(
         "print(\"OMOLA_BEGIN icon\\n\" + getModelInstanceAnnotation({class}, {{\"Icon\"}}) + \"\\nOMOLA_END icon\\n\");\n"
     ));
@@ -402,16 +393,7 @@ pub fn check_script(
     user_file: Option<&Path>,
 ) -> Result<String, BackendError> {
     validate_class_name(class)?;
-    let mut script = String::new();
-    for (i, spec) in libraries.iter().enumerate() {
-        script.push_str(&load_statement(spec, &format!("omolaLib{i}"))?);
-    }
-    if let Some(file) = user_file {
-        script.push_str(&format!(
-            "omolaUser := loadFile(\"{}\");\n",
-            escape_modelica_string(&file.to_string_lossy())
-        ));
-    }
+    let mut script = load_prefix(libraries, user_file)?;
     script.push_str(&format!(
         "print(\"OMOLA_BEGIN check\\n\" + checkModel({class}) + \"\\nOMOLA_END check\\n\");\nprint(\"OMOLA_BEGIN errors\\n\" + getErrorString() + \"\\nOMOLA_END errors\\n\");\n"
     ));

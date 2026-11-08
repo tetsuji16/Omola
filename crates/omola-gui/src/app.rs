@@ -307,6 +307,8 @@ pub struct OmolaApp {
     pub diagram_pan: egui::Vec2,
     /// Selected component in the Diagram layer (for tooltip and component browser sync).
     pub selected_component: Option<String>,
+    /// Class whose [`Job::EditModel`] is in flight; a second edit of the same class waits.
+    pub pending_edit: Option<String>,
     pub doc_view: DocView,
     pub find_open: bool,
     pub find_query: String,
@@ -443,6 +445,7 @@ impl OmolaApp {
             diagram_zoom: 1.0,
             diagram_pan: egui::Vec2::ZERO,
             selected_component: None,
+            pending_edit: None,
             doc_view: DocView::Formatted,
             find_open: false,
             find_query: String::new(),
@@ -1023,6 +1026,83 @@ impl OmolaApp {
         }
     }
 
+    // ---------------------------------------------------------------- model edits (G28)
+
+    /// Rewrite `class` through the OMC scripting API and put the answer back into the buffer.
+    ///
+    /// The GUI never edits Modelica text itself: the edit is a script that OMC applies to its
+    /// own copy of the class, and `list()` returns the new definition, which replaces the old
+    /// one in the document. That keeps the class valid and the editor text the single source
+    /// of truth.
+    #[allow(dead_code)] // the Diagram layer calls this from G29 on
+    pub fn apply_edit(&mut self, class: &str, ops: Vec<crate::edit::EditOp>) {
+        if ops.is_empty() {
+            return;
+        }
+        if !self.is_user_class(class) {
+            return self.error(
+                LogTab::Syntax,
+                format!("{class} is a library class and cannot be edited."),
+            );
+        }
+        let Some(doc) = self.doc_of(class) else {
+            return self.error(
+                LogTab::Syntax,
+                format!("{class} is not open in the editor."),
+            );
+        };
+        if let Some(pending) = &self.pending_edit {
+            return self.info(
+                LogTab::Syntax,
+                format!("Waiting for the running edit of {pending} to finish."),
+            );
+        }
+        self.pending_edit = Some(class.to_owned());
+        self.worker.submit(Job::EditModel {
+            class: class.to_owned(),
+            doc_text: self.documents[doc].text.clone(),
+            ops,
+            libraries: self.context_for(class).libraries,
+        });
+    }
+
+    /// The rewritten class text came back: swap it in, or report why it did not (G28).
+    fn model_edited(&mut self, class: &str, result: Result<String, String>) {
+        if self.pending_edit.as_deref() == Some(class) {
+            self.pending_edit = None;
+        }
+        let text = match result {
+            Ok(text) => text,
+            Err(message) => {
+                return self.error(
+                    LogTab::Syntax,
+                    format!("Editing {class} failed: {message}\nThe document was not changed."),
+                )
+            }
+        };
+        let Some(doc) = self.doc_of(class) else {
+            return self.error(
+                LogTab::Syntax,
+                format!("{class} is no longer open; the edit was dropped."),
+            );
+        };
+        if let Err(message) =
+            crate::model::replace_class_text(&mut self.documents[doc].text, class, &text)
+        {
+            return self.error(LogTab::Syntax, message);
+        }
+        self.user_text_changed(doc);
+        // Everything derived from the old text has to be fetched again.
+        self.model_diagrams.remove(class);
+        self.icons.remove(class);
+        self.texts.remove(class);
+        if self.components.as_ref().is_some_and(|(c, _)| c == class) {
+            self.components = None;
+            self.components_pending = None;
+        }
+        self.info(LogTab::Syntax, format!("Updated {class}."));
+    }
+
     // ---------------------------------------------------------------- check & simulate
 
     pub fn check(&mut self) {
@@ -1350,6 +1430,7 @@ impl OmolaApp {
                     );
                 }
                 Event::SimulationFinished(outcome) => self.add_run(*outcome),
+                Event::ModelEdited { class, result } => self.model_edited(&class, result),
                 Event::LibrariesInstalled(ok) => {
                     if ok {
                         self.docs.clear();
@@ -2645,5 +2726,75 @@ mod tests {
         assert!(!app.load_library_from_cache(LibrarySpec::new("Modelica", Some("3.2.3"))));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_edit_replaces_one_class_and_leaves_the_rest() {
+        let mut app = app();
+        app.documents.push(Document::new_untitled(
+            "// header\nmodel A\n  Real x;\nend A;\n\nmodel B\n  Real y;\nend B;\n".to_owned(),
+        ));
+        app.refresh_outline();
+        app.pending_edit = Some("A".into());
+        app.model_edited("A", Ok("model A\n  Real x;\n  Real k;\nend A;".into()));
+        assert_eq!(
+            app.documents[0].text,
+            "// header\nmodel A\n  Real x;\n  Real k;\nend A;\n\nmodel B\n  Real y;\nend B;\n"
+        );
+        assert!(app.documents[0].dirty);
+        assert!(app.pending_edit.is_none(), "the edit is no longer pending");
+        assert!(app.logs.iter().any(|e| e.text.contains("Updated A")));
+    }
+
+    #[test]
+    fn a_failed_edit_leaves_the_document_alone() {
+        let mut app = app();
+        app.documents
+            .push(Document::new_untitled("model A\nend A;\n".to_owned()));
+        app.refresh_outline();
+        app.pending_edit = Some("A".into());
+        app.model_edited("A", Err("Error: addComponent failed".into()));
+        assert_eq!(app.documents[0].text, "model A\nend A;\n");
+        assert!(!app.documents[0].dirty);
+        assert!(app.pending_edit.is_none());
+        assert!(app
+            .logs
+            .iter()
+            .any(|e| e.level == LogLevel::Error && e.text.contains("addComponent failed")));
+    }
+
+    #[test]
+    fn an_edit_of_a_nested_class_reindents_it_and_drops_its_caches() {
+        let mut app = app();
+        app.documents.push(Document::new_untitled(
+            "package P\n  model M\n    Real x;\n  end M;\nend P;\n".to_owned(),
+        ));
+        app.refresh_outline();
+        app.model_diagrams.insert("P.M".into(), Loadable::Loading);
+        app.icons.insert("P.M".into(), Loadable::Loading);
+        app.pending_edit = Some("P.M".into());
+        app.model_edited("P.M", Ok("model M\n  Real x;\n  Real y;\nend M;".into()));
+        assert_eq!(
+            app.documents[0].text,
+            "package P\n  model M\n    Real x;\n    Real y;\n  end M;\nend P;\n"
+        );
+        // The Diagram layer re-requests what is missing, so the old graphics are dropped.
+        assert!(!app.model_diagrams.contains_key("P.M"));
+        assert!(!app.icons.contains_key("P.M"));
+    }
+
+    #[test]
+    fn a_library_class_cannot_be_edited() {
+        let mut app = app();
+        app.libraries = vec![library_with(&["Modelica", "Modelica.Blocks.Gain"])];
+        app.apply_edit(
+            "Modelica.Blocks.Gain",
+            vec![crate::edit::EditOp::DeleteComponent { name: "k".into() }],
+        );
+        assert!(app.pending_edit.is_none(), "no job was sent");
+        assert!(app
+            .logs
+            .iter()
+            .any(|e| e.level == LogLevel::Error && e.text.contains("library class")));
     }
 }

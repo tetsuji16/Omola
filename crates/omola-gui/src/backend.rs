@@ -80,6 +80,16 @@ pub enum Job {
         class: String,
         context: ClassContext,
     },
+    /// Rewrite one class with the OMC scripting API and read it back with `list()` (G28).
+    #[allow(dead_code)]
+    // sent by `OmolaApp::apply_edit`, which the Diagram layer calls from G29 on
+    EditModel {
+        class: String,
+        /// The editor buffer; written to a private copy, never to the user's file.
+        doc_text: String,
+        ops: Vec<crate::edit::EditOp>,
+        libraries: Vec<LibrarySpec>,
+    },
     Simulate {
         class: String,
         context: ClassContext,
@@ -153,6 +163,11 @@ pub enum Event {
     Icon(String, Result<crate::graphics::Icon, String>),
     /// Diagram graphics + component placement + connections (G12).
     Diagram(String, Result<crate::diagram::Diagram, String>),
+    /// `EditModel` finished: the rewritten class text, or why OMC refused the edit (G28).
+    ModelEdited {
+        class: String,
+        result: Result<String, String>,
+    },
     SimulationFinished(Box<SimulationOutcome>),
     /// `InstallLibraries` finished (`true` when the Modelica Standard Library is installed).
     LibrariesInstalled(bool),
@@ -499,6 +514,27 @@ fn run_job(
                 Err(message) => send(Event::Log(LogTab::Syntax, LogLevel::Error, message)),
             }
         }
+        Job::EditModel {
+            class,
+            doc_text,
+            ops,
+            libraries,
+        } => {
+            let context = ClassContext {
+                libraries,
+                user_source: Some(doc_text),
+            };
+            let result = with_user_file(run_dir, &class, &context, |file| {
+                let mut script =
+                    library::load_prefix(&context.libraries, file).map_err(|e| e.to_string())?;
+                script.push_str(&crate::edit::edit_script(&class, &ops)?);
+                omc.run_query_script(&script)
+                    .map(|out| out.output)
+                    .map_err(|e| e.to_string())
+            })
+            .and_then(|output| crate::edit::edited_text(&output));
+            send(Event::ModelEdited { class, result });
+        }
         Job::Simulate {
             class,
             context,
@@ -575,6 +611,10 @@ fn fail_job(job: Job, message: String, send: &dyn Fn(Event)) {
         Job::LoadInstance { class, .. } => send(Event::Instance(class, Err(message))),
         Job::LoadIcon { class, .. } => send(Event::Icon(class, Err(message))),
         Job::LoadDiagram { class, .. } => send(Event::Diagram(class, Err(message))),
+        Job::EditModel { class, .. } => send(Event::ModelEdited {
+            class,
+            result: Err(message),
+        }),
         Job::Command { text, .. } => send(Event::Command(format!("{text}\n  {message}"))),
         Job::InstallLibraries => send(Event::LibrariesInstalled(false)),
         Job::Doctor | Job::Check { .. } | Job::Simulate { .. } => {}
@@ -928,6 +968,43 @@ mod tests {
             _ => None,
         });
         assert!(!inherited.is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Real OpenModelica through the GUI worker: a diagram edit is applied to OMC's copy of
+    /// the class and the rewritten definition comes back for the editor buffer (G28).
+    #[test]
+    #[ignore = "needs OpenModelica with MSL 4.1.0; run with --ignored and OMOLA_OMC set"]
+    fn add_component_with_real_omc() {
+        if std::env::var_os("OMOLA_OMC").is_none() {
+            eprintln!("OMOLA_OMC is not set; skipping");
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("omola-gui-edit-{}", std::process::id()));
+        let worker = Worker::spawn(root.join("work"), || {});
+        let source = "model A\n  Real x(start=1);\nequation\n  der(x) = -x;\nend A;\n";
+        worker.submit(Job::EditModel {
+            class: "A".into(),
+            doc_text: source.into(),
+            ops: vec![crate::edit::EditOp::AddComponent {
+                name: "k".into(),
+                type_name: "Modelica.Blocks.Sources.Constant".into(),
+                extent: [[-10.0, -10.0], [10.0, 10.0]],
+                origin: [0.0, 0.0],
+            }],
+            libraries: vec![LibrarySpec::new("Modelica", Some("4.1.0"))],
+        });
+        let text = wait_for(&worker, 300, |event| match event {
+            Event::ModelEdited { result, .. } => Some(result.expect("edited class text")),
+            _ => None,
+        });
+        assert!(
+            text.contains("Modelica.Blocks.Sources.Constant k"),
+            "no component k in\n{text}"
+        );
+        // Only the class was rewritten; the rest of the definition is untouched.
+        assert!(text.starts_with("model A"), "{text}");
+        assert!(text.contains("der(x) = -x;"), "{text}");
         let _ = std::fs::remove_dir_all(&root);
     }
 
