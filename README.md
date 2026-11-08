@@ -220,6 +220,8 @@ cargo run -p omola-gui -- examples/Pendulum.mo         # open a model file
 
 Checking, simulation and library queries are delegated to OMC (`omc` on PATH or `OMOLA_OMC`), and OpenModelica `.mat` results are read in-process by `omola_core::mat`. Library classes such as `Modelica.Blocks.Examples.PID_Controller` simulate directly; the `experiment` annotation sets the stop time. The real-OMC path (MSL index, documentation with images, simulation of a library example) is checked in CI.
 
+To measure drawing performance, start it with `OMOLA_FRAME_STATS=1`: once a second the frame count, average and maximum frame time are printed to standard error (`[omola-frame] frames=58 avg=4.21ms max=11.80ms tab=Simulation layer=Diagram`). Without the variable nothing is measured.
+
 Without OpenModelica you can exercise the UI with a demo result and a stand-in compiler (not a simulation; no compatibility evidence):
 
 ```sh

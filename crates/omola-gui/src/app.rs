@@ -290,6 +290,8 @@ pub struct OmolaApp {
     /// Root of the on-disk library index cache (see [`crate::cache`]).
     pub cache_root: PathBuf,
     pub worker: Worker,
+    /// Per-frame timing, printed once a second when `OMOLA_FRAME_STATS=1` (G16).
+    pub frame_stats: crate::perf::FrameStats,
     /// Last window title sent to the OS.
     pub title_sent: String,
     /// A link to open in the system browser at the end of the frame.
@@ -315,6 +317,7 @@ impl OmolaApp {
             ctx.request_repaint()
         });
         let mut app = Self::with_worker(worker);
+        app.frame_stats = crate::perf::FrameStats::from_env();
         app.worker.submit(Job::Doctor);
         // Serve the library tree from the on-disk index cache when it is still valid, so
         // start-up does not re-run `getClassNames(recursive=true)` over the whole MSL.
@@ -398,6 +401,7 @@ impl OmolaApp {
             omc_version: None,
             cache_root: crate::cache::cache_root(),
             worker,
+            frame_stats: crate::perf::FrameStats::disabled(),
             title_sent: String::new(),
             pending_url: None,
             omc_hint_shown: false,
@@ -1551,6 +1555,7 @@ pub fn merge_overrides(
 
 impl eframe::App for OmolaApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let started = std::time::Instant::now();
         self.handle_events();
         self.refresh_error_locations();
         self.poll_dialog();
@@ -1565,6 +1570,19 @@ impl eframe::App for OmolaApp {
         self.dialogs(ui);
         if let Some(url) = self.pending_url.take() {
             ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+        }
+        if let Some(s) = self
+            .frame_stats
+            .record(started.elapsed(), std::time::Instant::now())
+        {
+            eprintln!(
+                "[omola-frame] frames={} avg={:.2}ms max={:.2}ms tab={} layer={}",
+                s.frames,
+                s.avg_ms,
+                s.max_ms,
+                self.tab.label(),
+                self.layer().label()
+            );
         }
     }
 
