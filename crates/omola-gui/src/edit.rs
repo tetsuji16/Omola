@@ -96,7 +96,7 @@ fn is_modelica_string_literal(value: &str) -> bool {
     }
     let mut escaped = false;
     let mut closed = false;
-    while let Some(c) = chars.next() {
+    for c in chars.by_ref() {
         if escaped {
             if !matches!(c, '"' | '\\' | 'n' | 'r' | 't') {
                 return false;
