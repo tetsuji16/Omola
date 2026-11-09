@@ -301,6 +301,17 @@ pub struct PersistedState {
 /// Storage key for [`PersistedState`] in eframe's `Storage`.
 const STATE_KEY: &str = "omola_gui_state";
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParameterDialog {
+    pub class: String,
+    pub component: String,
+    pub component_type: String,
+    pub rows: Option<Vec<crate::instance::ParamRow>>,
+    pub values: Vec<String>,
+    pub readonly: bool,
+    pub error: Option<String>,
+}
+
 pub struct OmolaApp {
     pub tab: RibbonTab,
     pub graphics_layer: Layer,
@@ -407,6 +418,7 @@ pub struct OmolaApp {
     pub frame_stats: crate::perf::FrameStats,
     pub pending_edit: Option<String>,
     pub rename_dialog: Option<RenameDialog>,
+    pub parameter_dialog: Option<ParameterDialog>,
     pub diagram_drag: Option<DiagramDrag>,
     pub connection_drag: Option<ConnectionDrag>,
     pub selected_connection: Option<usize>,
@@ -538,6 +550,7 @@ impl OmolaApp {
             frame_stats: crate::perf::FrameStats::disabled(),
             pending_edit: None,
             rename_dialog: None,
+            parameter_dialog: None,
             diagram_drag: None,
             connection_drag: None,
             selected_connection: None,
@@ -901,6 +914,25 @@ impl OmolaApp {
             class: class.to_owned(),
             context: self.context_for(class),
         });
+    }
+
+    pub fn open_parameter_dialog(&mut self, class: &str, component: &str, component_type: &str) {
+        let dialog = ParameterDialog {
+            class: class.to_owned(),
+            component: component.to_owned(),
+            component_type: component_type.to_owned(),
+            rows: None,
+            values: Vec::new(),
+            readonly: !self.is_user_class(class),
+            error: None,
+        };
+        self.worker.submit(Job::LoadParameters {
+            component_type: component_type.to_owned(),
+            class: class.to_owned(),
+            component: component.to_owned(),
+            context: self.context_for(class),
+        });
+        self.parameter_dialog = Some(dialog);
     }
 
     /// Ask the worker for the Icon graphics of `class` (once per class).
@@ -1520,6 +1552,24 @@ impl OmolaApp {
                             LogTab::Translation,
                             format!("Component tree of {class} is not available: {message}"),
                         ),
+                    }
+                }
+                Event::Parameters { component, result } => {
+                    if let Some(dialog) = self
+                        .parameter_dialog
+                        .as_mut()
+                        .filter(|d| d.component == component)
+                    {
+                        match result {
+                            Ok(rows) => {
+                                dialog.values = rows
+                                    .iter()
+                                    .map(|r| r.current_value.clone().unwrap_or_default())
+                                    .collect();
+                                dialog.rows = Some(rows);
+                            }
+                            Err(message) => dialog.error = Some(message),
+                        }
                     }
                 }
                 Event::Icon(class, result) => {

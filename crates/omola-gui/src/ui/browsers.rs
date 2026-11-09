@@ -67,6 +67,7 @@ struct RowAction {
     toggle: bool,
     open: bool,
     open_new_tab: bool,
+    double_clicked: bool,
 }
 
 /// One tree row: expander, icon box, label. Returns what the user did.
@@ -143,6 +144,7 @@ fn tree_row(
         }
     }
     if response.double_clicked() {
+        action.double_clicked = true;
         action.toggle = expandable;
         action.open_new_tab = !expandable;
     }
@@ -198,6 +200,7 @@ fn component_rows(
     path: &str,
     expanded: &std::collections::BTreeSet<String>,
     toggles: &mut Vec<String>,
+    parameter_requests: &mut Vec<(String, String)>,
 ) {
     let key = if path.is_empty() {
         node.name.clone()
@@ -225,9 +228,20 @@ fn component_rows(
     if action.toggle {
         toggles.push(key.clone());
     }
+    if action.double_clicked && !node.is_parameter {
+        parameter_requests.push((key.clone(), node.type_name.clone()));
+    }
     if open {
         for child in &node.children {
-            component_rows(ui, child, depth + 1, &key, expanded, toggles);
+            component_rows(
+                ui,
+                child,
+                depth + 1,
+                &key,
+                expanded,
+                toggles,
+                parameter_requests,
+            );
         }
     }
 }
@@ -540,6 +554,7 @@ impl OmolaApp {
         let active = self.active.clone();
         let loading = self.components_pending.is_some();
         let mut toggles: Vec<String> = Vec::new();
+        let mut parameter_requests = Vec::new();
         Self::browser_frame(ui, |ui| {
             ui.set_min_height(ui.available_height().max(40.0));
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -576,12 +591,25 @@ impl OmolaApp {
                 return;
             }
             for node in nodes {
-                component_rows(ui, node, 0, "", &self.component_expanded, &mut toggles);
+                component_rows(
+                    ui,
+                    node,
+                    0,
+                    "",
+                    &self.component_expanded,
+                    &mut toggles,
+                    &mut parameter_requests,
+                );
             }
         });
         for path in toggles {
             if !self.component_expanded.remove(&path) {
                 self.component_expanded.insert(path);
+            }
+        }
+        if let Some(class) = active.as_deref() {
+            for (component, component_type) in parameter_requests {
+                self.open_parameter_dialog(class, &component, &component_type);
             }
         }
     }

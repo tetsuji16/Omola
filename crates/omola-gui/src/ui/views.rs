@@ -713,6 +713,9 @@ impl OmolaApp {
                         self.selected_component = Some(comp.name.clone());
                         self.component_expanded.insert(comp.name.clone());
                     }
+                    if response.double_clicked() {
+                        self.open_parameter_dialog(class, &comp.name, &comp.type_name);
+                    }
                 }
             } else if response.clicked_by(egui::PointerButton::Primary) {
                 self.selected_connection =

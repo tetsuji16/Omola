@@ -100,6 +100,66 @@ mod edit_integration_test {
             .contains("connect(sine.y, firstOrder.u)"));
         let _ = std::fs::remove_dir_all(root);
     }
+
+    #[test]
+    #[ignore = "needs OpenModelica with MSL 4.1.0; run with --ignored and OMOLA_OMC set"]
+    fn load_parameter_rows_and_current_modifier_with_real_omc() {
+        if std::env::var_os("OMOLA_OMC").is_none() {
+            return;
+        }
+        let root =
+            std::env::temp_dir().join(format!("omola-gui-parameters-{}", std::process::id()));
+        let worker = Worker::spawn(root.join("work"), || {});
+        worker.submit(Job::LoadParameters {
+            component_type: "Modelica.Blocks.Continuous.FirstOrder".into(),
+            class: "A".into(),
+            component: "firstOrder".into(),
+            context: ClassContext {
+                libraries: vec![LibrarySpec::new("Modelica", Some("4.1.0"))],
+                user_source: Some(
+                    "model A Modelica.Blocks.Continuous.FirstOrder firstOrder(T=2); end A;".into(),
+                ),
+            },
+        });
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let mut result = None;
+        while result.is_none() && Instant::now() < deadline {
+            for event in worker.poll() {
+                if let Event::Parameters { result: r, .. } = event {
+                    result = Some(r);
+                }
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        let rows = result.expect("parameter result").unwrap();
+        let t = rows.iter().find(|p| p.name == "T").expect("T parameter");
+        assert_eq!(t.default_value.as_deref(), Some("1"));
+        assert_eq!(t.current_value.as_deref(), Some("2"));
+        assert_eq!(t.unit, "s");
+        worker.submit(Job::EditModel {
+            doc_text: "model A Modelica.Blocks.Continuous.FirstOrder firstOrder; end A;".into(),
+            file_name: "A.mo".into(),
+            class: "A".into(),
+            ops: vec![EditOp::SetModifier {
+                path: "firstOrder.T".into(),
+                value: Some("2".into()),
+            }],
+            libraries: vec![LibrarySpec::new("Modelica", Some("4.1.0"))],
+        });
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let mut edited = None;
+        while edited.is_none() && Instant::now() < deadline {
+            for event in worker.poll() {
+                if let Event::ModelEdited { result, .. } = event {
+                    edited = Some(result);
+                }
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        let edited = edited.expect("modifier edit result").unwrap();
+        assert!(edited.contains("T = 2"), "{edited}");
+        let _ = std::fs::remove_dir_all(root);
+    }
 }
 
 impl Default for SimulationSetup {
@@ -138,6 +198,12 @@ pub enum Job {
     /// Component tree of a class, from `getModelInstance` (G06).
     LoadInstance {
         class: String,
+        context: ClassContext,
+    },
+    LoadParameters {
+        component_type: String,
+        class: String,
+        component: String,
         context: ClassContext,
     },
     /// Icon graphics of a class, from `getModelInstanceAnnotation` (G07).
@@ -230,6 +296,10 @@ pub enum Event {
     ClassText(String, Result<String, String>),
     /// Component tree of a class (empty when the class declares no components).
     Instance(String, Result<Vec<crate::instance::ComponentNode>, String>),
+    Parameters {
+        component: String,
+        result: Result<Vec<crate::instance::ParamRow>, String>,
+    },
     /// Icon graphics of a class; `Err` when the class has no usable Icon annotation.
     Icon(String, Result<crate::graphics::Icon, String>),
     /// Diagram graphics + component placement + connections (G12).
@@ -424,6 +494,36 @@ fn run_job(
                 crate::instance::parse_components(json, INSTANCE_DEPTH)
             });
             send(Event::Instance(class, result));
+        }
+        Job::LoadParameters {
+            component_type,
+            class,
+            component,
+            context,
+        } => {
+            let result = with_user_file(run_dir, &class, &context, |file| {
+                let type_script =
+                    library::instance_script(&component_type, &context.libraries, file)
+                        .map_err(|e| e.to_string())?;
+                let type_output = omc
+                    .run_query_script(&type_script)
+                    .map_err(|e| e.to_string())?
+                    .output;
+                let type_json = parse_instance_value(&type_output, &component_type)?;
+                let class_script = library::instance_script(&class, &context.libraries, file)
+                    .map_err(|e| e.to_string())?;
+                let class_output = omc
+                    .run_query_script(&class_script)
+                    .map_err(|e| e.to_string())?
+                    .output;
+                let class_json = parse_instance_value(&class_output, &class)?;
+                let component_json = find_instance_component(&class_json, &component);
+                Ok(crate::instance::parse_parameter_rows(
+                    &type_json,
+                    component_json,
+                ))
+            });
+            send(Event::Parameters { component, result });
         }
         Job::LoadIcon { class, context } => {
             let result = with_user_file(run_dir, &class, &context, |file| {
@@ -687,6 +787,28 @@ fn run_job(
     }
 }
 
+fn parse_instance_value(output: &str, class: &str) -> Result<serde_json::Value, String> {
+    let sections = library::parse_sections(output);
+    let body = sections
+        .get("instance")
+        .ok_or_else(|| format!("OMC returned no instance JSON for {class}"))?;
+    let json = crate::instance::extract_json(body)
+        .ok_or_else(|| format!("OMC returned no instance JSON for {class}"))?;
+    serde_json::from_str(json)
+        .map_err(|e| format!("could not parse instance JSON for {class}: {e}"))
+}
+
+fn find_instance_component<'a>(
+    root: &'a serde_json::Value,
+    path: &str,
+) -> Option<&'a serde_json::Value> {
+    let name = path.split('.').next()?;
+    root.get("elements")?.as_array()?.iter().find(|element| {
+        element.get("$kind").and_then(serde_json::Value::as_str) == Some("component")
+            && element.get("name").and_then(serde_json::Value::as_str) == Some(name)
+    })
+}
+
 /// Drop the echo of `cd(...)` and the library `loadModel` results from command output.
 fn clean_command_output(output: &str, loads: usize) -> String {
     let mut lines = output.lines();
@@ -705,6 +827,10 @@ fn fail_job(job: Job, message: String, send: &dyn Fn(Event)) {
         Job::LoadClassDoc { class, .. } => send(Event::ClassDoc(class, Err(message))),
         Job::LoadClassText { class, .. } => send(Event::ClassText(class, Err(message))),
         Job::LoadInstance { class, .. } => send(Event::Instance(class, Err(message))),
+        Job::LoadParameters { component, .. } => send(Event::Parameters {
+            component,
+            result: Err(message),
+        }),
         Job::LoadIcon { class, .. } => send(Event::Icon(class, Err(message))),
         Job::LoadDiagram { class, .. } => send(Event::Diagram(class, Err(message))),
         Job::Command { text, .. } => send(Event::Command(format!("{text}\n  {message}"))),
