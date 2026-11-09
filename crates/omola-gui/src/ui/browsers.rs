@@ -40,7 +40,8 @@ struct RowAction {
 /// One tree row: expander, icon box, label. Returns what the user did.
 ///
 /// `tooltip` is only called while the row is hovered, so a row that is merely visible
-/// does not build a string (G19).
+/// does not build a string (G19). `drag` is the payload the row offers to the Diagram
+/// layer when the user drags it out of the browser (G30).
 #[allow(clippy::too_many_arguments)]
 fn tree_row(
     ui: &mut egui::Ui,
@@ -51,9 +52,18 @@ fn tree_row(
     icon: (MaterialIcon, Color32),
     label: &str,
     tooltip: Option<&dyn Fn() -> String>,
+    drag: Option<&crate::app::ClassPayload>,
 ) -> RowAction {
     let width = ui.available_width().max(120.0);
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, ROW), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, ROW), Sense::click_and_drag());
+    if let Some(payload) = drag {
+        if response.drag_started() {
+            egui::DragAndDrop::set_payload(ui.ctx(), payload.clone());
+        }
+        if response.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        }
+    }
     let painter = ui.painter_at(rect);
     if selected {
         painter.rect_filled(rect, 0.0, theme::SELECT_BG);
@@ -124,6 +134,38 @@ fn tree_row(
     action
 }
 
+/// Draw the class being dragged next to the pointer (G30).
+///
+/// The label sits on a semi-transparent accent chip so the drop point stays visible
+/// underneath it, and it is painted on the tooltip layer so no widget can clip it.
+fn paint_drag_ghost(ui: &egui::Ui) {
+    let Some(payload) = egui::DragAndDrop::payload::<crate::app::ClassPayload>(ui.ctx()) else {
+        return;
+    };
+    let Some(pos) = ui.ctx().pointer_interact_pos() else {
+        return;
+    };
+    let painter = ui.ctx().layer_painter(egui::LayerId::new(
+        egui::Order::Tooltip,
+        egui::Id::unique("omola-class-drag-ghost"),
+    ));
+    let galley = painter.layout_no_wrap(
+        crate::library::short_name(&payload.qualified).to_owned(),
+        egui::FontId::proportional(12.5),
+        Color32::WHITE,
+    );
+    let rect = egui::Rect::from_min_size(
+        pos + egui::vec2(14.0, 10.0),
+        galley.size() + egui::vec2(10.0, 4.0),
+    );
+    painter.rect_filled(
+        rect,
+        2.0,
+        Color32::from_rgba_unmultiplied(0x1F, 0x4F, 0x9F, 190),
+    );
+    painter.galley(rect.min + egui::vec2(5.0, 2.0), galley, Color32::WHITE);
+}
+
 /// Icon for a component row: parameters look different from plain signals.
 fn component_icon(node: &ComponentNode) -> (MaterialIcon, Color32) {
     if node.is_parameter {
@@ -172,6 +214,7 @@ fn component_rows(
         component_icon(node),
         &label,
         (!node.comment.is_empty()).then_some(&tooltip as &dyn Fn() -> String),
+        None,
     );
     if action.toggle {
         toggles.push(key.clone());
@@ -308,6 +351,7 @@ impl OmolaApp {
                 }
             }
         });
+        paint_drag_ghost(ui);
     }
 
     fn package_tree(&mut self, ui: &mut egui::Ui) {
@@ -336,6 +380,7 @@ impl OmolaApp {
                         (ICON_HOURGLASS_EMPTY, theme::TEXT_WEAK),
                         &format!("{} (loading...)", spec.name),
                         None,
+                        None,
                     );
                 }
                 LibraryState::Failed(spec, message) => {
@@ -353,6 +398,7 @@ impl OmolaApp {
                         (ICON_ERROR, Color32::from_rgb(0xC6, 0x28, 0x28)),
                         &format!("{} (not installed)", spec.name),
                         Some(&tooltip as &dyn Fn() -> String),
+                        None,
                     );
                 }
             }
@@ -393,6 +439,10 @@ impl OmolaApp {
                 format!("{name}\n{comment}")
             }
         };
+        let payload = crate::edit::draggable(restriction).then(|| crate::app::ClassPayload {
+            qualified: name.to_owned(),
+            restriction: restriction.to_owned(),
+        });
         let action = tree_row(
             ui,
             depth,
@@ -402,6 +452,7 @@ impl OmolaApp {
             class_icon(restriction, name),
             crate::library::short_name(name),
             Some(&tooltip as &dyn Fn() -> String),
+            payload.as_ref(),
         );
         if action.toggle || action.open || action.open_new_tab {
             actions.push((name.to_owned(), action));
@@ -489,6 +540,12 @@ impl OmolaApp {
                             continue;
                         };
                         let tooltip = || hit.comment.clone();
+                        let payload = crate::edit::draggable(&hit.restriction).then(|| {
+                            crate::app::ClassPayload {
+                                qualified: hit.name.clone(),
+                                restriction: hit.restriction.clone(),
+                            }
+                        });
                         let action = tree_row(
                             ui,
                             0,
@@ -498,6 +555,7 @@ impl OmolaApp {
                             class_icon(&hit.restriction, &hit.name),
                             &hit.name,
                             (!hit.comment.is_empty()).then_some(&tooltip as &dyn Fn() -> String),
+                            payload.as_ref(),
                         );
                         if action.open || action.open_new_tab {
                             actions.push((hit.name.clone(), action));

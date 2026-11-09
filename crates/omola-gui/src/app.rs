@@ -312,6 +312,29 @@ pub fn placement_ops(
     }]
 }
 
+/// A class being dragged out of the Package Browser onto a diagram (G30).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClassPayload {
+    pub qualified: String,
+    pub restriction: String,
+}
+
+/// Default box of a component dropped from the Package Browser, in diagram units.
+const DROPPED_EXTENT: [[f64; 2]; 2] = [[-10.0, -10.0], [10.0, 10.0]];
+
+/// The edit a drop sends: one `AddComponent` at the snapped drop point (G30).
+pub fn drop_ops(qualified: &str, name: &str, p: [f64; 2]) -> Vec<crate::edit::EditOp> {
+    vec![crate::edit::EditOp::AddComponent {
+        name: name.to_owned(),
+        type_name: qualified.to_owned(),
+        extent: DROPPED_EXTENT,
+        origin: [
+            crate::diagram_view::snap(p[0], crate::diagram_view::GRID),
+            crate::diagram_view::snap(p[1], crate::diagram_view::GRID),
+        ],
+    }]
+}
+
 pub struct OmolaApp {
     pub tab: RibbonTab,
     pub graphics_layer: Layer,
@@ -1134,6 +1157,50 @@ impl OmolaApp {
     ) {
         if self.apply_edit(class, placement_ops(component, type_name, &placement)) {
             self.pending_placement = Some((component.to_owned(), placement));
+        }
+    }
+
+    /// Names of the components the Diagram layer already knows for `class` (G30).
+    ///
+    /// A loaded diagram is authoritative; while it is still loading the Component Browser
+    /// tree is the only source, and an empty list just means the first name is free.
+    pub fn component_names(&self, class: &str) -> Vec<String> {
+        if let Some(Loadable::Ready(diagram)) = self.model_diagrams.get(class) {
+            return diagram.components.iter().map(|c| c.name.clone()).collect();
+        }
+        match &self.components {
+            Some((owner, nodes)) if owner == class => {
+                nodes.iter().map(|node| node.name.clone()).collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// Add a class dropped from the Package Browser at `p` (diagram coordinates) (G30).
+    pub fn add_component_at(&mut self, class: &str, payload: &ClassPayload, p: [f64; 2]) {
+        if !self.is_user_class(class) {
+            self.error(
+                LogTab::Syntax,
+                "Library classes are read-only; open your own model to add a component.".into(),
+            );
+            return;
+        }
+        if !crate::edit::draggable(&payload.restriction) {
+            self.info(
+                LogTab::Syntax,
+                format!(
+                    "{} is a {} and cannot be placed in a diagram.",
+                    payload.qualified, payload.restriction
+                ),
+            );
+            return;
+        }
+        let name = crate::edit::unique_component_name(
+            crate::library::short_name(&payload.qualified),
+            &self.component_names(class),
+        );
+        if self.apply_edit(class, drop_ops(&payload.qualified, &name, p)) {
+            self.selected_component = Some(name);
         }
     }
 
@@ -3062,5 +3129,90 @@ mod tests {
             }
             other => panic!("expected SetPlacement, got {other:?}"),
         }
+    }
+
+    fn dropped(qualified: &str, restriction: &str) -> ClassPayload {
+        ClassPayload {
+            qualified: qualified.into(),
+            restriction: restriction.into(),
+        }
+    }
+
+    fn diagram_with(names: &[&str]) -> crate::diagram::Diagram {
+        crate::diagram::Diagram {
+            components: names
+                .iter()
+                .map(|name| crate::diagram::PlacedComponent {
+                    name: (*name).to_owned(),
+                    type_name: "T".into(),
+                    placement: gain_placement(),
+                    icon: None,
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_drop_snaps_the_new_component_to_the_grid() {
+        let ops = drop_ops("Modelica.Blocks.Sources.Sine", "sine1", [11.0, -5.0]);
+        assert_eq!(ops.len(), 1);
+        match &ops[0] {
+            crate::edit::EditOp::AddComponent {
+                name,
+                type_name,
+                extent,
+                origin,
+            } => {
+                assert_eq!(name, "sine1");
+                assert_eq!(type_name, "Modelica.Blocks.Sources.Sine");
+                assert_eq!(*extent, [[-10.0, -10.0], [10.0, 10.0]]);
+                // 11 is nearest to 12, and -5 sits exactly between -4 and -6, so it rounds
+                // away from zero.
+                assert_eq!(*origin, [12.0, -6.0]);
+            }
+            other => panic!("expected AddComponent, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_dropped_class_takes_the_next_free_component_name() {
+        let mut app = app_with_model("model A\nend A;\n");
+        app.model_diagrams
+            .insert("A".into(), Loadable::Ready(diagram_with(&["constant"])));
+        app.add_component_at(
+            "A",
+            &dropped("Modelica.Blocks.Sources.Constant", "model"),
+            [0.0, 0.0],
+        );
+        assert_eq!(app.pending_edit.as_deref(), Some("A"), "one edit was sent");
+        assert_eq!(app.selected_component.as_deref(), Some("constant1"));
+    }
+
+    #[test]
+    fn a_class_cannot_be_dropped_on_a_library_class() {
+        let mut app = app();
+        app.libraries = vec![library_with(&["Modelica", "Modelica.Blocks.Gain"])];
+        app.add_component_at(
+            "Modelica.Blocks.Gain",
+            &dropped("Modelica.Blocks.Sources.Sine", "model"),
+            [0.0, 0.0],
+        );
+        assert!(app.pending_edit.is_none(), "no job was sent");
+        assert!(app
+            .logs
+            .iter()
+            .any(|e| e.level == LogLevel::Error && e.text.contains("read-only")));
+    }
+
+    #[test]
+    fn a_package_cannot_be_dropped_into_a_diagram() {
+        let mut app = app_with_model("model A\nend A;\n");
+        app.add_component_at("A", &dropped("Modelica.Blocks", "package"), [0.0, 0.0]);
+        assert!(app.pending_edit.is_none(), "no job was sent");
+        assert!(app
+            .logs
+            .iter()
+            .any(|e| e.text.contains("cannot be placed in a diagram")));
     }
 }

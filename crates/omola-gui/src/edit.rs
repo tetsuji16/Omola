@@ -198,6 +198,42 @@ pub fn edited_text(output: &str) -> Result<String, String> {
     Ok(body[..end].trim_end_matches('\n').to_owned())
 }
 
+/// Whether a class of this `restriction` can be dropped into a diagram (G30).
+///
+/// Packages, functions and types have no instance to place. Records do, even though the
+/// Diagram layer draws nothing for them, so they are allowed.
+pub fn draggable(restriction: &str) -> bool {
+    !matches!(
+        restriction.trim(),
+        "package" | "function" | "operator function" | "type"
+    )
+}
+
+/// A component name for `type_short` that is not in `existing` yet (G30).
+///
+/// The first letter is lowercased (`Constant` -> `constant`) and a number is appended when
+/// the name is taken (`constant1`, `constant2`). Only the first character is touched, so
+/// `PID` becomes `pID`; that differs from Dymola, which lowercases the whole acronym, and it
+/// is fine as long as the result is a valid Modelica identifier.
+pub fn unique_component_name(type_short: &str, existing: &[String]) -> String {
+    let mut chars = type_short.chars();
+    let base: String = match chars.next() {
+        Some(first) => first.to_lowercase().chain(chars).collect(),
+        None => "component".to_owned(),
+    };
+    if !existing.iter().any(|name| name == &base) {
+        return base;
+    }
+    // At most `existing.len()` numbers are taken, so one more always finds a free name.
+    for suffix in 1..=existing.len() + 1 {
+        let candidate = format!("{base}{suffix}");
+        if !existing.iter().any(|name| name == &candidate) {
+            return candidate;
+        }
+    }
+    unreachable!("one of the first `existing.len() + 1` names is free")
+}
+
 /// `Placement(visible=true, transformation=transformation(...))` for an annotation argument.
 fn placement(extent: [[f64; 2]; 2], origin: [f64; 2], rotation: f64) -> Result<String, String> {
     let [[x1, y1], [x2, y2]] = extent;
@@ -505,5 +541,47 @@ mod tests {
         // A failure marker after the begin marker is part of the class text, not a failure.
         let inside = "OMOLA_EDIT_BEGIN\nmodel A\n  String s = \"OMOLA_EDIT_FAIL\";\nend A;\nOMOLA_EDIT_END\n";
         assert!(edited_text(inside).unwrap().contains("OMOLA_EDIT_FAIL"));
+    }
+
+    #[test]
+    fn a_new_component_name_is_lowercase_and_unique() {
+        let names = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(unique_component_name("Constant", &[]), "constant");
+        assert_eq!(
+            unique_component_name("Constant", &names(&["constant"])),
+            "constant1"
+        );
+        assert_eq!(
+            unique_component_name("Constant", &names(&["constant", "constant1"])),
+            "constant2"
+        );
+        // A gap is filled instead of always growing.
+        assert_eq!(
+            unique_component_name("Gain", &names(&["gain", "gain2"])),
+            "gain1"
+        );
+        // Only the first letter is lowercased.
+        assert_eq!(unique_component_name("PID", &[]), "pID");
+        assert_eq!(unique_component_name("", &[]), "component");
+    }
+
+    #[test]
+    fn only_placeable_restrictions_can_be_dropped() {
+        for restriction in [
+            "model",
+            "block",
+            "class",
+            "connector",
+            "expandable connector",
+            "record",
+        ] {
+            assert!(draggable(restriction), "{restriction} should be placeable");
+        }
+        for restriction in ["package", "function", "operator function", "type", " type "] {
+            assert!(
+                !draggable(restriction),
+                "{restriction} should not be placeable"
+            );
+        }
     }
 }

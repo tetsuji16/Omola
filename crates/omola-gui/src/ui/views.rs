@@ -360,6 +360,14 @@ impl OmolaApp {
                 .and_then(|p| crate::diagram::hit_component(&diagram, p))
                 .map(|i| diagram.components[i].name.clone());
         }
+        // A class dragged out of the Package Browser is added where it was dropped (G30).
+        // `interact_pointer_pos` is empty here because the drag belongs to the browser row,
+        // so the pointer has to come from the context.
+        if let Some(payload) = response.dnd_release_payload::<crate::app::ClassPayload>() {
+            if let Some(pos) = ui.ctx().pointer_interact_pos() {
+                self.add_component_at(class, &payload, to_diagram(pos));
+            }
+        }
         // Arrow keys nudge the selection by one grid step; Ctrl+R rotates it by 90 degrees.
         if editable && response.hovered() && ui.ctx().memory(|m| m.focused()).is_none() {
             if let Some(name) = self.selected_component.clone() {
