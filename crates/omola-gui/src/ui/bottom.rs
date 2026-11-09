@@ -50,6 +50,8 @@ impl OmolaApp {
     fn logs_pane(&mut self, ui: &mut egui::Ui) {
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
+            let mut copy_all = false;
+            let mut clear = false;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 ui.add_space(4.0);
@@ -62,7 +64,22 @@ impl OmolaApp {
                         self.log_tab = tab;
                     }
                 }
+                copy_all = ui.button("Copy All").clicked();
+                clear = ui.button("Clear").clicked();
             });
+            if copy_all {
+                let all = self
+                    .logs
+                    .iter()
+                    .filter(|entry| entry.tab == self.log_tab)
+                    .map(|entry| entry.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                ui.ctx().copy_text(all);
+            }
+            if clear {
+                self.clear_logs_for_tab(self.log_tab);
+            }
             egui::Frame::new()
                 .fill(Color32::WHITE)
                 .stroke(Stroke::new(1.0, Color32::from_rgb(0x82, 0x87, 0x90)))
@@ -78,12 +95,30 @@ impl OmolaApp {
                     egui::ScrollArea::vertical()
                         .id_salt(("logs", self.log_tab as u8))
                         .auto_shrink([false, false])
+                        .stick_to_bottom(true)
                         .show(ui, |ui| {
                             ui.spacing_mut().item_spacing.y = 0.0;
                             // A click is handled after the loop so that `self.logs` is no
                             // longer borrowed when the document is opened.
                             let mut jump: Option<SourceLocation> = None;
-                            for entry in self.logs.iter().filter(|e| e.tab == self.log_tab) {
+                            let entries: Vec<usize> = self
+                                .logs
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, entry)| entry.tab == self.log_tab)
+                                .map(|(index, _)| index)
+                                .collect();
+                            let hidden = entries.len().saturating_sub(300);
+                            if hidden > 0 {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "({hidden} older entries hidden — use Copy All to see everything)"
+                                    ))
+                                    .color(theme::TEXT_WEAK),
+                                );
+                            }
+                            for index in entries.iter().skip(hidden) {
+                                let entry = &self.logs[*index];
                                 let color = match entry.level {
                                     LogLevel::Info => theme::TEXT,
                                     LogLevel::Warning => Color32::from_rgb(0xA0, 0x60, 0x00),
