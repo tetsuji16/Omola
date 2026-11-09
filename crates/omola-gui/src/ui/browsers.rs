@@ -183,7 +183,8 @@ fn component_icon(node: &ComponentNode) -> (MaterialIcon, Color32) {
 /// Draw one component and, when expanded, its children.
 ///
 /// `path` is the dotted prefix used as the expansion key; `toggles` collects the paths
-/// whose expander was clicked so the caller can update the state after the frame.
+/// whose expander was clicked and `opens` the `(path, type)` of a double-clicked top-level
+/// component, whose parameter dialog the caller then opens (G33).
 fn component_rows(
     ui: &mut egui::Ui,
     node: &ComponentNode,
@@ -191,6 +192,7 @@ fn component_rows(
     path: &str,
     expanded: &std::collections::BTreeSet<String>,
     toggles: &mut Vec<String>,
+    opens: &mut Vec<(String, String)>,
 ) {
     let key = if path.is_empty() {
         node.name.clone()
@@ -219,9 +221,12 @@ fn component_rows(
     if action.toggle {
         toggles.push(key.clone());
     }
+    if action.open_new_tab && depth == 0 {
+        opens.push((key.clone(), node.type_name.clone()));
+    }
     if open {
         for child in &node.children {
-            component_rows(ui, child, depth + 1, &key, expanded, toggles);
+            component_rows(ui, child, depth + 1, &key, expanded, toggles, opens);
         }
     }
 }
@@ -586,6 +591,7 @@ impl OmolaApp {
         let active = self.active.clone();
         let loading = self.components_pending.is_some();
         let mut toggles: Vec<String> = Vec::new();
+        let mut opens: Vec<(String, String)> = Vec::new();
         Self::browser_frame(ui, |ui| {
             ui.set_min_height(ui.available_height().max(40.0));
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -622,12 +628,26 @@ impl OmolaApp {
                 return;
             }
             for node in nodes {
-                component_rows(ui, node, 0, "", &self.component_expanded, &mut toggles);
+                component_rows(
+                    ui,
+                    node,
+                    0,
+                    "",
+                    &self.component_expanded,
+                    &mut toggles,
+                    &mut opens,
+                );
             }
         });
         for path in toggles {
             if !self.component_expanded.remove(&path) {
                 self.component_expanded.insert(path);
+            }
+        }
+        // A double-clicked component opens its parameters (G33).
+        for (component, type_name) in opens {
+            if let Some(class) = active.as_deref() {
+                self.open_parameter_dialog(class, &component, &type_name);
             }
         }
     }

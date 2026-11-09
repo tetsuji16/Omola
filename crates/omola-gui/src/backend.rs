@@ -95,6 +95,12 @@ pub enum Job {
         context: ClassContext,
         setup: SimulationSetup,
     },
+    /// Read the parameters of one component for the parameter dialog (G33).
+    LoadParameters {
+        class: String,
+        component: String,
+        context: ClassContext,
+    },
     /// Install the start-up libraries with OpenModelica's package manager
     /// (`scripts/install-libraries.mos`).
     InstallLibraries,
@@ -167,6 +173,11 @@ pub enum Event {
     ModelEdited {
         class: String,
         result: Result<String, String>,
+    },
+    /// Parameters of a component, with the values its modifiers give them (G33).
+    Parameters {
+        component: String,
+        result: Result<Vec<crate::instance::ParamRow>, String>,
     },
     SimulationFinished(Box<SimulationOutcome>),
     /// `InstallLibraries` finished (`true` when the Modelica Standard Library is installed).
@@ -540,6 +551,37 @@ fn run_job(
             context,
             setup,
         } => simulate(&omc, run_dir, class, context, setup, send),
+        Job::LoadParameters {
+            class,
+            component,
+            context,
+        } => {
+            let result = with_user_file(run_dir, &class, &context, |file| {
+                let instance_json = |target: &str| -> Result<String, String> {
+                    let script = library::instance_script(target, &context.libraries, file)
+                        .map_err(|e| e.to_string())?;
+                    let output = omc
+                        .run_query_script(&script)
+                        .map(|out| out.output)
+                        .map_err(|e| e.to_string())?;
+                    library::parse_sections(&output)
+                        .get("instance")
+                        .cloned()
+                        .ok_or_else(|| format!("OMC returned no instance JSON for {target}"))
+                };
+                let class_json = instance_json(&class)?;
+                let modifiers = crate::instance::component_modifiers(&class_json, &component)?;
+                let components = crate::instance::parse_components(&class_json, 1)?;
+                let type_name = components
+                    .iter()
+                    .find(|node| node.name == component)
+                    .map(|node| node.type_name.clone())
+                    .ok_or_else(|| format!("{component} is not part of {class}"))?;
+                let type_json = instance_json(&type_name)?;
+                crate::instance::parse_parameters(&type_json, &modifiers)
+            });
+            send(Event::Parameters { component, result });
+        }
         Job::InstallLibraries => {
             send(Event::Log(
                 LogTab::Version,
@@ -613,6 +655,10 @@ fn fail_job(job: Job, message: String, send: &dyn Fn(Event)) {
         Job::LoadDiagram { class, .. } => send(Event::Diagram(class, Err(message))),
         Job::EditModel { class, .. } => send(Event::ModelEdited {
             class,
+            result: Err(message),
+        }),
+        Job::LoadParameters { component, .. } => send(Event::Parameters {
+            component,
             result: Err(message),
         }),
         Job::Command { text, .. } => send(Event::Command(format!("{text}\n  {message}"))),

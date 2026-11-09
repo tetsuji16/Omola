@@ -117,6 +117,239 @@ fn component_node(element: &Value, depth: usize) -> Option<ComponentNode> {
     })
 }
 
+/// One row of the parameter dialog (G33).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParamRow {
+    pub name: String,
+    pub type_name: String,
+    /// Default the class declares, shown as a hint when the row has no value.
+    pub default: String,
+    /// Value the component's modifier gives it now, empty when there is none.
+    pub original: String,
+    /// Text being edited in the dialog; starts as [`Self::original`].
+    pub value: String,
+    pub unit: String,
+    pub comment: String,
+    /// Enumeration literals when the type is an enumeration, empty otherwise.
+    pub choices: Vec<String>,
+    pub is_boolean: bool,
+}
+
+/// The parameters of a class, with the values `modifiers` gives them (G33).
+///
+/// `modifiers` is the component's modifier list from the class instance JSON, as
+/// `(name, text)` pairs; a parameter without one shows its default as a hint only.
+pub fn parse_parameters(
+    json: &str,
+    modifiers: &[(String, String)],
+) -> Result<Vec<ParamRow>, String> {
+    let root: Value = serde_json::from_str(json)
+        .map_err(|error| format!("could not read the parameter JSON: {error}"))?;
+    if !root.is_object() {
+        return Err("the parameter JSON is not an object".into());
+    }
+    let mut found = Vec::new();
+    collect_parameters(&root, 0, &mut found);
+    let mut seen = std::collections::HashSet::new();
+    let mut rows: Vec<ParamRow> = Vec::new();
+    for element in found {
+        let Some(name) = element.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        if !seen.insert(name.to_owned()) {
+            continue;
+        }
+        let declared = element.get("type").cloned().unwrap_or(Value::Null);
+        let type_name = match &declared {
+            Value::String(name) => name.clone(),
+            Value::Object(_) => declared
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            _ => String::new(),
+        };
+        let choices = enum_literals(&declared);
+        let default = element
+            .pointer("/value/binding")
+            .and_then(value_text)
+            .or_else(|| element.get("modifiers").and_then(value_text))
+            .unwrap_or_default();
+        let mut original = modifiers
+            .iter()
+            .find(|(other, _)| other == name)
+            .map(|(_, text)| text.clone())
+            .unwrap_or_default();
+        // An enumeration modifier is written `Init.NoInit`; the dialog works with the
+        // literal alone and puts the prefix back when it writes the modifier.
+        if !choices.is_empty() {
+            original = original.rsplit('.').next().unwrap_or(&original).to_owned();
+        }
+        rows.push(ParamRow {
+            name: name.to_owned(),
+            type_name: type_name.clone(),
+            default,
+            value: original.clone(),
+            original,
+            unit: unit_of(element, &declared),
+            comment: element
+                .get("comment")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            choices,
+            is_boolean: type_name == "Boolean",
+        });
+    }
+    Ok(rows)
+}
+
+/// The `modifiers` of one component in a class instance JSON, as `(name, text)` pairs.
+pub fn component_modifiers(json: &str, component: &str) -> Result<Vec<(String, String)>, String> {
+    let root: Value = serde_json::from_str(json)
+        .map_err(|error| format!("could not read the model instance JSON: {error}"))?;
+    let mut elements = Vec::new();
+    collect_elements(&root, 0, &mut elements);
+    let element = elements
+        .into_iter()
+        .find(|element| element.get("name").and_then(Value::as_str) == Some(component))
+        .ok_or_else(|| format!("{component} is not part of the model"))?;
+    Ok(element
+        .get("modifiers")
+        .and_then(Value::as_object)
+        .map(|modifiers| {
+            modifiers
+                .iter()
+                .filter_map(|(name, value)| Some((name.clone(), value_text(value)?)))
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+/// Every `component` element of a class, with `extends` flattened (G33).
+fn collect_elements<'a>(node: &'a Value, depth: usize, out: &mut Vec<&'a Value>) {
+    if depth > 8 {
+        return;
+    }
+    let Some(elements) = node.get("elements").and_then(Value::as_array) else {
+        return;
+    };
+    for element in elements {
+        match element.get("$kind").and_then(Value::as_str) {
+            Some(EXTENDS) => {
+                if let Some(base) = element.get("baseClass") {
+                    collect_elements(base, depth + 1, out);
+                }
+            }
+            Some(COMPONENT) => out.push(element),
+            _ => {}
+        }
+    }
+}
+
+fn collect_parameters<'a>(node: &'a Value, depth: usize, out: &mut Vec<&'a Value>) {
+    if depth > 8 {
+        return;
+    }
+    let Some(elements) = node.get("elements").and_then(Value::as_array) else {
+        return;
+    };
+    for element in elements {
+        match element.get("$kind").and_then(Value::as_str) {
+            Some(EXTENDS) => {
+                if let Some(base) = element.get("baseClass") {
+                    collect_parameters(base, depth + 1, out);
+                }
+            }
+            Some(COMPONENT) => {
+                // `constant` is a value, not something a user tunes per component.
+                let variability = element
+                    .pointer("/prefixes/variability")
+                    .and_then(Value::as_str);
+                if variability == Some("parameter") && element.get("type").is_some() {
+                    out.push(element);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Enumeration literals of a type, empty when it is not an enumeration (G33).
+fn enum_literals(declared: &Value) -> Vec<String> {
+    let Some(elements) = declared.get("elements").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let is_enum = elements.iter().any(|element| {
+        element.get("$kind").and_then(Value::as_str) == Some(EXTENDS)
+            && element.get("baseClass").and_then(Value::as_str) == Some("enumeration")
+    });
+    if !is_enum {
+        return Vec::new();
+    }
+    elements
+        .iter()
+        .filter(|element| element.get("$kind").and_then(Value::as_str) == Some(COMPONENT))
+        .filter_map(|element| element.get("name").and_then(Value::as_str))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Unit of a parameter: its own `unit` modifier, else the one its type declares (G33).
+fn unit_of(element: &Value, declared: &Value) -> String {
+    element
+        .pointer("/modifiers/unit")
+        .and_then(value_text)
+        .or_else(|| type_unit(declared, 0))
+        .unwrap_or_default()
+}
+
+fn type_unit(class: &Value, depth: usize) -> Option<String> {
+    if depth > 6 {
+        return None;
+    }
+    for element in class.get("elements")?.as_array()? {
+        if element.get("$kind").and_then(Value::as_str) != Some(EXTENDS) {
+            continue;
+        }
+        if let Some(unit) = element.pointer("/modifiers/unit").and_then(value_text) {
+            return Some(unit);
+        }
+        if let Some(base) = element.get("baseClass") {
+            if let Some(unit) = type_unit(base, depth + 1) {
+                return Some(unit);
+            }
+        }
+    }
+    None
+}
+
+/// Display text of a JSON value: numbers without a pointless `.0`, strings without their
+/// quotes, enumerations by their last name segment, modifier records by their `$value`.
+fn value_text(value: &Value) -> Option<String> {
+    match value {
+        Value::Number(number) => Some(number_text(number.as_f64()?)),
+        Value::String(text) => Some(text.trim_matches('"').to_owned()),
+        Value::Bool(flag) => Some(flag.to_string()),
+        Value::Object(object) => {
+            if object.get("$kind").and_then(Value::as_str) == Some("enum") {
+                let name = object.get("name").and_then(Value::as_str)?;
+                return Some(name.rsplit('.').next().unwrap_or(name).to_owned());
+            }
+            object.get("$value").and_then(value_text)
+        }
+        _ => None,
+    }
+}
+
+fn number_text(value: f64) -> String {
+    if value.fract() == 0.0 && value.abs() < 1e15 {
+        format!("{}", value as i64)
+    } else {
+        format!("{value}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,5 +446,76 @@ mod tests {
         assert!(parse_components("{not json", 4).is_err());
         assert!(parse_components("[]", 4).is_err());
         assert_eq!(parse_components("{}", 4).unwrap(), Vec::new());
+    }
+
+    /// The `type` object of `plant`, which is the `FirstOrder` class definition.
+    fn first_order() -> serde_json::Value {
+        let root: serde_json::Value = serde_json::from_str(MSL_FIRST_ORDER).unwrap();
+        root["elements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|element| element["name"] == "plant")
+            .unwrap()["type"]
+            .clone()
+    }
+
+    #[test]
+    fn lists_the_parameters_of_a_block() {
+        let class = first_order();
+        let rows = parse_parameters(&class.to_string(), &[]).unwrap();
+        let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, ["k", "T", "initType", "y_start"]);
+        let k = &rows[0];
+        assert_eq!(k.type_name, "Real");
+        assert_eq!(k.default, "1");
+        assert_eq!(k.comment, "Gain");
+        assert!(k.choices.is_empty());
+        let t = &rows[1];
+        assert_eq!(t.default, "0.25");
+        // The unit comes from `Modelica.Units.SI.Time`, not from the parameter itself.
+        assert_eq!(t.unit, "s");
+        // An enumeration lists its literals and keeps only the literal part of its default.
+        let init = &rows[2];
+        assert_eq!(
+            init.choices,
+            ["NoInit", "SteadyState", "InitialState", "InitialOutput"]
+        );
+        assert_eq!(init.default, "NoInit");
+        assert!(!rows[3].is_boolean);
+    }
+
+    #[test]
+    fn a_modifier_overrides_the_default_of_a_parameter() {
+        let class = first_order();
+        let modifiers = vec![
+            ("T".to_owned(), "2".to_owned()),
+            ("initType".to_owned(), "Init.SteadyState".to_owned()),
+        ];
+        let rows = parse_parameters(&class.to_string(), &modifiers).unwrap();
+        let t = rows.iter().find(|r| r.name == "T").unwrap();
+        assert_eq!(t.original, "2");
+        assert_eq!(t.value, "2");
+        assert_eq!(t.default, "0.25");
+        // The enumeration keeps the literal, so the combo box can select it.
+        let init = rows.iter().find(|r| r.name == "initType").unwrap();
+        assert_eq!(init.original, "SteadyState");
+        // `k` has no modifier, so it only has a default.
+        let k = rows.iter().find(|r| r.name == "k").unwrap();
+        assert!(k.original.is_empty());
+    }
+
+    #[test]
+    fn the_modifiers_of_a_component_are_read_from_the_model() {
+        let modifiers = component_modifiers(MSL_FIRST_ORDER, "plant").unwrap();
+        assert_eq!(
+            modifiers,
+            vec![
+                ("T".to_owned(), "0.25".to_owned()),
+                ("k".to_owned(), "1".to_owned()),
+            ]
+        );
+        assert!(component_modifiers(MSL_FIRST_ORDER, "nope").is_err());
+        assert!(component_modifiers("{not json", "plant").is_err());
     }
 }

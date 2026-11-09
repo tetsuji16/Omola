@@ -10,6 +10,137 @@ impl OmolaApp {
         self.setup_dialog(&ctx);
         self.path_dialog_window(&ctx);
         self.rename_dialog_window(&ctx);
+        self.parameter_dialog_window(&ctx);
+    }
+
+    /// Parameters of one component (G33).
+    ///
+    /// The dialog edits text only; the validation is OMC's. `;` and line breaks are
+    /// stripped as they are typed, because they would end the statement in the edit script.
+    fn parameter_dialog_window(&mut self, ctx: &egui::Context) {
+        let Some(dialog) = self.parameter_dialog.clone() else {
+            return;
+        };
+        let mut rows = dialog.rows.clone().unwrap_or_default();
+        let mut open = true;
+        let mut submitted = false;
+        let mut cancelled = false;
+        egui::Window::new(format!("Parameters: {}", dialog.component))
+            .collapsible(false)
+            .resizable(true)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.label(egui::RichText::new(&dialog.type_name).color(theme::TEXT_WEAK));
+                if let Some(error) = &dialog.error {
+                    ui.colored_label(theme::ERROR, error);
+                } else if dialog.rows.is_none() {
+                    ui.label(
+                        egui::RichText::new("Reading the parameters ...").color(theme::TEXT_WEAK),
+                    );
+                }
+                if !rows.is_empty() {
+                    egui::Grid::new("parameter_rows")
+                        .striped(true)
+                        .num_columns(4)
+                        .show(ui, |ui| {
+                            ui.strong("Name");
+                            ui.strong("Value");
+                            ui.strong("Unit");
+                            ui.strong("Description");
+                            ui.end_row();
+                            for row in &mut rows {
+                                ui.label(&row.name);
+                                if !row.choices.is_empty() {
+                                    let current =
+                                        row.value.rsplit('.').next().unwrap_or_default().to_owned();
+                                    egui::ComboBox::from_id_salt(("param", &row.name))
+                                        .selected_text(if current.is_empty() {
+                                            row.default.clone()
+                                        } else {
+                                            current
+                                        })
+                                        .show_ui(ui, |ui| {
+                                            for choice in &row.choices {
+                                                if ui
+                                                    .selectable_label(row.value == *choice, choice)
+                                                    .clicked()
+                                                {
+                                                    row.value = choice.clone();
+                                                }
+                                            }
+                                        });
+                                } else if row.is_boolean {
+                                    egui::ComboBox::from_id_salt(("param", &row.name))
+                                        .selected_text(if row.value.is_empty() {
+                                            row.default.clone()
+                                        } else {
+                                            row.value.clone()
+                                        })
+                                        .show_ui(ui, |ui| {
+                                            for choice in ["true", "false"] {
+                                                if ui
+                                                    .selectable_label(row.value == choice, choice)
+                                                    .clicked()
+                                                {
+                                                    row.value = choice.to_owned();
+                                                }
+                                            }
+                                        });
+                                } else {
+                                    // An unchanged row shows the default greyed out as a hint.
+                                    let hint = if row.default.is_empty() {
+                                        row.original.clone()
+                                    } else {
+                                        row.default.clone()
+                                    };
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut row.value)
+                                            .hint_text(hint)
+                                            .desired_width(120.0),
+                                    );
+                                }
+                                ui.label(&row.unit);
+                                ui.label(&row.comment);
+                                ui.end_row();
+                            }
+                        });
+                }
+                ui.horizontal(|ui| {
+                    let ready = dialog.rows.is_some() && dialog.error.is_none();
+                    if ui
+                        .add_enabled(dialog.editable && ready, egui::Button::new("OK"))
+                        .clicked()
+                    {
+                        submitted = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        cancelled = true;
+                    }
+                    if !dialog.editable {
+                        ui.label(
+                            egui::RichText::new("read-only (library class)")
+                                .color(theme::TEXT_WEAK),
+                        );
+                    }
+                });
+            });
+        // A `;` or a line break would end the statement the edit script builds.
+        for row in &mut rows {
+            row.value.retain(|c| c != ';' && c != '\n' && c != '\r');
+        }
+        if submitted {
+            self.parameter_dialog = None;
+            let ops = crate::app::param_ops(&dialog.component, &rows);
+            if !ops.is_empty() {
+                self.apply_edit(&dialog.class, ops);
+            }
+        } else if cancelled || !open {
+            self.parameter_dialog = None;
+        } else if dialog.rows.is_some() {
+            if let Some(state) = &mut self.parameter_dialog {
+                state.rows = Some(rows);
+            }
+        }
     }
 
     /// Rename a Diagram component (G31).

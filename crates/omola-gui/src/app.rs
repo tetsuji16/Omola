@@ -427,6 +427,41 @@ pub struct RenameDialog {
     pub new_text: String,
 }
 
+/// The parameter dialog of one component (G33).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParameterDialog {
+    pub class: String,
+    pub component: String,
+    pub type_name: String,
+    /// `None` while `Job::LoadParameters` is running.
+    pub rows: Option<Vec<crate::instance::ParamRow>>,
+    pub error: Option<String>,
+    /// A component of a library class cannot be edited.
+    pub editable: bool,
+}
+
+/// The edits the parameter dialog sends: one `SetModifier` per changed row (G33).
+///
+/// A row that was cleared removes the modifier (`value: None`); a row that still equals the
+/// value it opened with is left alone. An enumeration is written with its type
+/// (`Init.NoInit`), because the bare literal does not resolve inside the class.
+pub fn param_ops(component: &str, rows: &[crate::instance::ParamRow]) -> Vec<crate::edit::EditOp> {
+    rows.iter()
+        .filter(|row| row.value.trim() != row.original.trim())
+        .map(|row| {
+            let mut value = row.value.trim().to_owned();
+            if !row.choices.is_empty() && !value.is_empty() && !value.contains('.') {
+                let short = row.type_name.rsplit('.').next().unwrap_or(&row.type_name);
+                value = format!("{short}.{value}");
+            }
+            crate::edit::EditOp::SetModifier {
+                path: format!("{component}.{}", row.name),
+                value: (!value.is_empty()).then_some(value),
+            }
+        })
+        .collect()
+}
+
 pub struct OmolaApp {
     pub tab: RibbonTab,
     pub graphics_layer: Layer,
@@ -476,6 +511,8 @@ pub struct OmolaApp {
     pub context_component: Option<String>,
     /// Open rename dialog of the Diagram layer (G31).
     pub rename_dialog: Option<RenameDialog>,
+    /// Parameter dialog of one component (G33).
+    pub parameter_dialog: Option<ParameterDialog>,
     /// Connection being dragged out of a pin (G32).
     pub pin_drag: Option<PinDrag>,
     /// Selected connection as `(from, to)`; the index would change on every reload (G32).
@@ -621,6 +658,7 @@ impl OmolaApp {
             pending_placement: None,
             context_component: None,
             rename_dialog: None,
+            parameter_dialog: None,
             pin_drag: None,
             selected_connection: None,
             doc_view: DocView::Formatted,
@@ -1373,6 +1411,49 @@ impl OmolaApp {
         });
     }
 
+    /// Open the parameter dialog of `component` and ask OMC for its parameters (G33).
+    pub fn open_parameter_dialog(&mut self, class: &str, component: &str, type_name: &str) {
+        let editable = self.is_user_class(class);
+        self.parameter_dialog = Some(ParameterDialog {
+            class: class.to_owned(),
+            component: component.to_owned(),
+            type_name: type_name.to_owned(),
+            rows: None,
+            error: None,
+            editable,
+        });
+        self.worker.submit(Job::LoadParameters {
+            class: class.to_owned(),
+            component: component.to_owned(),
+            context: self.context_for(class),
+        });
+    }
+
+    /// The parameter rows came back (G33).
+    fn parameters_loaded(
+        &mut self,
+        component: &str,
+        result: Result<Vec<crate::instance::ParamRow>, String>,
+    ) {
+        let Some(dialog) = &mut self.parameter_dialog else {
+            return;
+        };
+        // A dialog for another component may have been opened while this one was running.
+        if dialog.component != component {
+            return;
+        }
+        match result {
+            Ok(rows) => {
+                dialog.rows = Some(rows);
+                dialog.error = None;
+            }
+            Err(message) => {
+                dialog.rows = None;
+                dialog.error = Some(message);
+            }
+        }
+    }
+
     /// The rewritten class text came back: swap it in, or report why it did not (G28).
     fn model_edited(&mut self, class: &str, result: Result<String, String>) {
         if self.pending_edit.as_deref() == Some(class) {
@@ -1800,6 +1881,9 @@ impl OmolaApp {
                 }
                 Event::SimulationFinished(outcome) => self.add_run(*outcome),
                 Event::ModelEdited { class, result } => self.model_edited(&class, result),
+                Event::Parameters { component, result } => {
+                    self.parameters_loaded(&component, result)
+                }
                 Event::LibrariesInstalled(ok) => {
                     if ok {
                         self.docs.clear();
@@ -3565,5 +3649,55 @@ mod tests {
             }
             other => panic!("expected AddConnection, got {other:?}"),
         }
+    }
+
+    fn param(name: &str, original: &str, value: &str) -> crate::instance::ParamRow {
+        crate::instance::ParamRow {
+            name: name.into(),
+            type_name: "Real".into(),
+            default: "1".into(),
+            original: original.into(),
+            value: value.into(),
+            unit: String::new(),
+            comment: String::new(),
+            choices: Vec::new(),
+            is_boolean: false,
+        }
+    }
+
+    fn modifier_of(ops: &[crate::edit::EditOp]) -> (&str, Option<&str>) {
+        match &ops[0] {
+            crate::edit::EditOp::SetModifier { path, value } => (path.as_str(), value.as_deref()),
+            other => panic!("expected SetModifier, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn only_changed_parameter_rows_become_edits() {
+        let mut rows = vec![param("k", "1", "1"), param("T", "0.25", "0.25")];
+        assert!(param_ops("plant", &rows).is_empty(), "nothing changed");
+        rows[1].value = " 2 ".into();
+        let ops = param_ops("plant", &rows);
+        assert_eq!(ops.len(), 1);
+        assert_eq!(modifier_of(&ops), ("plant.T", Some("2")));
+    }
+
+    #[test]
+    fn clearing_a_parameter_removes_its_modifier() {
+        let rows = vec![param("T", "0.25", "")];
+        let ops = param_ops("plant", &rows);
+        assert_eq!(modifier_of(&ops), ("plant.T", None));
+    }
+
+    #[test]
+    fn an_enumeration_modifier_keeps_its_type_prefix() {
+        let mut row = param("initType", "NoInit", "SteadyState");
+        row.type_name = "Modelica.Blocks.Types.Init".into();
+        row.choices = vec!["NoInit".into(), "SteadyState".into()];
+        let ops = param_ops("plant", &[row]);
+        assert_eq!(
+            modifier_of(&ops),
+            ("plant.initType", Some("Init.SteadyState"))
+        );
     }
 }

@@ -407,6 +407,15 @@ impl OmolaApp {
                     .map(|i| diagram.components[i].name.clone());
             }
         }
+        // Double click on a component opens its parameter dialog (G33).
+        if response.double_clicked() {
+            if let Some(pos) = pointer {
+                if let Some(index) = crate::diagram::hit_component(&diagram, to_diagram(pos)) {
+                    let comp = &diagram.components[index];
+                    self.open_parameter_dialog(class, &comp.name, &comp.type_name);
+                }
+            }
+        }
         // A class dragged out of the Package Browser is added where it was dropped (G30).
         // `interact_pointer_pos` is empty here because the drag belongs to the browser row,
         // so the pointer has to come from the context.
