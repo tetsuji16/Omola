@@ -229,6 +229,8 @@ OMOLA_FAKE_MAT="$PWD/target/demo_res.mat" OMOLA_OMC="$PWD/scripts/fake-omc.sh" c
 
 Not implemented yet: graphical diagram/icon rendering and editing, component hierarchy, animation, sweeps, and the remaining Simulation Setup fields; see issues G01–G14 in [`docs/issues/gui`](docs/issues/gui/README.md). Screenshots: [`docs/images/omola-gui`](docs/images/omola-gui).
 
+性能を調べるときは `OMOLA_FRAME_STATS=1` を付けて起動すると、1 秒ごとの描画時間が標準エラーに出ます。
+
 ## Plan and issue queue
 
 Issues are ordered by dependency. Start with issue 01 before expanding command semantics; issue 02 supplies the sample used in README. Compatibility and feature issues require their corpus and version reporting first. The concrete implementation briefs are in [`docs/issues`](docs/issues/README.md).
