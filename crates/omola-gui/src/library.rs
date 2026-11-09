@@ -359,7 +359,7 @@ pub fn instance_script(
         ));
     }
     script.push_str(&format!(
-        "print(\"OMOLA_BEGIN instance\\n\" + getModelInstance({class}, prettyPrint=true) + \"\\nOMOLA_END instance\\n\");\n"
+        "print(\"OMOLA_BEGIN instance\\n\" + OpenModelica.Scripting.getModelInstance({class}, prettyPrint=true) + \"\\nOMOLA_END instance\\n\");\n"
     ));
     Ok(script)
 }
@@ -386,7 +386,7 @@ pub fn icon_script(
         ));
     }
     script.push_str(&format!(
-        "print(\"OMOLA_BEGIN icon\\n\" + getModelInstanceAnnotation({class}, {{\"Icon\"}}) + \"\\nOMOLA_END icon\\n\");\n"
+        "print(\"OMOLA_BEGIN icon\\n\" + OpenModelica.Scripting.getModelInstanceAnnotation({class}, {{\"Icon\"}}) + \"\\nOMOLA_END icon\\n\");\n"
     ));
     Ok(script)
 }
@@ -401,7 +401,7 @@ pub fn icons_script(types: &[String], libraries: &[LibrarySpec]) -> Result<Strin
         validate_class_name(class)?;
         let key = format!("icon:{class}");
         script.push_str(&format!(
-            "print(\"OMOLA_BEGIN {key}\\n\" + getModelInstanceAnnotation({class}, {{\"Icon\"}}) + \"\\nOMOLA_END {key}\\n\");\n"
+            "print(\"OMOLA_BEGIN {key}\\n\" + OpenModelica.Scripting.getModelInstanceAnnotation({class}, {{\"Icon\"}}) + \"\\nOMOLA_END {key}\\n\");\n"
         ));
     }
     Ok(script)
@@ -638,6 +638,13 @@ mod tests {
     }
 
     #[test]
+    fn instance_query_uses_the_openmodelica_scripting_namespace() {
+        let script = instance_script("Modelica.Blocks.Examples.BouncingBall", &[], None).unwrap();
+        assert!(script.contains("OpenModelica.Scripting.getModelInstance("));
+        assert!(script.contains("prettyPrint=true"));
+    }
+
+    #[test]
     fn sections_keep_inner_text_verbatim() {
         let s = parse_sections("x\nOMOLA_BEGIN info\n<p>Error: a\n\"b\"</p>\nOMOLA_END info\nOMOLA_BEGIN comment\n\nOMOLA_END comment\n");
         assert_eq!(s["info"], "<p>Error: a\n\"b\"</p>");
@@ -649,7 +656,7 @@ mod tests {
         let script = icon_script("Modelica.Blocks.Continuous.FirstOrder", &[msl()], None).unwrap();
         assert!(script.contains("loadModel(Modelica, {\"4.1.0\"})"));
         assert!(script.contains(
-            "getModelInstanceAnnotation(Modelica.Blocks.Continuous.FirstOrder, {\"Icon\"})"
+            "OpenModelica.Scripting.getModelInstanceAnnotation(Modelica.Blocks.Continuous.FirstOrder, {\"Icon\"})"
         ));
         assert!(script.contains("OMOLA_BEGIN icon"));
         // The user file is loaded after the libraries, like the other scripts.
