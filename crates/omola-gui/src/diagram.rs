@@ -224,6 +224,11 @@ pub fn parse_diagram(
             if element.get("$kind").and_then(|k| k.as_str()) != Some("component") {
                 continue;
             }
+            // Instance JSON also includes parameters and other scalar components. Only
+            // elements with a Diagram Placement annotation belong in this view.
+            if !has_placement_annotation(element) {
+                continue;
+            }
             let name = element
                 .get("name")
                 .and_then(|n| n.as_str())
@@ -332,6 +337,13 @@ pub fn parse_diagram(
     }
 
     Ok(diagram)
+}
+
+pub fn has_placement_annotation(element: &Value) -> bool {
+    element
+        .get("annotation")
+        .and_then(|annotation| annotation.get("Placement"))
+        .is_some()
 }
 
 fn collect_connector_pins(class: &Value, pins: &mut Vec<ConnectorPin>) {
@@ -860,7 +872,7 @@ mod tests {
             serde_json::from_str(include_str!("../tests/fixtures/instance_cauer.json")).unwrap();
         let icons = BTreeMap::new();
         let d = parse_diagram(&json, &icons).unwrap();
-        assert_eq!(d.components.len(), 18);
+        assert_eq!(d.components.len(), 11);
         assert!(d.components.iter().any(|c| c.name == "R1"));
         assert_eq!(d.connections.len(), 16);
         assert!(d
@@ -878,7 +890,7 @@ mod tests {
             serde_json::from_str(include_str!("../tests/fixtures/instance_pid.json")).unwrap();
         let icons = BTreeMap::new();
         let d = parse_diagram(&json, &icons).unwrap();
-        assert_eq!(d.components.len(), 10);
+        assert_eq!(d.components.len(), 9);
         assert_eq!(d.connections.len(), 9);
         assert!(!d.own_graphics.is_empty());
         assert_eq!(d.coordinate_extent.x1, -100.0);
@@ -891,15 +903,17 @@ mod tests {
             "../tests/fixtures/instance_MSLFirstOrder.json"
         ))
         .unwrap();
-        let d = parse_diagram(&json, &BTreeMap::new()).unwrap();
-        let component = d
-            .components
+        let mut connectors = Vec::new();
+        let first_order = json["elements"]
+            .as_array()
+            .unwrap()
             .iter()
-            .find(|c| c.connectors.iter().any(|p| p.name == "u"))
+            .find(|element| element["name"] == "plant")
             .unwrap();
-        assert!(component.connectors.iter().any(|p| p.name == "u"));
-        assert!(component.connectors.iter().any(|p| p.name == "y"));
-        let u = component.connectors.iter().find(|p| p.name == "u").unwrap();
+        collect_connector_pins(&first_order["type"], &mut connectors);
+        assert!(connectors.iter().any(|p| p.name == "u"));
+        assert!(connectors.iter().any(|p| p.name == "y"));
+        let u = connectors.iter().find(|p| p.name == "u").unwrap();
         assert_eq!(
             (u.extent.x1, u.extent.y1, u.extent.x2, u.extent.y2),
             (-140.0, -20.0, -100.0, 20.0)
@@ -1015,6 +1029,11 @@ mod tests {
                             }
                         }
                     }
+                },
+                {
+                    "$kind": "component",
+                    "name": "gravity",
+                    "typeName": "Modelica.Units.SI.Acceleration"
                 }
             ],
             "connections": [
