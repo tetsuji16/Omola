@@ -163,6 +163,7 @@ fn paint_graphics(
     place: &dyn Fn([f64; 2], &Graphic) -> [f64; 2],
     component_name: &str,
     type_name: &str,
+    max_text_width: Option<f32>,
 ) {
     let scale = scale_of(extent, rect, zoom);
     for g in graphics {
@@ -256,7 +257,15 @@ fn paint_graphics(
                 if label.trim().is_empty() {
                     continue;
                 }
-                let size = (br.height() * 0.9).clamp(8.0, 48.0);
+                let mut size = (br.height() * 0.9).clamp(8.0, 48.0);
+                let width = br.width().min(max_text_width.unwrap_or(br.width()));
+                let measured = painter
+                    .layout_no_wrap(label.clone(), FontId::proportional(size), col(*tc))
+                    .size()
+                    .x;
+                if measured > width && measured > 0.0 {
+                    size = (size * width / measured).max(6.0);
+                }
                 painter.text(
                     br.center(),
                     Align2::CENTER_CENTER,
@@ -281,6 +290,7 @@ pub fn paint_diagram(painter: &Painter, rect: Rect, diagram: &Diagram, zoom: f32
         &|p, g| crate::graphics::transform(p, g.origin, g.rotation_deg),
         "",
         "",
+        None,
     );
     for conn in &diagram.connections {
         let pts: Vec<Pos2> = conn
@@ -302,6 +312,7 @@ pub fn paint_diagram(painter: &Painter, rect: Rect, diagram: &Diagram, zoom: f32
         if let Some(icon) = &comp.icon {
             let icon_extent = icon.coordinate_extent;
             let placement = &comp.placement;
+            let component_rect = bounds_screen_rect(placement, extent, rect, zoom, pan);
             paint_graphics(
                 painter,
                 &icon.graphics,
@@ -312,6 +323,7 @@ pub fn paint_diagram(painter: &Painter, rect: Rect, diagram: &Diagram, zoom: f32
                 &|p, _g| placement_transform(p, &icon_extent, placement),
                 &comp.name,
                 &comp.type_name,
+                Some(component_rect.width()),
             );
         } else {
             // No icon: the placement box is all there is to draw. It already includes the

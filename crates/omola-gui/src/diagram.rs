@@ -4,9 +4,8 @@
 //! `getModelInstanceAnnotation(..., {"Icon"})` for each component type.
 //!
 //! Placement coordinate transform follows Modelica 3.6 section 18.6.1:
-//! `p' = R(rotation) * scale * p + origin`, where `scale` maps the icon's
-//! `extent` rectangle to the placement's `extent` rectangle (handling flip via
-//! `extent.x1 > extent.x2` or `extent.y1 > extent.y2`).
+//! `p' = origin + center(placement.extent) + R(rotation) * scale *
+//! (p - center(icon.extent))`, mapping the icon extent onto its diagram placement.
 
 use crate::graphics::{Extent, Graphic, Icon, Shape, Style};
 use serde_json::Value;
@@ -346,6 +345,34 @@ pub fn has_placement_annotation(element: &Value) -> bool {
         .is_some()
 }
 
+/// Collect the class names needed for icon queries from placed model components.
+/// OpenModelica 1.27.1 reports the class under `type.name`; older instance JSON may
+/// provide the same name through `typeName` instead.
+pub fn placed_component_types(instance: &Value) -> std::collections::BTreeSet<String> {
+    instance
+        .get("elements")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|element| {
+            element.get("$kind").and_then(Value::as_str) == Some("component")
+                && has_placement_annotation(element)
+        })
+        .filter_map(|element| {
+            element
+                .get("typeName")
+                .and_then(Value::as_str)
+                .or_else(|| {
+                    element
+                        .get("type")
+                        .and_then(|t| t.get("name"))
+                        .and_then(Value::as_str)
+                })
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
 fn collect_connector_pins(class: &Value, pins: &mut Vec<ConnectorPin>) {
     let Some(elements) = class.get("elements").and_then(Value::as_array) else {
         return;
@@ -405,7 +432,7 @@ fn parse_placement(annotation: &Value) -> Placement {
 ///
 /// Modelica 3.6 section 18.6.1 formula:
 /// ```
-/// p_diagram = R(rotation) * S * p_icon + origin
+/// p_diagram = origin + center(placement.extent) + R(rotation) * S * (p_icon - center(icon.extent))
 /// ```
 /// where `S` is the scaling matrix that maps the icon's extent to the placement's extent:
 /// ```
@@ -421,24 +448,37 @@ pub fn placement_transform(
 ) -> [f64; 2] {
     let icon_w = icon_extent.x2 - icon_extent.x1;
     let icon_h = icon_extent.y2 - icon_extent.y1;
+    let placement_center = [
+        (placement.extent.x1 + placement.extent.x2) / 2.0,
+        (placement.extent.y1 + placement.extent.y2) / 2.0,
+    ];
     if icon_w.abs() < 1e-9 || icon_h.abs() < 1e-9 {
-        return placement.origin;
+        return [
+            placement.origin[0] + placement_center[0],
+            placement.origin[1] + placement_center[1],
+        ];
     }
     let sx = (placement.extent.x2 - placement.extent.x1) / icon_w;
     let sy = (placement.extent.y2 - placement.extent.y1) / icon_h;
-    let scaled = [p_icon[0] * sx, p_icon[1] * sy];
+    let icon_center = [
+        (icon_extent.x1 + icon_extent.x2) / 2.0,
+        (icon_extent.y1 + icon_extent.y2) / 2.0,
+    ];
+    let scaled = [
+        (p_icon[0] - icon_center[0]) * sx,
+        (p_icon[1] - icon_center[1]) * sy,
+    ];
     let (sin, cos) = placement.rotation_deg.to_radians().sin_cos();
-    let rx = cos * scaled[0] - sin * scaled[1] + placement.origin[0];
-    let ry = sin * scaled[0] + cos * scaled[1] + placement.origin[1];
+    let rx = cos * scaled[0] - sin * scaled[1] + placement.origin[0] + placement_center[0];
+    let ry = sin * scaled[0] + cos * scaled[1] + placement.origin[1] + placement_center[1];
     [rx, ry]
 }
 
 /// Bounding box of a placed component in diagram coordinates.
 ///
-/// Modelica 3.6 §18.6.1.1 maps an icon point to `origin + R * S * p_icon`, where `S`
-/// takes the icon extent onto the placement extent. The four corners of the placement
-/// extent therefore land on `origin + R * corner`; their axis-aligned box is the area the
-/// view has to draw, hit-test and put the label under.
+/// Modelica 3.6 §18.6.1.1 maps the centered icon extent onto the placement extent and adds
+/// `origin`. The four corners therefore land on `origin + R * corner`; their axis-aligned
+/// box is the area the view has to draw, hit-test and put the label under.
 ///
 /// This is also what makes an omitted `origin` behave: the specification says it defaults
 /// to `{0, 0}` and the `extent` is then already in the parent's coordinates, so the box is
@@ -454,9 +494,18 @@ pub fn component_bounds(placement: &Placement) -> Extent {
     let mut y1 = f64::INFINITY;
     let mut x2 = f64::NEG_INFINITY;
     let mut y2 = f64::NEG_INFINITY;
+    let (sin, cos) = placement.rotation_deg.to_radians().sin_cos();
+    let center = [
+        (placement.extent.x1 + placement.extent.x2) / 2.0,
+        (placement.extent.y1 + placement.extent.y2) / 2.0,
+    ];
     for corner in corners {
-        // `S` is the identity here: the placement extent is mapped onto itself.
-        let q = placement_transform(corner, &placement.extent, placement);
+        let dx = corner[0] - center[0];
+        let dy = corner[1] - center[1];
+        let q = [
+            placement.origin[0] + center[0] + cos * dx - sin * dy,
+            placement.origin[1] + center[1] + sin * dx + cos * dy,
+        ];
         x1 = x1.min(q[0]);
         y1 = y1.min(q[1]);
         x2 = x2.max(q[0]);
@@ -674,6 +723,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn placed_component_types_support_openmodelica_type_name_shape() {
+        let value = serde_json::json!({
+            "elements": [
+                {"$kind":"component", "name":"newOmc", "type":{"name":"Modelica.Blocks.Sources.Sine"}, "annotation":{"Placement":{}}},
+                {"$kind":"component", "name":"legacy", "typeName":"Modelica.Blocks.Math.Gain", "annotation":{"Placement":{}}},
+                {"$kind":"component", "name":"parameter", "type":{"name":"Modelica.Units.SI.Time"}},
+                {"$kind":"extends", "name":"base", "type":{"name":"Modelica.Blocks.Icons.Block"}, "annotation":{"Placement":{}}}
+            ]
+        });
+
+        assert_eq!(
+            placed_component_types(&value),
+            [
+                "Modelica.Blocks.Math.Gain".to_owned(),
+                "Modelica.Blocks.Sources.Sine".to_owned()
+            ]
+            .into_iter()
+            .collect()
+        );
+    }
+
+    #[test]
     fn delete_ops_remove_only_component_connections_before_component() {
         let d = Diagram {
             connections: vec![
@@ -740,6 +811,21 @@ mod tests {
             (p[0] - 50.0).abs() < 1e-9 && (p[1] + 20.0).abs() < 1e-9,
             "{p:?}"
         );
+    }
+
+    #[test]
+    fn placement_transform_maps_icon_center_to_offset_placement_center() {
+        let placement = Placement {
+            extent: Extent {
+                x1: -56.0,
+                y1: -20.0,
+                x2: -36.0,
+                y2: 0.0,
+            },
+            ..Default::default()
+        };
+        let center = placement_transform([0.0, 0.0], &Extent::DEFAULT, &placement);
+        assert_eq!(center, [-46.0, -10.0]);
     }
 
     #[test]
@@ -863,7 +949,7 @@ mod tests {
             origin: [100.0, 0.0],
             rotation_deg: 90.0,
         };
-        assert_bounds(&placement, (80.0, 0.0, 100.0, 10.0));
+        assert_bounds(&placement, (95.0, 5.0, 115.0, 15.0));
     }
 
     #[test]

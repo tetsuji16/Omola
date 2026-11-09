@@ -612,19 +612,7 @@ fn run_job(
             };
 
             // Collect all component types that need icons
-            let mut component_types = std::collections::BTreeSet::new();
-            if let Some(elements) = instance_value.get("elements").and_then(|e| e.as_array()) {
-                for element in elements {
-                    if element.get("$kind").and_then(|k| k.as_str()) == Some("component") {
-                        if !crate::diagram::has_placement_annotation(element) {
-                            continue;
-                        }
-                        if let Some(type_name) = element.get("typeName").and_then(|n| n.as_str()) {
-                            component_types.insert(type_name.to_owned());
-                        }
-                    }
-                }
-            }
+            let component_types = crate::diagram::placed_component_types(&instance_value);
 
             // Load icons for all component types
             let mut icons = std::collections::BTreeMap::new();
