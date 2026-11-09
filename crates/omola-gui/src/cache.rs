@@ -132,11 +132,11 @@ pub fn load(root: &Path, spec: &LibrarySpec) -> Option<LoadedLibrary> {
     if cached.classes.is_empty() {
         return None;
     }
-    Some(LoadedLibrary {
-        spec: spec.clone(),
-        version: cached.version,
-        source_file: cached.source_file,
-        classes: cached
+    Some(LoadedLibrary::new(
+        spec.clone(),
+        cached.version,
+        cached.source_file,
+        cached
             .classes
             .into_iter()
             .map(|c| ClassEntry {
@@ -145,7 +145,7 @@ pub fn load(root: &Path, spec: &LibrarySpec) -> Option<LoadedLibrary> {
                 comment: c.comment,
             })
             .collect(),
-    })
+    ))
 }
 
 /// Write `lib` to the cache. Failures are reported to the caller but are never fatal:
@@ -211,11 +211,11 @@ mod tests {
     }
 
     fn library(source: PathBuf) -> LoadedLibrary {
-        LoadedLibrary {
-            spec: spec(),
-            version: "4.1.0".into(),
-            source_file: source,
-            classes: vec![
+        LoadedLibrary::new(
+            spec(),
+            "4.1.0".into(),
+            source,
+            vec![
                 ClassEntry {
                     qualified_name: "Modelica".into(),
                     restriction: "package".into(),
@@ -227,7 +227,7 @@ mod tests {
                     comment: String::new(),
                 },
             ],
-        }
+        )
     }
 
     #[test]
