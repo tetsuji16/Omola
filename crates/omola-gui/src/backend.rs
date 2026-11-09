@@ -94,7 +94,10 @@ mod edit_integration_test {
             }
             thread::sleep(Duration::from_millis(20));
         }
-        assert!(result.expect("edit result").unwrap().contains("connect(sine.y, firstOrder.u)"));
+        assert!(result
+            .expect("edit result")
+            .unwrap()
+            .contains("connect(sine.y, firstOrder.u)"));
         let _ = std::fs::remove_dir_all(root);
     }
 
