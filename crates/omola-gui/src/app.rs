@@ -208,6 +208,8 @@ pub struct OmolaApp {
     pub libraries: Vec<LibraryState>,
     pub expanded: BTreeSet<String>,
     pub package_filter: String,
+    /// Cached Package Browser matches for the normalized query.
+    pub package_search_cache: Option<(String, Vec<String>)>,
     /// Open model tabs (qualified class names) and the active one.
     pub model_tabs: Vec<String>,
     pub active: Option<String>,
@@ -346,6 +348,7 @@ impl OmolaApp {
             libraries: Vec::new(),
             expanded: BTreeSet::new(),
             package_filter: String::new(),
+            package_search_cache: None,
             model_tabs: Vec::new(),
             active: None,
             history: Vec::new(),
@@ -536,6 +539,104 @@ impl OmolaApp {
                 _ => None,
             })
             .unwrap_or_default()
+    }
+
+    /// Whether a class has direct children in the user outline or library index.
+    pub fn has_children_of(&self, class: &str) -> bool {
+        if self.is_user_class(class) {
+            return self
+                .user_classes
+                .iter()
+                .any(|c| library::parent_name(&c.qualified_name) == Some(class));
+        }
+        self.libraries.iter().any(|state| match state {
+            LibraryState::Loaded(lib)
+                if class.split('.').next() == Some(lib.spec.name.as_str()) =>
+            {
+                lib.has_children(class)
+            }
+            _ => false,
+        })
+    }
+
+    /// Direct child names for rendering an expanded Package Browser node.
+    pub fn child_names(&self, class: &str) -> Vec<&str> {
+        if self.is_user_class(class) {
+            return self
+                .user_classes
+                .iter()
+                .filter(|c| library::parent_name(&c.qualified_name) == Some(class))
+                .map(|c| c.qualified_name.as_str())
+                .collect();
+        }
+        self.libraries
+            .iter()
+            .find_map(|state| match state {
+                LibraryState::Loaded(lib)
+                    if class.split('.').next() == Some(lib.spec.name.as_str()) =>
+                {
+                    Some(
+                        lib.children_iter(class)
+                            .map(|c| c.qualified_name.as_str())
+                            .collect(),
+                    )
+                }
+                _ => None,
+            })
+            .unwrap_or_default()
+    }
+
+    /// Borrowed restriction and comment for a Package Browser class.
+    pub fn class_details(&self, class: &str) -> Option<(&str, &str)> {
+        if let Some(c) = self.user_classes.iter().find(|c| c.qualified_name == class) {
+            return Some((c.kind.as_str(), c.description.as_deref().unwrap_or("")));
+        }
+        self.libraries.iter().find_map(|state| match state {
+            LibraryState::Loaded(lib) => lib
+                .class(class)
+                .map(|c| (c.restriction.as_str(), c.comment.as_str())),
+            _ => None,
+        })
+    }
+
+    /// Compute normalized Package Browser search matches, capped with one sentinel row.
+    pub fn search_classes(&self, query: &str) -> Vec<String> {
+        let mut hits = Vec::new();
+        for c in &self.user_classes {
+            if c.qualified_name.to_lowercase().contains(query) {
+                hits.push(c.qualified_name.clone());
+                if hits.len() > 500 {
+                    return hits;
+                }
+            }
+        }
+        for state in &self.libraries {
+            if let LibraryState::Loaded(lib) = state {
+                for c in &lib.classes {
+                    if library::short_name(&c.qualified_name)
+                        .to_lowercase()
+                        .contains(query)
+                    {
+                        hits.push(c.qualified_name.clone());
+                        if hits.len() > 500 {
+                            return hits;
+                        }
+                    }
+                }
+            }
+        }
+        hits
+    }
+
+    pub fn update_package_search_cache(&mut self) {
+        let query = self.package_filter.trim().to_lowercase();
+        if self
+            .package_search_cache
+            .as_ref()
+            .is_none_or(|(cached, _)| cached != &query)
+        {
+            self.package_search_cache = Some((query.clone(), self.search_classes(&query)));
+        }
     }
 
     /// Show a class in the edit window (new tab if needed) and record history.
@@ -808,6 +909,7 @@ impl OmolaApp {
     }
 
     pub fn refresh_outline(&mut self) {
+        self.package_search_cache = None;
         self.user_classes.clear();
         self.user_class_doc.clear();
         for (i, doc) in self.documents.iter().enumerate() {
@@ -1071,6 +1173,7 @@ impl OmolaApp {
                 }
                 Event::Busy(busy) => self.busy = busy,
                 Event::LibraryLoaded(spec, result) => {
+                    self.package_search_cache = None;
                     let state = match result {
                         Ok(lib) => LibraryState::Loaded(lib),
                         Err(message) => LibraryState::Failed(spec.clone(), message),
@@ -1620,6 +1723,66 @@ mod tests {
             std::env::temp_dir().join("omola-gui-unused"),
             || {},
         ))
+    }
+
+    #[test]
+    fn package_browser_child_lookup_covers_user_and_library_classes() {
+        let mut app = app();
+        app.user_classes = vec![
+            UserClass {
+                kind: "package".into(),
+                qualified_name: "UserPkg".into(),
+                depth: 0,
+                description: None,
+            },
+            UserClass {
+                kind: "model".into(),
+                qualified_name: "UserPkg.Child".into(),
+                depth: 1,
+                description: None,
+            },
+        ];
+        assert!(app.has_children_of("UserPkg"));
+        let spec = LibrarySpec::new("Modelica", None);
+        app.libraries.push(LibraryState::Loaded(LoadedLibrary::new(
+            spec,
+            "4.1".into(),
+            PathBuf::new(),
+            vec![
+                crate::library::ClassEntry {
+                    qualified_name: "Modelica".into(),
+                    restriction: "package".into(),
+                    comment: String::new(),
+                },
+                crate::library::ClassEntry {
+                    qualified_name: "Modelica.Blocks".into(),
+                    restriction: "package".into(),
+                    comment: String::new(),
+                },
+            ],
+        )));
+        assert!(app.has_children_of("Modelica"));
+        assert!(!app.has_children_of("Modelica.Blocks"));
+    }
+
+    #[test]
+    fn package_search_cache_reuses_matches_and_caps_at_500() {
+        let mut app = app();
+        app.user_classes = (0..510)
+            .map(|i| UserClass {
+                kind: "model".into(),
+                qualified_name: format!("Search{i}"),
+                depth: 0,
+                description: None,
+            })
+            .collect();
+        app.package_filter = " Search ".into();
+        app.update_package_search_cache();
+        let first = app.package_search_cache.as_ref().unwrap().1.as_ptr();
+        assert_eq!(app.package_search_cache.as_ref().unwrap().0, "search");
+        assert_eq!(app.package_search_cache.as_ref().unwrap().1.len(), 501);
+        app.update_package_search_cache();
+        assert_eq!(app.package_search_cache.as_ref().unwrap().1.as_ptr(), first);
     }
 
     #[test]
