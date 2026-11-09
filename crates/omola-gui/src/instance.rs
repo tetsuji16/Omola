@@ -202,10 +202,14 @@ pub fn parameter_edits(
             let draft = draft.trim();
             match (row.current_value.as_deref(), draft.is_empty()) {
                 (None, true) => None,
-                (Some(_), true) => Some(crate::edit::EditOp::SetModifier {
-                    path: format!("{component}.{}", row.name),
-                    value: None,
-                }),
+                (Some(_), true) => {
+                    row.default_value
+                        .as_ref()
+                        .map(|default| crate::edit::EditOp::SetModifier {
+                            path: format!("{component}.{}", row.name),
+                            value: Some(default.clone()),
+                        })
+                }
                 (Some(current), false) if current == draft => None,
                 (_, false) => Some(crate::edit::EditOp::SetModifier {
                     path: format!("{component}.{}", row.name),
@@ -444,7 +448,7 @@ mod tests {
     }
 
     #[test]
-    fn parameter_edits_only_include_changes_and_clear_explicit_values() {
+    fn parameter_edits_only_include_changes_and_restore_defaults() {
         let rows = vec![
             ParamRow {
                 name: "k".into(),
@@ -468,7 +472,7 @@ mod tests {
         assert!(parameter_edits("plant", &rows, &[String::new(), "2".into()]).is_empty());
         let edits = parameter_edits("plant", &rows, &["3".into(), String::new()]);
         assert!(
-            matches!(edits.as_slice(), [crate::edit::EditOp::SetModifier { path, value: Some(v) }, crate::edit::EditOp::SetModifier { path: clear, value: None }] if path == "plant.k" && v == "3" && clear == "plant.T")
+            matches!(edits.as_slice(), [crate::edit::EditOp::SetModifier { path, value: Some(v) }, crate::edit::EditOp::SetModifier { path: reset, value: Some(default) }] if path == "plant.k" && v == "3" && reset == "plant.T" && default == "0.25")
         );
     }
 }

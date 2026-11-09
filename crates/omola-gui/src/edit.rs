@@ -163,7 +163,11 @@ pub fn edit_script(class: &str, ops: &[EditOp]) -> Result<String, String> {
                             "modifier value cannot contain semicolons, quotes, or newlines".into(),
                         )
                     }
-                    None => "$Code()".into(),
+                    None => {
+                        return Err(
+                            "clearing a modifier is unsupported; set the parameter's declared default explicitly".into(),
+                        )
+                    }
                 };
                 (
                     format!("setElementModifierValue({class}, {path}, {code})"),
@@ -216,10 +220,6 @@ mod tests {
                 path: "k.k".into(),
                 value: Some("2.5".into()),
             },
-            EditOp::SetModifier {
-                path: "k.k".into(),
-                value: None,
-            },
         ];
         let s = edit_script("Pkg.A", &ops).unwrap();
         for api in [
@@ -265,5 +265,18 @@ mod tests {
             }]
         )
         .is_err());
+    }
+
+    #[test]
+    fn rejects_modifier_removal_instead_of_emitting_invalid_omc_syntax() {
+        assert!(edit_script(
+            "A",
+            &[EditOp::SetModifier {
+                path: "plant.T".into(),
+                value: None,
+            }]
+        )
+        .unwrap_err()
+        .contains("declared default"));
     }
 }
