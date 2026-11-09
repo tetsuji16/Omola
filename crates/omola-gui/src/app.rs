@@ -138,6 +138,23 @@ pub struct ResultRun {
     pub outcome: SimulationOutcome,
 }
 
+/// Cached Variable Browser model for a result and its current filters.
+pub struct VarTreeCache {
+    pub key: VarTreeKey,
+    pub tree: crate::var_tree::VarNode,
+    /// Matching variable indices when the text filter is active.
+    pub flat: Vec<usize>,
+    pub(crate) generation: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VarTreeKey {
+    pub run_id: u64,
+    pub filter: String,
+    pub show_parameters: bool,
+    pub show_time_varying: bool,
+}
+
 /// A curve in the plot window: (run id, variable name).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlotSignal {
@@ -252,6 +269,7 @@ pub struct OmolaApp {
     pub next_run_id: u64,
     pub keep_results: usize,
     pub variable_filter: String,
+    pub var_tree_cache: BTreeMap<u64, VarTreeCache>,
     /// Time shown in the Value column; `None` = the last sample of the newest result.
     pub variable_time: Option<f64>,
     /// Explicit expand/collapse state of the Variable Browser tree, keyed by
@@ -377,6 +395,7 @@ impl OmolaApp {
             next_run_id: 1,
             keep_results: 2,
             variable_filter: String::new(),
+            var_tree_cache: BTreeMap::new(),
             variable_time: None,
             variable_expanded: BTreeMap::new(),
             variable_show_parameters: true,
@@ -1321,6 +1340,7 @@ impl OmolaApp {
         self.runs.push(ResultRun { id, label, outcome });
         while self.runs.len() > self.keep_results.max(1) {
             let removed = self.runs.remove(0);
+            self.var_tree_cache.remove(&removed.id);
             for diagram in &mut self.diagrams {
                 diagram.signals.retain(|s| s.run_id != removed.id);
             }
@@ -1329,6 +1349,69 @@ impl OmolaApp {
         self.variable_time = None;
         self.tab = RibbonTab::Simulation;
         self.log_tab = LogTab::Simulation;
+    }
+
+    /// Return the cached variable tree, rebuilding it only when its inputs change.
+    pub fn var_tree_for(&mut self, run_id: u64) -> &VarTreeCache {
+        let key = VarTreeKey {
+            run_id,
+            filter: self.variable_filter.to_lowercase(),
+            show_parameters: self.variable_show_parameters,
+            show_time_varying: self.variable_show_time_varying,
+        };
+        let current_generation = self
+            .var_tree_cache
+            .get(&run_id)
+            .map_or(0, |cache| cache.generation);
+        if self
+            .var_tree_cache
+            .get(&run_id)
+            .is_none_or(|cache| cache.key != key)
+        {
+            let run = self
+                .runs
+                .iter()
+                .find(|run| run.id == run_id)
+                .expect("Variable Browser run id must exist");
+            let vars = &run.outcome.result.variables;
+            let mut names = Vec::new();
+            let mut flat = Vec::new();
+            for i in crate::ui::browsers::variable_order(self, run) {
+                let var = &vars[i];
+                if var.name == "time" {
+                    continue;
+                }
+                if (var.is_parameter && !key.show_parameters)
+                    || (!var.is_parameter && !key.show_time_varying)
+                {
+                    continue;
+                }
+                if !key.filter.is_empty() && !var.name.to_lowercase().contains(&key.filter) {
+                    continue;
+                }
+                names.push((i, var.name.as_str()));
+                if !key.filter.is_empty() {
+                    flat.push(i);
+                }
+            }
+            let tree = if key.filter.is_empty() {
+                crate::var_tree::build_variable_tree(&names)
+            } else {
+                crate::var_tree::VarNode::default()
+            };
+            self.var_tree_cache.insert(
+                run_id,
+                VarTreeCache {
+                    key,
+                    tree,
+                    flat,
+                    generation: current_generation + 1,
+                },
+            );
+        }
+        self.var_tree_cache
+            .get(&run_id)
+            .expect("cache inserted for existing run")
     }
 
     pub fn run(&self, id: u64) -> Option<&ResultRun> {
@@ -1723,6 +1806,62 @@ mod tests {
             std::env::temp_dir().join("omola-gui-unused"),
             || {},
         ))
+    }
+
+    #[test]
+    fn variable_tree_cache_reuses_entries_and_tracks_filter_toggles() {
+        let mut app = app();
+        let mut run = outcome("BouncingBall");
+        run.result
+            .variables
+            .extend(
+                ["der(w)", "inertia1.w"]
+                    .into_iter()
+                    .map(|name| ResultVariable {
+                        name: name.into(),
+                        description: String::new(),
+                        is_parameter: false,
+                    }),
+            );
+        app.add_run(run);
+        let id = app.runs[0].id;
+
+        let first = app.var_tree_for(id).generation;
+        assert_eq!(app.var_tree_for(id).generation, first);
+
+        app.variable_filter = "w".into();
+        let filtered_indices = {
+            let filtered = app.var_tree_for(id);
+            assert_eq!(filtered.generation, first + 1);
+            filtered.flat.clone()
+        };
+        let matched: Vec<_> = filtered_indices
+            .iter()
+            .map(|&i| {
+                app.run(id).unwrap().outcome.result.variables[i]
+                    .name
+                    .as_str()
+            })
+            .collect();
+        assert!(matched.contains(&"der(w)"));
+        assert!(matched.contains(&"inertia1.w"));
+
+        app.variable_show_parameters = false;
+        let no_parameters = app.var_tree_for(id).generation;
+        assert_eq!(no_parameters, first + 2);
+        app.variable_show_time_varying = false;
+        assert_eq!(app.var_tree_for(id).generation, first + 3);
+    }
+
+    #[test]
+    fn evicting_a_result_removes_its_variable_tree_cache() {
+        let mut app = app();
+        app.keep_results = 1;
+        app.add_run(outcome("First"));
+        let removed_id = app.runs[0].id;
+        app.var_tree_for(removed_id);
+        app.add_run(outcome("Second"));
+        assert!(!app.var_tree_cache.contains_key(&removed_id));
     }
 
     #[test]

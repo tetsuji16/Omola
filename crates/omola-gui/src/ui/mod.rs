@@ -9,7 +9,7 @@
 //! - `widgets.rs`: ribbon buttons and other small widgets
 
 mod bottom;
-mod browsers;
+pub(crate) mod browsers;
 mod chrome;
 mod dialogs;
 mod doc_view;
