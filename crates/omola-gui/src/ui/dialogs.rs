@@ -68,7 +68,12 @@ impl OmolaApp {
                                                 ),
                                         );
                                         if response.changed() {
-                                            value.retain(|c| c != ';' && c != '\n' && c != '\r');
+                                            let string_parameter = row.type_name == "String";
+                                            value.retain(|c| {
+                                                c != '\n'
+                                                    && c != '\r'
+                                                    && (string_parameter || c != ';')
+                                            });
                                         }
                                     } else {
                                         let selected = if value.is_empty() {
