@@ -26,6 +26,9 @@ pub struct Document {
     pub path: Option<PathBuf>,
     pub text: String,
     pub dirty: bool,
+    /// Whole-text snapshots used by graphical editing history (oldest first).
+    pub undo: Vec<String>,
+    pub redo: Vec<String>,
     /// Editor state (cursor position, selection, syntax highlighting, etc.).
     pub editor: EditorState,
 }
@@ -36,6 +39,8 @@ impl Document {
             path: None,
             text: text.into(),
             dirty: false,
+            undo: Vec::new(),
+            redo: Vec::new(),
             editor: EditorState::new(),
         }
     }
@@ -46,6 +51,8 @@ impl Document {
             path: Some(path),
             text,
             dirty: false,
+            undo: Vec::new(),
+            redo: Vec::new(),
             editor: EditorState::new(),
         })
     }

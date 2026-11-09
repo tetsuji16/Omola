@@ -380,8 +380,12 @@ impl OmolaApp {
         });
         group(ui, "History", |ui| {
             column(ui, |ui| {
-                small_button(ui, ICON_UNDO, DARK, "Undo", false, false);
-                small_button(ui, ICON_REDO, DARK, "Redo", false, false);
+                if small_button(ui, ICON_UNDO, DARK, "Undo", self.can_undo(), false).clicked() {
+                    self.undo();
+                }
+                if small_button(ui, ICON_REDO, DARK, "Redo", self.can_redo(), false).clicked() {
+                    self.redo();
+                }
             });
         });
         let delete_enabled = self
