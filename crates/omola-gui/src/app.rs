@@ -8,6 +8,7 @@
 use crate::backend::{
     ClassContext, Event, Job, LogLevel, LogTab, SimulationOutcome, SimulationSetup, Worker,
 };
+use crate::diagram::Placement;
 use crate::edit::EditOp;
 use crate::html::{self, Block};
 use crate::library::{self, ClassDoc, LibrarySpec, LoadedLibrary};
@@ -322,6 +323,15 @@ pub struct OmolaApp {
     pub omc_hint_shown: bool,
     pub frame_stats: crate::perf::FrameStats,
     pub pending_edit: Option<String>,
+    pub diagram_drag: Option<DiagramDrag>,
+    pub pending_placement: Option<(String, Placement)>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DiagramDrag {
+    pub component: String,
+    pub start: [f64; 2],
+    pub offset: [f64; 2],
 }
 
 /// Shown once when no OpenModelica compiler is found.
@@ -434,6 +444,8 @@ impl OmolaApp {
             omc_hint_shown: false,
             frame_stats: crate::perf::FrameStats::disabled(),
             pending_edit: None,
+            diagram_drag: None,
+            pending_placement: None,
         }
     }
 
@@ -1343,6 +1355,7 @@ impl OmolaApp {
                 }
                 Event::ModelEdited { class, result } => {
                     self.pending_edit = None;
+                    self.pending_placement = None;
                     match result {
                         Ok(source) => {
                             if let Some(doc) = self.doc_of(&class) {

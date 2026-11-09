@@ -4,7 +4,7 @@ use super::widgets::{flat_tab, paint_icon};
 use crate::app::{Layer, Loadable, OmolaApp, PlotSignal};
 use crate::text_editor::{draw_text_editor, lines_for_file};
 use crate::theme;
-use egui::{Align2, Color32, FontId, RichText, Sense, Stroke, Vec2};
+use egui::{Align2, Color32, FontId, Rect, RichText, Sense, Stroke, Vec2};
 use egui_material_icons::icons::*;
 
 /// Curve colours in plot order.
@@ -227,7 +227,7 @@ impl OmolaApp {
         }
     }
 
-    /// Graphics tab > Diagram: read-only placement + connections (G12).
+    /// Graphics tab > Diagram: selectable and movable model components (G29).
     fn diagram_layer(&mut self, ui: &mut egui::Ui, class: &str) {
         self.request_diagram(class);
         // Toolbar
@@ -252,7 +252,7 @@ impl OmolaApp {
         if scroll != 1.0 && scroll > 0.0 {
             self.diagram_zoom = (self.diagram_zoom * scroll).clamp(0.1, 20.0);
         }
-        // pan with middle/right drag or left drag with shift
+        // Pan with middle/right drag. Primary drag is reserved for component movement.
         if response.dragged() {
             let secondary = ui.input(|i| i.pointer.secondary_down() || i.pointer.middle_down());
             if secondary {
@@ -292,31 +292,208 @@ impl OmolaApp {
                 return;
             }
         };
+        let user_class = self.is_user_class(class);
+        let mut draw_diagram = diagram.clone();
+        if let Some((component, placement)) = &self.pending_placement {
+            if let Some(comp) = draw_diagram
+                .components
+                .iter_mut()
+                .find(|c| &c.name == component)
+            {
+                comp.placement = placement.clone();
+            }
+        }
+        if let Some(drag) = &self.diagram_drag {
+            if let Some(comp) = draw_diagram
+                .components
+                .iter_mut()
+                .find(|c| c.name == drag.component)
+            {
+                comp.placement.origin[0] += drag.offset[0];
+                comp.placement.origin[1] += drag.offset[1];
+            }
+        }
+        let primary_drag_started = (response.drag_started() || response.dragged())
+            && ui.input(|i| {
+                i.pointer.button_down(egui::PointerButton::Primary)
+                    || i.pointer.button_pressed(egui::PointerButton::Primary)
+                    || i.pointer.button_released(egui::PointerButton::Primary)
+            });
+        if primary_drag_started {
+            let press_origin = ui.input(|i| i.pointer.press_origin());
+            if let Some(pos) = press_origin.or_else(|| response.interact_pointer_pos()) {
+                let point = crate::diagram_view::to_diagram(
+                    pos,
+                    &diagram.coordinate_extent,
+                    rect,
+                    self.diagram_zoom,
+                    self.diagram_pan,
+                );
+                if let Some(i) = crate::diagram_view::hit_component(&diagram, point) {
+                    let name = diagram.components[i].name.clone();
+                    self.selected_component = Some(name.clone());
+                    self.component_expanded.insert(name.clone());
+                    if user_class {
+                        self.diagram_drag = Some(crate::app::DiagramDrag {
+                            component: name,
+                            start: point,
+                            offset: [0.0, 0.0],
+                        });
+                    }
+                } else {
+                    self.selected_component = None;
+                }
+            }
+        }
+        if response.dragged_by(egui::PointerButton::Primary) {
+            if let (Some(drag), Some(pos)) =
+                (&mut self.diagram_drag, response.interact_pointer_pos())
+            {
+                let current = crate::diagram_view::to_diagram(
+                    pos,
+                    &diagram.coordinate_extent,
+                    rect,
+                    self.diagram_zoom,
+                    self.diagram_pan,
+                );
+                drag.offset = [current[0] - drag.start[0], current[1] - drag.start[1]];
+            }
+        }
+        if response.drag_stopped_by(egui::PointerButton::Primary) {
+            if let Some(drag) = self.diagram_drag.take() {
+                let final_offset = response
+                    .hover_pos()
+                    .map(|pos| {
+                        let current = crate::diagram_view::to_diagram(
+                            pos,
+                            &diagram.coordinate_extent,
+                            rect,
+                            self.diagram_zoom,
+                            self.diagram_pan,
+                        );
+                        [current[0] - drag.start[0], current[1] - drag.start[1]]
+                    })
+                    .unwrap_or(drag.offset);
+                if final_offset != [0.0, 0.0] {
+                    if let Some(comp) = diagram.components.iter().find(|c| c.name == drag.component)
+                    {
+                        let shift = ui.input(|i| i.modifiers.shift);
+                        let delta = if shift {
+                            final_offset
+                        } else {
+                            [
+                                crate::diagram_view::snap(final_offset[0], 2.0),
+                                crate::diagram_view::snap(final_offset[1], 2.0),
+                            ]
+                        };
+                        if delta != [0.0, 0.0] && self.pending_edit.is_none() {
+                            let (placement, op) =
+                                crate::diagram_view::placement_edit(comp, delta, 0.0);
+                            self.pending_placement = Some((comp.name.clone(), placement.clone()));
+                            self.apply_edit(class, vec![op]);
+                        }
+                    }
+                }
+            }
+        }
+        // Single-step keyboard transforms on a hovered canvas.
+        if response.hovered() {
+            let selected = self.selected_component.clone();
+            let movement = ui.input(|i| {
+                if i.key_pressed(egui::Key::ArrowUp) {
+                    Some([0.0, 2.0])
+                } else if i.key_pressed(egui::Key::ArrowDown) {
+                    Some([0.0, -2.0])
+                } else if i.key_pressed(egui::Key::ArrowLeft) {
+                    Some([-2.0, 0.0])
+                } else if i.key_pressed(egui::Key::ArrowRight) {
+                    Some([2.0, 0.0])
+                } else {
+                    None
+                }
+            });
+            let rotate = ui.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::R));
+            if let Some(name) = selected {
+                if user_class && self.pending_edit.is_none() {
+                    if let Some(comp) = diagram.components.iter().find(|c| c.name == name) {
+                        if movement.is_some() || rotate {
+                            let (p, op) = crate::diagram_view::placement_edit(
+                                comp,
+                                movement.unwrap_or([0.0, 0.0]),
+                                if rotate { 90.0 } else { 0.0 },
+                            );
+                            self.pending_placement = Some((name, p));
+                            self.apply_edit(class, vec![op]);
+                        }
+                    }
+                }
+            }
+        }
         crate::diagram_view::paint_diagram(
             &painter,
             rect,
-            &diagram,
+            &draw_diagram,
             self.diagram_zoom,
             self.diagram_pan,
         );
-        // Hover / click on components
-        if let Some(pos) = response.hover_pos() {
-            for comp in &diagram.components {
-                let cr = crate::diagram_view::component_screen_rect(
-                    &diagram,
+        // Selection outline and four grab handles.
+        if let Some(name) = self.selected_component.as_deref() {
+            if let Some(comp) = draw_diagram.components.iter().find(|c| c.name == name) {
+                let r = crate::diagram_view::component_screen_rect(
+                    &draw_diagram,
                     rect,
                     self.diagram_zoom,
                     self.diagram_pan,
                     comp,
                 );
-                if cr.contains(pos) {
-                    if response.clicked() {
-                        self.selected_component = Some(comp.name.clone());
-                        self.component_expanded.insert(comp.name.clone());
-                    }
-                    response.on_hover_text(format!("{} : {}", comp.name, comp.type_name));
-                    break;
+                let color = theme::ACCENT;
+                let points = [
+                    r.left_top(),
+                    r.right_top(),
+                    r.right_bottom(),
+                    r.left_bottom(),
+                ];
+                for i in 0..4 {
+                    painter.add(egui::Shape::Vec(egui::Shape::dashed_line(
+                        &[points[i], points[(i + 1) % 4]],
+                        Stroke::new(1.0, color),
+                        4.0,
+                        3.0,
+                    )));
                 }
+                for p in points {
+                    painter.rect_filled(Rect::from_center_size(p, Vec2::splat(6.0)), 0.0, color);
+                }
+            }
+        }
+        // Hover / click on components. Component Browser selection stays synchronized.
+        if let Some(pos) = response.hover_pos() {
+            let point = crate::diagram_view::to_diagram(
+                pos,
+                &diagram.coordinate_extent,
+                rect,
+                self.diagram_zoom,
+                self.diagram_pan,
+            );
+            if let Some(i) = crate::diagram_view::hit_component(&diagram, point) {
+                let comp = &diagram.components[i];
+                response.clone().on_hover_text(if user_class {
+                    format!("{} : {}", comp.name, comp.type_name)
+                } else {
+                    format!("{} : {} (read-only)", comp.name, comp.type_name)
+                });
+                if response.clicked_by(egui::PointerButton::Primary) {
+                    self.selected_component = Some(comp.name.clone());
+                    self.component_expanded.insert(comp.name.clone());
+                }
+            } else if response.clicked_by(egui::PointerButton::Primary) {
+                self.selected_component = None;
+            }
+            if !user_class
+                && response.drag_started_by(egui::PointerButton::Primary)
+                && crate::diagram_view::hit_component(&diagram, point).is_some()
+            {
+                self.info(crate::backend::LogTab::Syntax, "read-only".into());
             }
         }
     }
