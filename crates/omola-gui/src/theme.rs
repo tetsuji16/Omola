@@ -24,6 +24,13 @@ pub const LINK: Color32 = Color32::from_rgb(0x00, 0x33, 0xCC);
 pub const CONTEXT_TAB: Color32 = Color32::from_rgb(0x71, 0xBE, 0x59);
 pub const FILE_BLUE: Color32 = Color32::from_rgb(0x19, 0x79, 0xCA);
 pub const FIELD_BORDER: Color32 = Color32::from_rgb(0xBD, 0xBD, 0xBD);
+pub const MODEL_KEYWORD: Color32 = Color32::from_rgb(0, 0, 255);
+pub const MODEL_TYPE: Color32 = Color32::from_rgb(0, 128, 128);
+pub const MODEL_BUILTIN: Color32 = Color32::from_rgb(128, 0, 128);
+pub const MODEL_COMMENT: Color32 = Color32::from_rgb(0, 128, 0);
+pub const MODEL_STRING: Color32 = Color32::from_rgb(163, 21, 21);
+pub const MODEL_NUMBER: Color32 = Color32::from_rgb(9, 134, 88);
+pub const MODEL_PLAIN: Color32 = Color32::BLACK;
 
 /// Font family names used by the documentation renderer.
 pub const BOLD: &str = "omola-bold";

@@ -171,14 +171,26 @@ impl OmolaApp {
                 ui.label(RichText::new(e).color(theme::TEXT_WEAK));
             }
             Some(Loadable::Ready(text)) => {
+                let font = FontId::monospace(13.0);
+                let layout = self
+                    .library_text_layouts
+                    .entry(class.to_owned())
+                    .or_insert_with(|| crate::text_editor::highlight_job(text, &font))
+                    .clone();
                 let mut text = text.as_str();
                 egui::ScrollArea::both()
                     .id_salt(("lib_text", class))
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
+                        let mut layouter =
+                            |ui: &egui::Ui, _buffer: &dyn egui::TextBuffer, _wrap| {
+                                ui.ctx().fonts_mut(|fonts| fonts.layout_job(layout.clone()))
+                            };
                         ui.add(
                             egui::TextEdit::multiline(&mut text)
                                 .code_editor()
+                                .font(font)
+                                .layouter(&mut layouter)
                                 .frame(egui::Frame::NONE)
                                 .desired_width(f32::INFINITY),
                         );

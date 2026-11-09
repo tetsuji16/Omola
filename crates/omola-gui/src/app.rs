@@ -215,6 +215,8 @@ pub struct OmolaApp {
     pub history_pos: usize,
     pub docs: BTreeMap<String, Loadable<DocPage>>,
     pub texts: BTreeMap<String, Loadable<String>>,
+    /// Tokenized layout jobs for read-only library source text, keyed by class.
+    pub library_text_layouts: BTreeMap<String, egui::text::LayoutJob>,
     /// Component tree of the active class (`getModelInstance`, G06).
     pub components: Option<(String, Vec<crate::instance::ComponentNode>)>,
     /// Component nodes the user expanded, as dotted paths from the active class.
@@ -352,6 +354,7 @@ impl OmolaApp {
             history_pos: 0,
             docs: BTreeMap::new(),
             texts: BTreeMap::new(),
+            library_text_layouts: BTreeMap::new(),
             components: None,
             component_expanded: BTreeSet::new(),
             components_pending: None,
@@ -1102,6 +1105,7 @@ impl OmolaApp {
                     self.docs.insert(class, page);
                 }
                 Event::ClassText(class, result) => {
+                    self.library_text_layouts.remove(&class);
                     self.texts.insert(
                         class,
                         match result {

@@ -2,74 +2,13 @@
 //!
 //! The widget is an [`egui::TextEdit`] so that the cursor, selection, copy & paste, IME and
 //! undo/redo all come from egui. Syntax colouring is supplied through the `layouter` hook:
-//! a [`LayoutJob`] is rebuilt with `syntect` only when the text changes, and the result is
+//! a [`LayoutJob`] is rebuilt only when the text changes, and the result is
 //! cached in [`EditorState`]. Line numbers, the error marker and the F7/F8 jumps are drawn
 //! on top of the text.
 
 use egui::text::{CCursor, CCursorRange, LayoutJob, TextFormat};
 use egui::{Align, Align2, Color32, FontId, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
-use syntect::{
-    easy::HighlightLines,
-    highlighting::{FontStyle, Style, Theme, ThemeSet},
-    parsing::SyntaxSet,
-    util::LinesWithEndings,
-};
-
-/// Modelica syntax definition embedded as a `.sublime-syntax` compatible YAML.
-///
-/// `syntect`'s bundled set has neither Modelica nor Ada, so without this every `.mo` file
-/// would be highlighted as plain text.
-const MODELICA_SYNTAX: &str = r#"
-name: Modelica
-scope: source.modelica
-file_extensions:
-  - mo
-  - mos
-first_line_match: '(?i)^(model|package|block|connector|record|function|type|class)\b'
-contexts:
-  main:
-    - match: '(?i)^\s*(model|package|block|connector|record|function|type|class|operator|record|connector|package|model|block|function|type|class|operator)\b'
-      scope: keyword.definition.modelica
-    - match: '(?i)\b(if|then|else|elseif|elsif|end|for|while|when|do|loop|repeat|until|return|break|continue|else|elseif|elsif|then|end)\b'
-      scope: keyword.control.modelica
-    - match: '(?i)\b(and|or|not|xor)\b'
-      scope: keyword.operator.logical.modelica
-    - match: '(?i)\b(real|integer|boolean|string|enumeration|type|extends|redeclare|replaceable|const|parameter|input|output|protected|public|private|outer|inner|final|partial|encapsulated|discrete|time|initial|terminal|der|pre|edge|change|sample|reinit|delay|smooth|noEvent|smooth|inStream|actualStream|hold|spatialDistribution|getInstanceName)\b'
-      scope: storage.type.modelica
-    - match: '(?i)\b(import|within|annotation|equation|algorithm|initial equation|initial algorithm|external|function|operator record|operator connector|operator block|operator model|operator type|operator class|operator)\b'
-      scope: keyword.other.modelica
-    - match: '//.*$'
-      scope: comment.line.double-slash.modelica
-    - match: '/\*'
-      scope: punctuation.definition.comment.modelica
-      push:
-        - meta_scope: comment.block.modelica
-        - match: '\*/'
-          scope: punctuation.definition.comment.modelica
-          pop: true
-        - match: '[^*]'
-    - match: '"'
-      scope: punctuation.definition.string.begin.modelica
-      push:
-        - meta_scope: string.quoted.double.modelica
-        - match: '\\.'
-          scope: constant.character.escape.modelica
-        - match: '"'
-          scope: punctuation.definition.string.end.modelica
-          pop: true
-    - match: '\b([0-9]+\.[0-9]*([eE][+-]?[0-9]+)?|[0-9]+[eE][+-]?[0-9]+|[0-9]+\.[0-9]*|[0-9]+)\b'
-      scope: constant.numeric.modelica
-    - match: '\b(true|false)\b'
-      scope: constant.language.boolean.modelica
-    - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\s*(?=\()'
-      scope: entity.name.function.modelica
-    - match: '\b([a-zA-Z_][a-zA-Z0-9_]*)\b'
-      scope: variable.other.modelica
-    - match: '[:=<>+\-*/^.,;()\[\]{}]'
-      scope: punctuation.modelica
-"#;
 
 /// Font used by the editor.
 fn editor_font() -> FontId {
@@ -93,8 +32,6 @@ pub struct EditorState {
     pub show_line_numbers: bool,
     /// Text the cached layout job was built from.
     cache_text: String,
-    /// File the cached layout job was built for (the syntax depends on it).
-    cache_path: Option<PathBuf>,
     /// Cached syntax-highlighted layout of [`Self::cache_text`].
     cache_job: Option<LayoutJob>,
 }
@@ -108,89 +45,31 @@ impl EditorState {
     }
 }
 
-/// Syntax highlighter using syntect.
-struct Highlighter {
-    syntax_set: SyntaxSet,
-    theme: Theme,
-}
-
-impl Highlighter {
-    fn new() -> Self {
-        let mut builder = SyntaxSet::load_defaults_newlines().into_builder();
-        // A broken definition must not stop the editor; it would just fall back to plain text.
-        if let Ok(modelica) =
-            syntect::parsing::SyntaxDefinition::load_from_str(MODELICA_SYNTAX, true, None)
-        {
-            builder.add(modelica);
-        }
-        let syntax_set = builder.build();
-        let theme_set = ThemeSet::load_defaults();
-        // The workbench is light, so the dark default themes would be unreadable.
-        let theme = ["InspiredGitHub", "base16-ocean.light", "Solarized (light)"]
-            .iter()
-            .find_map(|name| theme_set.themes.get(*name))
-            .or_else(|| theme_set.themes.values().next())
-            .cloned()
-            .expect("At least one theme");
-        Self { syntax_set, theme }
-    }
-
-    /// Syntax for a document: by extension, else Modelica (this editor only edits Modelica).
-    fn syntax_for_path(&self, path: Option<&PathBuf>) -> &syntect::parsing::SyntaxReference {
-        let extension = path
-            .and_then(|p| p.extension())
-            .and_then(|e| e.to_str())
-            .unwrap_or("mo");
-        self.syntax_set
-            .find_syntax_by_extension(extension)
-            .or_else(|| self.syntax_set.find_syntax_by_extension("mo"))
-            .unwrap_or_else(|| self.syntax_set.find_syntax_plain_text())
-    }
-}
-
-fn highlighter() -> &'static Highlighter {
-    static HIGHLIGHTER: OnceLock<Highlighter> = OnceLock::new();
-    HIGHLIGHTER.get_or_init(Highlighter::new)
-}
-
-fn text_format(style: Style, font: &FontId) -> TextFormat {
-    TextFormat {
-        font_id: font.clone(),
-        color: Color32::from_rgb(style.foreground.r, style.foreground.g, style.foreground.b),
-        italics: style.font_style.contains(FontStyle::ITALIC),
-        underline: Stroke::NONE,
-        ..Default::default()
-    }
-}
-
-/// Build the syntax-highlighted layout of `text`.
-///
-/// A single [`HighlightLines`] walks every line in order: creating one per line would lose the
-/// parser state of multi-line comments and strings. The resulting `job.text` is always exactly
-/// `text`, which the layout engine relies on.
-pub fn highlight_job(text: &str, font: &FontId, path: Option<&PathBuf>) -> LayoutJob {
-    let highlighter = highlighter();
-    let syntax = highlighter.syntax_for_path(path);
+/// Build the syntax-highlighted layout of `text` from Modelica tokenizer spans.
+pub fn highlight_job(text: &str, font: &FontId) -> LayoutJob {
     let mut job = LayoutJob::default();
     job.wrap.max_width = f32::INFINITY;
-    let mut lines = HighlightLines::new(syntax, &highlighter.theme);
-    for line in LinesWithEndings::from(text) {
-        match lines.highlight_line(line, &highlighter.syntax_set) {
-            Ok(regions) => {
-                for (style, segment) in regions {
-                    job.append(segment, 0.0, text_format(style, font));
-                }
-            }
-            Err(_) => job.append(
-                line,
-                0.0,
-                TextFormat {
-                    font_id: font.clone(),
-                    color: crate::theme::TEXT,
-                    ..Default::default()
-                },
-            ),
-        }
+    for (range, kind) in crate::highlight::tokenize(text) {
+        let color = match kind {
+            crate::highlight::TokenKind::Keyword => crate::theme::MODEL_KEYWORD,
+            crate::highlight::TokenKind::Type => crate::theme::MODEL_TYPE,
+            crate::highlight::TokenKind::Builtin => crate::theme::MODEL_BUILTIN,
+            crate::highlight::TokenKind::Comment => crate::theme::MODEL_COMMENT,
+            crate::highlight::TokenKind::String => crate::theme::MODEL_STRING,
+            crate::highlight::TokenKind::Number => crate::theme::MODEL_NUMBER,
+            crate::highlight::TokenKind::QuotedIdent
+            | crate::highlight::TokenKind::Operator
+            | crate::highlight::TokenKind::Plain => crate::theme::MODEL_PLAIN,
+        };
+        job.append(
+            &text[range],
+            0.0,
+            TextFormat {
+                font_id: font.clone(),
+                color,
+                ..Default::default()
+            },
+        );
     }
     job
 }
@@ -290,13 +169,10 @@ pub fn draw_text_editor(
                     let state = &mut *editor_state;
                     let mut layouter = |ui: &Ui, buf: &dyn egui::TextBuffer, _wrap_width: f32| {
                         let current = buf.as_str();
-                        let stale = state.cache_job.is_none()
-                            || state.cache_text != current
-                            || state.cache_path.as_ref() != path;
+                        let stale = state.cache_job.is_none() || state.cache_text != current;
                         if stale {
                             state.cache_text = current.to_owned();
-                            state.cache_path = path.cloned();
-                            state.cache_job = Some(highlight_job(current, &font, path));
+                            state.cache_job = Some(highlight_job(current, &font));
                         }
                         let mut job = state.cache_job.clone().unwrap_or_default();
                         job.wrap.max_width = f32::INFINITY;
@@ -656,14 +532,14 @@ no location here [
     #[test]
     fn highlight_job_keeps_every_character() {
         let text = "model A\n  // comment\n  Real x = 1.0;\nend A;\n";
-        let job = highlight_job(text, &editor_font(), None);
+        let job = highlight_job(text, &editor_font());
         assert_eq!(job.text, text);
     }
 
     #[test]
     fn highlight_job_colours_block_comment_continuation() {
         let text = "/* a\n b */ x";
-        let job = highlight_job(text, &editor_font(), None);
+        let job = highlight_job(text, &editor_font());
         assert_eq!(job.text, text);
         let opener = format_at(&job, 0).color;
         // " b */" starts on the second line, inside the multi-line comment.
