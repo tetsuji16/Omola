@@ -9,6 +9,137 @@ impl OmolaApp {
         self.setup_dialog(&ctx);
         self.path_dialog_window(&ctx);
         self.rename_dialog_window(&ctx);
+        self.parameter_dialog_window(&ctx);
+    }
+
+    fn parameter_dialog_window(&mut self, ctx: &egui::Context) {
+        let Some(mut dialog) = self.parameter_dialog.clone() else {
+            return;
+        };
+        let title = format!(
+            "Parameters: {} ({})",
+            dialog.component, dialog.component_type
+        );
+        let mut open = true;
+        let mut accepted = false;
+        let mut cancel = false;
+        egui::Window::new(title)
+            .open(&mut open)
+            .resizable(true)
+            .show(ctx, |ui| {
+                if dialog.readonly {
+                    ui.label("Library components are read-only.");
+                }
+                if let Some(message) = &dialog.error {
+                    ui.colored_label(egui::Color32::RED, message);
+                }
+                match dialog.rows.as_ref() {
+                    None => {
+                        ui.spinner();
+                        ui.label("Loading parameters ...");
+                    }
+                    Some(rows) if rows.is_empty() => {
+                        ui.label("This component has no parameters.");
+                    }
+                    Some(rows) => {
+                        egui::Grid::new("component_parameters")
+                            .striped(true)
+                            .show(ui, |ui| {
+                                ui.strong("Name");
+                                ui.strong("Value");
+                                ui.strong("Unit");
+                                ui.strong("Description");
+                                ui.end_row();
+                                for (i, row) in rows.iter().enumerate() {
+                                    ui.label(&row.name);
+                                    let value = &mut dialog.values[i];
+                                    let choices: Vec<String> = if row.type_name == "Boolean" {
+                                        vec!["true".into(), "false".into()]
+                                    } else {
+                                        row.choices.clone()
+                                    };
+                                    if choices.is_empty() {
+                                        let response = ui.add_enabled(
+                                            !dialog.readonly,
+                                            egui::TextEdit::singleline(value)
+                                                .desired_width(150.0)
+                                                .hint_text(
+                                                    row.default_value.as_deref().unwrap_or(""),
+                                                ),
+                                        );
+                                        if response.changed() {
+                                            value.retain(|c| c != ';' && c != '\n' && c != '\r');
+                                        }
+                                    } else {
+                                        let selected = if value.is_empty() {
+                                            row.default_value
+                                                .clone()
+                                                .unwrap_or_else(|| "(default)".into())
+                                        } else {
+                                            value.clone()
+                                        };
+                                        ui.add_enabled_ui(!dialog.readonly, |ui| {
+                                            egui::ComboBox::from_id_salt((
+                                                "parameter_value",
+                                                &dialog.component,
+                                                &row.name,
+                                            ))
+                                            .selected_text(selected)
+                                            .show_ui(
+                                                ui,
+                                                |ui| {
+                                                    for choice in &choices {
+                                                        if ui
+                                                            .selectable_label(
+                                                                value == choice,
+                                                                choice,
+                                                            )
+                                                            .clicked()
+                                                        {
+                                                            *value = choice.clone();
+                                                        }
+                                                    }
+                                                },
+                                            );
+                                        });
+                                    }
+                                    ui.label(&row.unit);
+                                    ui.label(&row.comment).on_hover_text(&row.comment);
+                                    ui.end_row();
+                                }
+                            });
+                    }
+                }
+                ui.separator();
+                ui.horizontal(|ui| {
+                    let ready = dialog.rows.is_some();
+                    if ui
+                        .add_enabled(
+                            !dialog.readonly && ready && !self.busy,
+                            egui::Button::new("OK"),
+                        )
+                        .clicked()
+                    {
+                        accepted = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+        if accepted {
+            if let Some(rows) = dialog.rows.as_ref() {
+                let ops = crate::instance::parameter_edits(&dialog.component, rows, &dialog.values);
+                self.parameter_dialog = None;
+                if !ops.is_empty() {
+                    self.apply_edit(&dialog.class, ops);
+                }
+            }
+        } else if cancel || !open {
+            self.parameter_dialog = None;
+        } else {
+            self.parameter_dialog = Some(dialog);
+        }
     }
 
     fn setup_dialog(&mut self, ctx: &egui::Context) {

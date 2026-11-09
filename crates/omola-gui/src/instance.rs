@@ -12,6 +12,210 @@
 
 use serde_json::Value;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParamRow {
+    pub name: String,
+    pub type_name: String,
+    pub default_value: Option<String>,
+    pub current_value: Option<String>,
+    pub unit: String,
+    pub comment: String,
+    /// Modelica expressions to use for enumeration literals.
+    pub choices: Vec<String>,
+}
+
+pub fn parse_parameter_rows(type_json: &Value, component_json: Option<&Value>) -> Vec<ParamRow> {
+    let modifiers = component_json.and_then(|c| c.get("modifiers"));
+    let mut out = Vec::new();
+    collect_parameters(
+        type_json,
+        modifiers,
+        &mut out,
+        &mut std::collections::HashSet::new(),
+    );
+    out
+}
+
+fn collect_parameters(
+    node: &Value,
+    modifiers: Option<&Value>,
+    out: &mut Vec<ParamRow>,
+    seen: &mut std::collections::HashSet<String>,
+) {
+    let Some(elements) = node.get("elements").and_then(Value::as_array) else {
+        return;
+    };
+    for element in elements {
+        match element.get("$kind").and_then(Value::as_str) {
+            Some(EXTENDS) => {
+                if let Some(base) = element.get("baseClass") {
+                    collect_parameters(base, modifiers, out, seen);
+                }
+            }
+            Some(COMPONENT) => {
+                let Some(name) = element.get("name").and_then(Value::as_str) else {
+                    continue;
+                };
+                if element
+                    .pointer("/prefixes/variability")
+                    .and_then(Value::as_str)
+                    != Some("parameter")
+                    || !seen.insert(name.to_owned())
+                {
+                    continue;
+                }
+                let Some(declared) = element.get("type") else {
+                    continue;
+                };
+                let type_name = match declared {
+                    Value::String(s) => s.clone(),
+                    Value::Object(_) => declared
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                    _ => continue,
+                };
+                let default_value =
+                    element
+                        .get("modifiers")
+                        .and_then(modifier_default)
+                        .or_else(|| {
+                            element
+                                .pointer("/value/binding")
+                                .and_then(binding_expression)
+                        });
+                let current_value = modifiers
+                    .and_then(|m| m.get(name))
+                    .and_then(binding_expression);
+                let unit = element
+                    .get("modifiers")
+                    .and_then(|m| m.get("unit"))
+                    .and_then(binding_expression)
+                    .or_else(|| type_unit(declared))
+                    .unwrap_or_default();
+                let mut literals = Vec::new();
+                collect_enum_choices(declared, &mut literals);
+                let prefix = default_value
+                    .as_deref()
+                    .and_then(|v| v.rsplit_once('.').map(|(prefix, _)| format!("{prefix}.")))
+                    .unwrap_or_default();
+                let choices = literals
+                    .into_iter()
+                    .map(|literal| format!("{prefix}{literal}"))
+                    .collect();
+                let comment = element
+                    .get("comment")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                out.push(ParamRow {
+                    name: name.to_owned(),
+                    type_name,
+                    default_value,
+                    current_value,
+                    unit,
+                    comment,
+                    choices,
+                });
+            }
+            _ => {}
+        }
+    }
+}
+
+fn modifier_default(value: &Value) -> Option<String> {
+    if let Some(s) = value.as_str() {
+        return (!s.is_empty()).then(|| s.to_owned());
+    }
+    value.get("binding").and_then(binding_expression)
+}
+
+fn binding_expression(value: &Value) -> Option<String> {
+    if let Some(s) = value.as_str() {
+        return Some(s.to_owned());
+    }
+    if let Some(b) = value.as_bool() {
+        return Some(b.to_string());
+    }
+    if let Some(n) = value.as_number() {
+        return Some(n.to_string());
+    }
+    if let Some(name) = value.get("name").and_then(Value::as_str) {
+        return Some(name.to_owned());
+    }
+    None
+}
+
+fn type_unit(value: &Value) -> Option<String> {
+    let elements = value.get("elements")?.as_array()?;
+    for element in elements {
+        if element.get("$kind").and_then(Value::as_str) == Some(EXTENDS) {
+            if let Some(unit) = element
+                .pointer("/modifiers/unit/$value")
+                .and_then(Value::as_str)
+            {
+                if let Ok(decoded) = serde_json::from_str::<String>(unit) {
+                    return Some(decoded);
+                }
+                return Some(unit.to_owned());
+            }
+            if let Some(base) = element.get("baseClass") {
+                if let Some(unit) = type_unit(base) {
+                    return Some(unit);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn collect_enum_choices(value: &Value, out: &mut Vec<String>) {
+    let Some(elements) = value.get("elements").and_then(Value::as_array) else {
+        return;
+    };
+    for element in elements {
+        match element.get("$kind").and_then(Value::as_str) {
+            Some(EXTENDS) => {
+                if let Some(base) = element.get("baseClass") {
+                    collect_enum_choices(base, out);
+                }
+            }
+            Some(COMPONENT) if element.get("type").is_none() => {
+                if let Some(name) = element.get("name").and_then(Value::as_str) {
+                    out.push(name.to_owned());
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+pub fn parameter_edits(
+    component: &str,
+    rows: &[ParamRow],
+    values: &[String],
+) -> Vec<crate::edit::EditOp> {
+    rows.iter()
+        .zip(values)
+        .filter_map(|(row, draft)| {
+            let draft = draft.trim();
+            match (row.current_value.as_deref(), draft.is_empty()) {
+                (None, true) => None,
+                (Some(_), true) => Some(crate::edit::EditOp::SetModifier {
+                    path: format!("{component}.{}", row.name),
+                    value: None,
+                }),
+                (Some(current), false) if current == draft => None,
+                (_, false) => Some(crate::edit::EditOp::SetModifier {
+                    path: format!("{component}.{}", row.name),
+                    value: Some(draft.to_owned()),
+                }),
+            }
+        })
+        .collect()
+}
+
 /// Element `$kind` values that describe a component rather than a nested class.
 const COMPONENT: &str = "component";
 const EXTENDS: &str = "extends";
@@ -213,5 +417,58 @@ mod tests {
         assert!(parse_components("{not json", 4).is_err());
         assert!(parse_components("[]", 4).is_err());
         assert_eq!(parse_components("{}", 4).unwrap(), Vec::new());
+    }
+
+    #[test]
+    fn parses_parameter_defaults_units_inherited_values_and_enumerations() {
+        let root: Value = serde_json::from_str(MSL_FIRST_ORDER).unwrap();
+        let plant = root["elements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["name"] == "plant")
+            .unwrap();
+        let rows = parse_parameter_rows(
+            &plant["type"],
+            Some(&serde_json::json!({"modifiers":{"T":"2"}})),
+        );
+        let k = rows.iter().find(|p| p.name == "k").unwrap();
+        assert_eq!(k.default_value.as_deref(), Some("1"));
+        let t = rows.iter().find(|p| p.name == "T").unwrap();
+        assert_eq!(t.default_value.as_deref(), Some("0.25"));
+        assert_eq!(t.current_value.as_deref(), Some("2"));
+        assert_eq!(t.unit, "s");
+        let init = rows.iter().find(|p| p.name == "initType").unwrap();
+        assert!(init.choices.contains(&"Init.NoInit".to_owned()));
+        assert!(rows.iter().all(|p| p.name != "NoInit"));
+    }
+
+    #[test]
+    fn parameter_edits_only_include_changes_and_clear_explicit_values() {
+        let rows = vec![
+            ParamRow {
+                name: "k".into(),
+                type_name: "Real".into(),
+                default_value: Some("1".into()),
+                current_value: None,
+                unit: String::new(),
+                comment: String::new(),
+                choices: vec![],
+            },
+            ParamRow {
+                name: "T".into(),
+                type_name: "Real".into(),
+                default_value: Some("0.25".into()),
+                current_value: Some("2".into()),
+                unit: "s".into(),
+                comment: String::new(),
+                choices: vec![],
+            },
+        ];
+        assert!(parameter_edits("plant", &rows, &[String::new(), "2".into()]).is_empty());
+        let edits = parameter_edits("plant", &rows, &["3".into(), String::new()]);
+        assert!(
+            matches!(edits.as_slice(), [crate::edit::EditOp::SetModifier { path, value: Some(v) }, crate::edit::EditOp::SetModifier { path: clear, value: None }] if path == "plant.k" && v == "3" && clear == "plant.T")
+        );
     }
 }
