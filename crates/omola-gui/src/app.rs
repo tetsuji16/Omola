@@ -1096,7 +1096,6 @@ impl OmolaApp {
         let Some(doc) = self.doc_of(class) else {
             return;
         };
-        self.record_undo_snapshot(doc, self.documents[doc].text.clone());
         self.pending_edit = Some(class.to_owned());
         let libs = self.loaded_specs();
         self.worker.submit(Job::EditModel {
@@ -2386,6 +2385,18 @@ mod tests {
         assert_eq!(app.package_search_cache.as_ref().unwrap().1.len(), 501);
         app.update_package_search_cache();
         assert_eq!(app.package_search_cache.as_ref().unwrap().1.as_ptr(), first);
+    }
+
+    #[test]
+    fn failed_graphical_edit_does_not_add_an_undo_snapshot() {
+        let mut app = history_app();
+        app.pending_edit = Some("A".into());
+        app.handle_model_edited_event(Event::ModelEdited {
+            class: "A".into(),
+            result: Err("OMC rejected the edit".into()),
+        });
+        assert!(app.documents[0].undo.is_empty());
+        assert!(!app.can_undo());
     }
 
     #[test]
