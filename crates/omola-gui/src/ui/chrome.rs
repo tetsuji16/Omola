@@ -422,43 +422,71 @@ impl OmolaApp {
                     })
             });
         });
-        fixed_group(ui, "Time range", 256.0, |ui, o| {
-            for (i, label) in ["From", "To"].into_iter().enumerate() {
-                place(ui, o, (6.0, 10.0 + i as f32 * 31.0, 62.0, 23.0), |ui| {
+        fixed_group(ui, "Range", 256.0, |ui, o| {
+            for (i, label) in ["Time from", "Time to", "Y min", "Y max"]
+                .into_iter()
+                .enumerate()
+            {
+                let row = i as f32;
+                place(ui, o, (6.0, 5.0 + row * 23.0, 68.0, 21.0), |ui| {
                     ui.label(label)
                 });
-                let id = egui::Id::NULL.with(("plot_time_range", i));
+                let id = egui::Id::NULL.with(("plot_range", i));
                 let mut value = ui
                     .ctx()
                     .data(|d| d.get_temp::<String>(id))
                     .unwrap_or_default();
-                let response = place(ui, o, (70.0, 10.0 + i as f32 * 31.0, 100.0, 23.0), |ui| {
+                let invalid_id = egui::Id::NULL.with(("plot_range_invalid", i / 2));
+                let invalid = ui
+                    .ctx()
+                    .data(|d| d.get_temp::<bool>(invalid_id))
+                    .unwrap_or(false);
+                let response = place(ui, o, (78.0, 5.0 + row * 23.0, 100.0, 21.0), |ui| {
                     ui.add(egui::TextEdit::singleline(&mut value).desired_width(96.0))
                 });
                 if response.changed() {
                     ui.ctx().data_mut(|d| d.insert_temp(id, value.clone()));
                 }
+                if invalid {
+                    response
+                        .clone()
+                        .on_hover_text("Enter finite increasing bounds, or leave both empty.");
+                    ui.painter().text(
+                        egui::pos2(response.rect.right() + 8.0, response.rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        "!",
+                        FontId::proportional(14.0),
+                        RED,
+                    );
+                }
                 if response.lost_focus() {
                     let a = ui
                         .ctx()
-                        .data(|d| d.get_temp::<String>(egui::Id::NULL.with(("plot_time_range", 0))))
+                        .data(|d| {
+                            d.get_temp::<String>(egui::Id::NULL.with(("plot_range", (i / 2) * 2)))
+                        })
                         .unwrap_or_default();
                     let b = ui
                         .ctx()
-                        .data(|d| d.get_temp::<String>(egui::Id::NULL.with(("plot_time_range", 1))))
+                        .data(|d| {
+                            d.get_temp::<String>(
+                                egui::Id::NULL.with(("plot_range", (i / 2) * 2 + 1)),
+                            )
+                        })
                         .unwrap_or_default();
-                    let range = match (a.trim().parse::<f64>(), b.trim().parse::<f64>()) {
-                        (Ok(a), Ok(b)) if a.is_finite() && b.is_finite() && a < b => Some((a, b)),
-                        _ => None,
-                    };
+                    let range = parse_optional_range(&a, &b);
+                    ui.ctx()
+                        .data_mut(|d| d.insert_temp(invalid_id, range.is_err()));
                     let index = self
                         .active_diagram
                         .min(self.diagrams.len().saturating_sub(1));
-                    self.diagrams[index].style.x_view = range;
-                    let index = self
-                        .active_diagram
-                        .min(self.diagrams.len().saturating_sub(1));
-                    self.diagrams[index].style.x_view = self.plot_x;
+                    if let Ok(bounds) = range {
+                        if i < 2 {
+                            self.diagrams[index].style.x_view = bounds;
+                        } else {
+                            self.diagrams[index].y_view = bounds;
+                        }
+                    }
                 }
             }
         });
@@ -1107,6 +1135,18 @@ fn truncate_title(title: &str, max_width: f32, font: &FontId, ui: &egui::Ui) -> 
     }
 }
 
+fn parse_optional_range(min: &str, max: &str) -> Result<Option<(f64, f64)>, &'static str> {
+    if min.trim().is_empty() && max.trim().is_empty() {
+        return Ok(None);
+    }
+    let min = min.trim().parse::<f64>().map_err(|_| "invalid minimum")?;
+    let max = max.trim().parse::<f64>().map_err(|_| "invalid maximum")?;
+    if !min.is_finite() || !max.is_finite() || min >= max {
+        return Err("range bounds must be finite and increasing");
+    }
+    Ok(Some((min, max)))
+}
+
 fn clipboard_group(ui: &mut egui::Ui, delete_enabled: bool) -> bool {
     let mut delete = false;
     group(ui, "Clipboard", |ui| {
@@ -1189,4 +1229,18 @@ fn window_button(
     };
     paint_icon(ui, rect.center(), icon, 16.0, fg);
     response
+}
+
+#[cfg(test)]
+mod range_tests {
+    use super::parse_optional_range;
+
+    #[test]
+    fn range_input_accepts_numbers_clear_and_rejects_invalid_pairs() {
+        assert_eq!(parse_optional_range("0.5", "0.8"), Ok(Some((0.5, 0.8))));
+        assert_eq!(parse_optional_range("", ""), Ok(None));
+        assert!(parse_optional_range("a", "0.8").is_err());
+        assert!(parse_optional_range("1", "1").is_err());
+        assert!(parse_optional_range("NaN", "2").is_err());
+    }
 }

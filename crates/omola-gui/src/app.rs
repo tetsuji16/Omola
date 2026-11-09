@@ -389,8 +389,6 @@ pub struct OmolaApp {
     pub cursor_enabled: bool,
     /// Values edited in the variable browser, applied as overrides on the next simulation.
     pub pending_overrides: BTreeMap<String, String>,
-    /// Legacy shared x range used by drag zoom and cleared when all diagrams are rescaled.
-    pub plot_x: Option<(f64, f64)>,
     /// Whether the contextual Plot Options ribbon is selected (Simulation remains active).
     pub plot_options: bool,
     pub logs: Vec<LogEntry>,
@@ -531,7 +529,6 @@ impl OmolaApp {
             active_diagram: 0,
             cursor_enabled: false,
             pending_overrides: BTreeMap::new(),
-            plot_x: None,
             plot_options: false,
             logs: Vec::new(),
             error_locations: Vec::new(),
