@@ -335,6 +335,30 @@ pub fn drop_ops(qualified: &str, name: &str, p: [f64; 2]) -> Vec<crate::edit::Ed
     }]
 }
 
+/// The edits a delete sends: every connection that touches the component, then the
+/// component itself (G31).
+///
+/// `deleteComponent` leaves `connect` statements behind, so the connections have to go
+/// first; one `apply_edit` carries the whole list so the class is rewritten once.
+pub fn delete_ops(diagram: &crate::diagram::Diagram, component: &str) -> Vec<crate::edit::EditOp> {
+    let mut ops: Vec<crate::edit::EditOp> = crate::diagram::connections_of(diagram, component)
+        .into_iter()
+        .map(|(from, to)| crate::edit::EditOp::DeleteConnection { from, to })
+        .collect();
+    ops.push(crate::edit::EditOp::DeleteComponent {
+        name: component.to_owned(),
+    });
+    ops
+}
+
+/// The rename dialog of the Diagram layer (G31).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenameDialog {
+    pub class: String,
+    pub old: String,
+    pub new_text: String,
+}
+
 pub struct OmolaApp {
     pub tab: RibbonTab,
     pub graphics_layer: Layer,
@@ -380,6 +404,10 @@ pub struct OmolaApp {
     pub diagram_drag: Option<DiagramDrag>,
     /// Placement shown instead of the loaded one until `Event::ModelEdited` arrives (G29).
     pub pending_placement: Option<(String, Placement)>,
+    /// Component whose right-click menu is open (G31).
+    pub context_component: Option<String>,
+    /// Open rename dialog of the Diagram layer (G31).
+    pub rename_dialog: Option<RenameDialog>,
     pub doc_view: DocView,
     pub find_open: bool,
     pub find_query: String,
@@ -519,6 +547,8 @@ impl OmolaApp {
             pending_edit: None,
             diagram_drag: None,
             pending_placement: None,
+            context_component: None,
+            rename_dialog: None,
             doc_view: DocView::Formatted,
             find_open: false,
             find_query: String::new(),
@@ -1202,6 +1232,41 @@ impl OmolaApp {
         if self.apply_edit(class, drop_ops(&payload.qualified, &name, p)) {
             self.selected_component = Some(name);
         }
+    }
+
+    /// Delete `component` together with every connection that touches it (G31).
+    pub fn delete_component(&mut self, class: &str, component: &str) {
+        let ops = match self.model_diagrams.get(class) {
+            Some(Loadable::Ready(diagram)) => delete_ops(diagram, component),
+            _ => {
+                return self.error(
+                    LogTab::Syntax,
+                    "The diagram is still loading; try again in a moment.".into(),
+                )
+            }
+        };
+        if self.apply_edit(class, ops) && self.selected_component.as_deref() == Some(component) {
+            self.selected_component = None;
+        }
+    }
+
+    /// Whether the ribbon Delete button has a component to act on (G31).
+    pub fn can_delete_component(&self) -> bool {
+        self.graphics_layer == Layer::Diagram
+            && self.selected_component.is_some()
+            && self
+                .active
+                .as_ref()
+                .is_some_and(|class| self.is_user_class(class))
+    }
+
+    /// Open the rename dialog for the selected component (G31).
+    pub fn open_rename_dialog(&mut self, class: &str, component: &str) {
+        self.rename_dialog = Some(RenameDialog {
+            class: class.to_owned(),
+            old: component.to_owned(),
+            new_text: component.to_owned(),
+        });
     }
 
     /// The rewritten class text came back: swap it in, or report why it did not (G28).
@@ -3214,5 +3279,62 @@ mod tests {
             .logs
             .iter()
             .any(|e| e.text.contains("cannot be placed in a diagram")));
+    }
+
+    fn wire(from: &str, to: &str) -> crate::diagram::Connection {
+        crate::diagram::Connection {
+            from: from.into(),
+            to: to.into(),
+            points: vec![[0.0, 0.0], [1.0, 1.0]],
+            color: [0, 0, 0],
+        }
+    }
+
+    #[test]
+    fn a_delete_removes_the_connections_before_the_component() {
+        let mut diagram = diagram_with(&["c1", "c2"]);
+        diagram.connections = vec![
+            wire("c1.p", "c2.n"),
+            wire("c2.p", "c10.n"),
+            wire("c1.p", "c10.n"),
+        ];
+        let ops = delete_ops(&diagram, "c2");
+        assert_eq!(ops.len(), 3, "two connections and the component");
+        match (&ops[0], &ops[1], &ops[2]) {
+            (
+                crate::edit::EditOp::DeleteConnection { from, to },
+                crate::edit::EditOp::DeleteConnection { from: f2, to: t2 },
+                crate::edit::EditOp::DeleteComponent { name },
+            ) => {
+                assert_eq!((from.as_str(), to.as_str()), ("c1.p", "c2.n"));
+                assert_eq!((f2.as_str(), t2.as_str()), ("c2.p", "c10.n"));
+                assert_eq!(name, "c2");
+            }
+            other => panic!("unexpected ops {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_delete_of_an_unconnected_component_is_one_edit() {
+        let diagram = diagram_with(&["c1"]);
+        let ops = delete_ops(&diagram, "c1");
+        assert_eq!(ops.len(), 1);
+        assert!(matches!(
+            &ops[0],
+            crate::edit::EditOp::DeleteComponent { name } if name == "c1"
+        ));
+    }
+
+    #[test]
+    fn the_delete_button_needs_a_selected_user_component() {
+        let mut app = app_with_model("model A\nend A;\n");
+        app.graphics_layer = Layer::Diagram;
+        assert!(!app.can_delete_component(), "nothing is selected");
+        app.selected_component = Some("gain1".into());
+        assert!(app.can_delete_component());
+        // The same selection in a library class is read-only.
+        app.libraries = vec![library_with(&["Modelica", "Modelica.Blocks.Gain"])];
+        app.active = Some("Modelica.Blocks.Gain".into());
+        assert!(!app.can_delete_component());
     }
 }

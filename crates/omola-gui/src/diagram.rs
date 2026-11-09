@@ -310,6 +310,24 @@ pub fn hit_component(diagram: &Diagram, p: [f64; 2]) -> Option<usize> {
         .map(|(index, _)| index)
 }
 
+/// The connections that touch `component`, as `(from, to)` pairs (G31).
+///
+/// A connector belongs to the component when the name matches exactly or is followed by a
+/// dot, so `c1` matches `c1.p[2]` but not `c10.out`. Deleting a component has to delete
+/// these first: `deleteComponent` does not remove `connect` statements.
+pub fn connections_of(diagram: &Diagram, component: &str) -> Vec<(String, String)> {
+    let touches = |end: &str| {
+        end.strip_prefix(component)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
+    };
+    diagram
+        .connections
+        .iter()
+        .filter(|c| touches(&c.from) || touches(&c.to))
+        .map(|c| (c.from.clone(), c.to.clone()))
+        .collect()
+}
+
 /// Parse a graphic entry (Rectangle, Line, Polygon, Ellipse, Text, Bitmap).
 fn parse_graphic(entry: &Value) -> Result<Option<Graphic>, String> {
     let name = entry
@@ -854,5 +872,44 @@ mod tests {
         };
         assert_eq!(hit_component(&diagram, [15.0, 0.0]), Some(0));
         assert_eq!(hit_component(&diagram, [0.0, 15.0]), None);
+    }
+
+    fn connected(from: &str, to: &str) -> Connection {
+        Connection {
+            from: from.into(),
+            to: to.into(),
+            points: vec![[0.0, 0.0], [1.0, 1.0]],
+            color: [0, 0, 0],
+        }
+    }
+
+    #[test]
+    fn a_component_owns_its_connections_but_not_similar_names() {
+        let diagram = Diagram {
+            connections: vec![
+                connected("c1.p", "c10.p"),
+                connected("c10.n", "c1.n[2]"),
+                connected("c2.p", "c10.n"),
+            ],
+            ..Diagram::default()
+        };
+        assert_eq!(
+            connections_of(&diagram, "c1"),
+            vec![
+                ("c1.p".to_owned(), "c10.p".to_owned()),
+                ("c10.n".to_owned(), "c1.n[2]".to_owned()),
+            ]
+        );
+        assert_eq!(
+            connections_of(&diagram, "c10"),
+            vec![
+                ("c1.p".to_owned(), "c10.p".to_owned()),
+                ("c10.n".to_owned(), "c1.n[2]".to_owned()),
+                ("c2.p".to_owned(), "c10.n".to_owned()),
+            ]
+        );
+        // `c1` is not a prefix match for `c10`, and an unconnected component has nothing.
+        assert!(connections_of(&diagram, "c3").is_empty());
+        assert!(connections_of(&Diagram::default(), "c1").is_empty());
     }
 }

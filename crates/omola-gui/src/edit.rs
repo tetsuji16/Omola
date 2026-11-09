@@ -234,6 +234,20 @@ pub fn unique_component_name(type_short: &str, existing: &[String]) -> String {
     unreachable!("one of the first `existing.len() + 1` names is free")
 }
 
+/// Why a component name cannot be used, or `Ok(())` when it can (G31).
+///
+/// `existing` holds the other component names of the class; the old name of a rename must
+/// be left out so the dialog's starting text is not reported as a clash.
+pub fn check_component_name(name: &str, existing: &[String]) -> Result<(), &'static str> {
+    if !crate::model::is_identifier(name) || crate::highlight::is_keyword(name) {
+        return Err("Not a valid Modelica identifier");
+    }
+    if existing.iter().any(|other| other == name) {
+        return Err("Name already used");
+    }
+    Ok(())
+}
+
 /// `Placement(visible=true, transformation=transformation(...))` for an annotation argument.
 fn placement(extent: [[f64; 2]; 2], origin: [f64; 2], rotation: f64) -> Result<String, String> {
     let [[x1, y1], [x2, y2]] = extent;
@@ -583,5 +597,25 @@ mod tests {
                 "{restriction} should not be placeable"
             );
         }
+    }
+
+    #[test]
+    fn a_component_name_must_be_a_free_identifier() {
+        let taken = vec!["gain".to_string(), "k".to_string()];
+        assert_eq!(check_component_name("abc", &taken), Ok(()));
+        assert_eq!(check_component_name("_x1", &taken), Ok(()));
+        for bad in ["1a", "a b", "", "'quoted'", "model"] {
+            assert_eq!(
+                check_component_name(bad, &taken),
+                Err("Not a valid Modelica identifier"),
+                "{bad} should be rejected"
+            );
+        }
+        // `der` is a builtin operator, not a reserved word, so it is a legal name.
+        assert_eq!(check_component_name("der", &taken), Ok(()));
+        assert_eq!(
+            check_component_name("gain", &taken),
+            Err("Name already used")
+        );
     }
 }

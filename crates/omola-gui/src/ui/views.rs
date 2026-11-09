@@ -374,6 +374,7 @@ impl OmolaApp {
                 if let Some(comp) = diagram.components.iter().find(|c| c.name == name) {
                     let mut step = [0.0, 0.0];
                     let mut rotate = false;
+                    let mut delete = false;
                     ui.input_mut(|i| {
                         if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft) {
                             step[0] -= crate::diagram_view::GRID;
@@ -388,8 +389,11 @@ impl OmolaApp {
                             step[1] -= crate::diagram_view::GRID;
                         }
                         rotate = i.consume_key(egui::Modifiers::COMMAND, egui::Key::R);
+                        delete = i.consume_key(egui::Modifiers::NONE, egui::Key::Delete);
                     });
-                    if step != [0.0, 0.0] || rotate {
+                    if delete {
+                        self.delete_component(class, &name);
+                    } else if step != [0.0, 0.0] || rotate {
                         let mut placement = crate::app::dragged(&comp.placement, step)
                             .unwrap_or_else(|| comp.placement.clone());
                         if rotate {
@@ -429,6 +433,48 @@ impl OmolaApp {
                 let bounds =
                     crate::diagram_view::component_screen_rect(&shown, rect, zoom, pan, comp);
                 crate::diagram_view::paint_selection(&painter, bounds);
+            }
+        }
+        // Right-click menu (G31). The canvas stays the only interactive widget, so the
+        // target is remembered when the right click lands on a component; a right click
+        // on empty space clears it and opens nothing.
+        if response.secondary_clicked() {
+            self.context_component = pointer
+                .map(to_diagram)
+                .and_then(|p| crate::diagram::hit_component(&shown, p))
+                .map(|i| shown.components[i].name.clone());
+            if let Some(name) = self.context_component.clone() {
+                self.selected_component = Some(name);
+            }
+        }
+        if let Some(name) = self.context_component.clone() {
+            if let Some(comp) = shown.components.iter().find(|c| c.name == name) {
+                let placement = comp.placement.clone();
+                let type_name = comp.type_name.clone();
+                response.context_menu(|ui| {
+                    if !editable {
+                        ui.add_enabled(false, egui::Button::new("Rename..."));
+                        ui.add_enabled(false, egui::Button::new("Delete"));
+                        ui.separator();
+                        ui.add_enabled(false, egui::Button::new("Rotate 90"));
+                        return;
+                    }
+                    if ui.button("Rename...").clicked() {
+                        self.open_rename_dialog(class, &name);
+                        ui.close();
+                    }
+                    if ui.button("Delete").clicked() {
+                        self.delete_component(class, &name);
+                        ui.close();
+                    }
+                    ui.separator();
+                    if ui.button("Rotate 90").clicked() {
+                        let mut rotated = placement.clone();
+                        rotated.rotation_deg = (rotated.rotation_deg + 90.0) % 360.0;
+                        self.move_component(class, &name, &type_name, rotated);
+                        ui.close();
+                    }
+                });
             }
         }
         // Tooltip of the component under the pointer.

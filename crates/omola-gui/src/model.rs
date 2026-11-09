@@ -289,7 +289,8 @@ pub fn default_class(entries: &[ClassEntry]) -> Option<String> {
         .map(|e| e.qualified_name.clone())
 }
 
-fn is_identifier(token: &str) -> bool {
+/// Whether `token` is a plain Modelica identifier (no quotes, no dots).
+pub fn is_identifier(token: &str) -> bool {
     let mut chars = token.chars();
     matches!(chars.next(), Some(c) if c == '_' || c.is_ascii_alphabetic())
         && chars.all(|c| c == '_' || c.is_ascii_alphanumeric())

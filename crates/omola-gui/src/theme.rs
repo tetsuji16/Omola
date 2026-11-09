@@ -25,6 +25,9 @@ pub const CONTEXT_TAB: Color32 = Color32::from_rgb(0x71, 0xBE, 0x59);
 pub const FILE_BLUE: Color32 = Color32::from_rgb(0x19, 0x79, 0xCA);
 pub const FIELD_BORDER: Color32 = Color32::from_rgb(0xBD, 0xBD, 0xBD);
 
+/// Validation messages in a dialog (G31).
+pub const ERROR: Color32 = Color32::from_rgb(0xC6, 0x28, 0x28);
+
 /// Syntax colours of the Modelica editor (G24).
 ///
 /// These are ordinary editor colours for a light background, not a copy of another

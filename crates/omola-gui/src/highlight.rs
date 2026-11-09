@@ -21,6 +21,11 @@ pub enum TokenKind {
     Plain,
 }
 
+/// Whether `word` is a Modelica reserved word (G31 rejects these as component names).
+pub fn is_keyword(word: &str) -> bool {
+    KEYWORDS.contains(&word)
+}
+
 /// Modelica 3.6 reserved words.
 ///
 /// `der` is in the specification's keyword list but is a built-in operator function, so it

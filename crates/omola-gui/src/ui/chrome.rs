@@ -398,7 +398,13 @@ impl OmolaApp {
                 }
             });
         });
-        clipboard_group(ui);
+        if clipboard_group(ui, self.can_delete_component()) {
+            if let (Some(class), Some(name)) =
+                (self.active.clone(), self.selected_component.clone())
+            {
+                self.delete_component(&class, &name);
+            }
+        }
         group(ui, "Draw", |ui| {
             column(ui, |ui| {
                 small_button(ui, ICON_HORIZONTAL_RULE, BLUE, "Line", false, false);
@@ -501,7 +507,13 @@ impl OmolaApp {
                 small_button(ui, ICON_MARKDOWN, DARK, "Markdown", !read_only, false);
             });
         });
-        clipboard_group(ui);
+        if clipboard_group(ui, self.can_delete_component()) {
+            if let (Some(class), Some(name)) =
+                (self.active.clone(), self.selected_component.clone())
+            {
+                self.delete_component(&class, &name);
+            }
+        }
         group(ui, "Find", |ui| {
             if big_button(ui, ICON_SEARCH, DARK, "Find", true, self.find_open).clicked() {
                 self.find_open = !self.find_open;
@@ -587,7 +599,13 @@ impl OmolaApp {
                 }
             });
         });
-        clipboard_group(ui);
+        if clipboard_group(ui, self.can_delete_component()) {
+            if let (Some(class), Some(name)) =
+                (self.active.clone(), self.selected_component.clone())
+            {
+                self.delete_component(&class, &name);
+            }
+        }
         group(ui, "Find", |ui| {
             column(ui, |ui| {
                 if small_button(ui, ICON_SEARCH, DARK, "Find", true, false).clicked() {
@@ -908,19 +926,24 @@ impl OmolaApp {
     }
 }
 
-fn clipboard_group(ui: &mut egui::Ui) {
+/// The Clipboard group. Returns whether Delete was clicked; it is only enabled when the
+/// Diagram layer has a component selected (G31).
+fn clipboard_group(ui: &mut egui::Ui, delete_enabled: bool) -> bool {
+    let mut deleted = false;
     group(ui, "Clipboard", |ui| {
         big_button(ui, ICON_CONTENT_CUT, DARK, "Cut", false, false);
         big_button(ui, ICON_CONTENT_COPY, DARK, "Copy", false, false);
         big_button(ui, ICON_CONTENT_PASTE, DARK, "Paste", false, false);
         column(ui, |ui| {
-            small_button(ui, ICON_CLOSE, RED, "Delete", false, false);
+            if small_button(ui, ICON_CLOSE, RED, "Delete", delete_enabled, false).clicked() {
+                deleted = true;
+            }
             small_button(ui, ICON_FILE_COPY, DARK, "Duplicate", false, false);
             small_button(ui, ICON_SELECT_ALL, DARK, "Select All", false, false);
         });
     });
+    deleted
 }
-
 fn display_method(m: &str) -> String {
     let mut c = m.chars();
     c.next()
