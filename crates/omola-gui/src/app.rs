@@ -2065,11 +2065,11 @@ mod tests {
         std::fs::write(&source, "package Modelica end Modelica;").unwrap();
 
         let spec = LibrarySpec::new("Modelica", Some("4.1.0"));
-        let lib = LoadedLibrary {
-            spec: spec.clone(),
-            version: "4.1.0".into(),
-            source_file: source,
-            classes: vec![
+        let lib = LoadedLibrary::new(
+            spec.clone(),
+            "4.1.0".into(),
+            source,
+            vec![
                 ClassEntry {
                     qualified_name: "Modelica".into(),
                     restriction: "package".into(),
@@ -2081,7 +2081,7 @@ mod tests {
                     comment: String::new(),
                 },
             ],
-        };
+        );
         crate::cache::store(&dir.join("cache"), &lib).unwrap();
 
         let mut app = app();

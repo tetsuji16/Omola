@@ -4,7 +4,7 @@
 //! `OMOLA_CLASS\t...`) so the output can be parsed without guessing OMC's formatting.
 
 use omola_core::{escape_modelica_string, validate_class_name, BackendError};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 /// A library to load into OMC (`loadModel`). `version: None` means "any installed version".
@@ -62,31 +62,69 @@ pub struct LoadedLibrary {
     pub source_file: PathBuf,
     /// All classes including the top-level one, in declaration order.
     pub classes: Vec<ClassEntry>,
+    /// Qualified class name to index in `classes`.
+    by_name: HashMap<String, usize>,
+    /// Direct child indices for each class, preserving declaration order.
+    children: Vec<Vec<usize>>,
 }
 
 impl LoadedLibrary {
+    pub fn new(
+        spec: LibrarySpec,
+        version: String,
+        source_file: PathBuf,
+        classes: Vec<ClassEntry>,
+    ) -> Self {
+        let by_name: HashMap<_, _> = classes
+            .iter()
+            .enumerate()
+            .map(|(i, class)| (class.qualified_name.clone(), i))
+            .collect();
+        let mut children = vec![Vec::new(); classes.len()];
+        for (i, class) in classes.iter().enumerate() {
+            if let Some(parent) = parent_name(&class.qualified_name) {
+                if let Some(&parent_index) = by_name.get(parent) {
+                    children[parent_index].push(i);
+                }
+            }
+        }
+        Self {
+            spec,
+            version,
+            source_file,
+            classes,
+            by_name,
+            children,
+        }
+    }
+
     pub fn root(&self) -> Option<&ClassEntry> {
         self.classes.first()
     }
 
     /// Direct children of `parent` in declaration order.
     pub fn children(&self, parent: &str) -> Vec<&ClassEntry> {
-        self.classes
-            .iter()
-            .filter(|c| parent_name(&c.qualified_name) == Some(parent))
-            .collect()
+        self.children_iter(parent).collect()
     }
 
     pub fn class(&self, qualified: &str) -> Option<&ClassEntry> {
-        self.classes.iter().find(|c| c.qualified_name == qualified)
+        self.by_name.get(qualified).map(|&i| &self.classes[i])
+    }
+
+    pub fn children_iter<'a>(&'a self, parent: &str) -> impl Iterator<Item = &'a ClassEntry> + 'a {
+        let indices: &[usize] = self
+            .by_name
+            .get(parent)
+            .map(|&i| self.children[i].as_slice())
+            .unwrap_or_default();
+        indices.iter().map(move |&i| &self.classes[i])
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn has_children(&self, parent: &str) -> bool {
-        let prefix = format!("{parent}.");
-        self.classes
-            .iter()
-            .any(|c| c.qualified_name.starts_with(&prefix))
+        self.by_name
+            .get(parent)
+            .is_some_and(|&i| !self.children[i].is_empty())
     }
 }
 
@@ -173,15 +211,15 @@ pub fn parse_library_index(spec: &LibrarySpec, output: &str) -> Result<LoadedLib
     if classes.first().map(|c| c.qualified_name.as_str()) != Some(spec.name.as_str()) {
         return Err(format!("OMC returned no class index for {}", spec.name));
     }
-    Ok(LoadedLibrary {
-        spec: spec.clone(),
-        version: sections
+    Ok(LoadedLibrary::new(
+        spec.clone(),
+        sections
             .get("version")
             .map(|v| v.trim().to_owned())
             .unwrap_or_default(),
         source_file,
         classes,
-    })
+    ))
 }
 
 /// Documentation of one class.
@@ -471,6 +509,60 @@ mod tests {
 
     fn msl() -> LibrarySpec {
         LibrarySpec::new("Modelica", Some("4.1.0"))
+    }
+
+    fn class(name: &str) -> ClassEntry {
+        ClassEntry {
+            qualified_name: name.into(),
+            restriction: "package".into(),
+            comment: String::new(),
+        }
+    }
+
+    #[test]
+    fn loaded_library_indexes_classes_and_ordered_children() {
+        let lib = LoadedLibrary::new(
+            msl(),
+            "4.1.0".into(),
+            PathBuf::from("/lib/Modelica/package.mo"),
+            [
+                "Modelica",
+                "Modelica.Blocks",
+                "Modelica.UsersGuide",
+                "Modelica.Blocks.Basic",
+                "Modelica.Blocks.Continuous",
+                "Orphan.Parent.Child",
+            ]
+            .into_iter()
+            .map(class)
+            .collect(),
+        );
+
+        assert_eq!(
+            lib.class("Modelica.Blocks").unwrap().qualified_name,
+            "Modelica.Blocks"
+        );
+        assert!(lib.class("Modelica.Missing").is_none());
+        let children: Vec<_> = lib
+            .children("Modelica")
+            .into_iter()
+            .map(|c| c.qualified_name.as_str())
+            .collect();
+        assert_eq!(children, ["Modelica.Blocks", "Modelica.UsersGuide"]);
+        let iterated: Vec<_> = lib
+            .children_iter("Modelica.Blocks")
+            .map(|c| c.qualified_name.as_str())
+            .collect();
+        assert_eq!(
+            iterated,
+            ["Modelica.Blocks.Basic", "Modelica.Blocks.Continuous"]
+        );
+        assert!(lib.has_children("Modelica"));
+        assert!(lib.has_children("Modelica.Blocks"));
+        assert!(!lib.has_children("Modelica.UsersGuide"));
+        assert!(lib.children("Missing").is_empty());
+        assert!(!lib.has_children("Missing"));
+        assert!(lib.children("Orphan.Parent").is_empty());
     }
 
     #[test]
