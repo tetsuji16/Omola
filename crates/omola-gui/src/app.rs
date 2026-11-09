@@ -8,6 +8,7 @@
 use crate::backend::{
     ClassContext, Event, Job, LogLevel, LogTab, SimulationOutcome, SimulationSetup, Worker,
 };
+use crate::edit::EditOp;
 use crate::html::{self, Block};
 use crate::library::{self, ClassDoc, LibrarySpec, LoadedLibrary};
 use crate::model::{default_class, scan_classes, ClassEntry as UserClass, Document};
@@ -320,6 +321,7 @@ pub struct OmolaApp {
     pub pending_url: Option<String>,
     pub omc_hint_shown: bool,
     pub frame_stats: crate::perf::FrameStats,
+    pub pending_edit: Option<String>,
 }
 
 /// Shown once when no OpenModelica compiler is found.
@@ -431,6 +433,7 @@ impl OmolaApp {
             pending_url: None,
             omc_hint_shown: false,
             frame_stats: crate::perf::FrameStats::disabled(),
+            pending_edit: None,
         }
     }
 
@@ -973,6 +976,32 @@ impl OmolaApp {
         }
     }
 
+    /// Apply graphical edits to a user-owned class through OMC.
+    #[allow(dead_code)] // Called by graphical edit controls introduced by the dependent UI issues.
+    pub fn apply_edit(&mut self, class: &str, ops: Vec<EditOp>) {
+        if !self.is_user_class(class) {
+            return self.error(LogTab::Syntax, "Library classes are read-only".into());
+        }
+        if self.pending_edit.is_some() {
+            return self.error(LogTab::Syntax, "A model edit is already running".into());
+        }
+        let Some(doc) = self.doc_of(class) else {
+            return;
+        };
+        self.pending_edit = Some(class.to_owned());
+        let libs = self.loaded_specs();
+        self.worker.submit(Job::EditModel {
+            doc_text: self.documents[doc].text.clone(),
+            file_name: self.documents[doc]
+                .path
+                .as_ref()
+                .map_or_else(String::new, |p| p.to_string_lossy().into_owned()),
+            class: class.to_owned(),
+            ops,
+            libraries: libs,
+        });
+    }
+
     // ---------------------------------------------------------------- check & simulate
 
     pub fn check(&mut self) {
@@ -1310,6 +1339,40 @@ impl OmolaApp {
                         for spec in library::default_libraries() {
                             self.load_library(spec);
                         }
+                    }
+                }
+                Event::ModelEdited { class, result } => {
+                    self.pending_edit = None;
+                    match result {
+                        Ok(source) => {
+                            if let Some(doc) = self.doc_of(&class) {
+                                if let Some(updated) = crate::model::replace_class_text(
+                                    &self.documents[doc].text,
+                                    &class,
+                                    &source,
+                                ) {
+                                    self.documents[doc].text = updated;
+                                    self.user_text_changed(doc);
+                                    self.model_diagrams.remove(&class);
+                                    self.icons.remove(&class);
+                                    if self.components.as_ref().is_some_and(|(c, _)| c == &class) {
+                                        self.components = None;
+                                    }
+                                    self.components_pending = None;
+                                    self.request_diagram(&class);
+                                    self.request_icon(&class);
+                                    self.request_components(&class);
+                                } else {
+                                    self.error(
+                                        LogTab::Syntax,
+                                        format!(
+                                            "Could not locate class {class} in the editor buffer"
+                                        ),
+                                    );
+                                }
+                            }
+                        }
+                        Err(message) => self.error(LogTab::Syntax, message),
                     }
                 }
             }

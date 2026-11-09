@@ -3,6 +3,7 @@
 //! The UI sends [`Job`]s and polls [`Event`]s once per frame. The worker writes the
 //! editor buffer to a private run directory, so user files are never modified by a run.
 
+use crate::edit::{self, EditOp};
 use crate::library::{self, ClassDoc, LibrarySpec, LoadedLibrary};
 use omola_core::{mat, Omc, SimulationConfig};
 use std::{
@@ -26,6 +27,48 @@ pub struct SimulationSetup {
     pub method: String,
     /// Parameter overrides `name=value` applied with OMC `-override`.
     pub parameters: Vec<(String, String)>,
+}
+
+#[cfg(test)]
+mod edit_integration_test {
+    use super::*;
+    use crate::edit::EditOp;
+    use std::time::Duration;
+
+    #[test]
+    #[ignore = "needs OpenModelica; run with --ignored and OMOLA_OMC set"]
+    fn edit_model_adds_component_with_real_omc() {
+        if std::env::var_os("OMOLA_OMC").is_none() {
+            eprintln!("OMOLA_OMC is not set; skipping real-OMC edit test");
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("omola-gui-edit-{}", std::process::id()));
+        let worker = Worker::spawn(root.join("work"), || {});
+        worker.submit(Job::EditModel {
+            doc_text: "model A Real x; equation der(x)=-x; end A;".into(),
+            file_name: "A.mo".into(),
+            class: "A".into(),
+            ops: vec![EditOp::AddComponent {
+                name: "k".into(),
+                type_name: "Modelica.Blocks.Sources.Constant".into(),
+                extent: [[-10., -10.], [10., 10.]],
+                origin: [0., 0.],
+            }],
+            libraries: vec![LibrarySpec::new("Modelica", Some("4.1.0"))],
+        });
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let mut result = None;
+        while result.is_none() && Instant::now() < deadline {
+            for event in worker.poll() {
+                if let Event::ModelEdited { result: r, .. } = event {
+                    result = Some(r);
+                }
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(result.expect("edit result").unwrap().contains("Constant k"));
+        let _ = std::fs::remove_dir_all(root);
+    }
 }
 
 impl Default for SimulationSetup {
@@ -93,6 +136,13 @@ pub enum Job {
         text: String,
         libraries: Vec<LibrarySpec>,
     },
+    EditModel {
+        doc_text: String,
+        file_name: String,
+        class: String,
+        ops: Vec<EditOp>,
+        libraries: Vec<LibrarySpec>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -156,6 +206,10 @@ pub enum Event {
     SimulationFinished(Box<SimulationOutcome>),
     /// `InstallLibraries` finished (`true` when the Modelica Standard Library is installed).
     LibrariesInstalled(bool),
+    ModelEdited {
+        class: String,
+        result: Result<String, String>,
+    },
 }
 
 /// How deep the Component Browser follows the inlined type definitions of a component.
@@ -552,6 +606,53 @@ fn run_job(
             };
             send(Event::Command(format!("{text}\n{output}")));
         }
+        Job::EditModel {
+            doc_text,
+            file_name,
+            class,
+            ops,
+            libraries,
+        } => {
+            let result = edit::edit_script(&class, &ops).and_then(|script| {
+                let mut prefix = String::new();
+                let pins = pinned(&libraries);
+                omola_core::validate_library_pins(&pins).map_err(|e| e.to_string())?;
+                for (name, version) in &pins {
+                    prefix.push_str(&format!(
+                        "loadModel({name}, {{\"{}\"}});\n",
+                        omola_core::escape_modelica_string(version)
+                    ));
+                }
+                let source_name = if file_name.is_empty() {
+                    format!("{class}.mo")
+                } else {
+                    file_name
+                };
+                prefix.push_str(&format!(
+                    "loadString(\"{}\", \"{}\");\n",
+                    omola_core::escape_modelica_string(&doc_text),
+                    omola_core::escape_modelica_string(&source_name)
+                ));
+                prefix.push_str(&script);
+                let output = omc
+                    .run_query_script(&prefix)
+                    .map_err(|e| e.to_string())?
+                    .output;
+                if output.contains("OMOLA_EDIT_FAIL") {
+                    return Err(output);
+                }
+                let begin = output
+                    .find("OMOLA_EDIT_BEGIN")
+                    .ok_or_else(|| format!("OMC did not return edited class:\n{output}"))?
+                    + "OMOLA_EDIT_BEGIN".len();
+                let end = output[begin..]
+                    .find("OMOLA_EDIT_END")
+                    .ok_or_else(|| format!("OMC returned an incomplete edited class:\n{output}"))?
+                    + begin;
+                Ok(output[begin..end].trim().to_owned())
+            });
+            send(Event::ModelEdited { class, result });
+        }
     }
 }
 
@@ -576,6 +677,10 @@ fn fail_job(job: Job, message: String, send: &dyn Fn(Event)) {
         Job::LoadIcon { class, .. } => send(Event::Icon(class, Err(message))),
         Job::LoadDiagram { class, .. } => send(Event::Diagram(class, Err(message))),
         Job::Command { text, .. } => send(Event::Command(format!("{text}\n  {message}"))),
+        Job::EditModel { class, .. } => send(Event::ModelEdited {
+            class,
+            result: Err(message),
+        }),
         Job::InstallLibraries => send(Event::LibrariesInstalled(false)),
         Job::Doctor | Job::Check { .. } | Job::Simulate { .. } => {}
     }
@@ -874,6 +979,41 @@ mod tests {
         let gravity = result.index_of("gravity").expect("gravity variable");
         assert!(result.variables[gravity].is_parameter);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    #[ignore = "needs OpenModelica; run with --ignored and OMOLA_OMC set"]
+    fn edit_model_adds_component_with_real_omc() {
+        if std::env::var_os("OMOLA_OMC").is_none() {
+            eprintln!("OMOLA_OMC is not set; skipping real-OMC edit test");
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("omola-gui-edit-{}", std::process::id()));
+        let worker = Worker::spawn(root.join("work"), || {});
+        worker.submit(Job::EditModel {
+            doc_text: "model A Real x; equation der(x)=-x; end A;".into(),
+            file_name: "A.mo".into(),
+            class: "A".into(),
+            ops: vec![EditOp::AddComponent {
+                name: "k".into(),
+                type_name: "Modelica.Blocks.Sources.Constant".into(),
+                extent: [[-10., -10.], [10., 10.]],
+                origin: [0., 0.],
+            }],
+            libraries: vec![LibrarySpec::new("Modelica", Some("4.1.0"))],
+        });
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let mut result = None;
+        while result.is_none() && Instant::now() < deadline {
+            for event in worker.poll() {
+                if let Event::ModelEdited { result: r, .. } = event {
+                    result = Some(r);
+                }
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(result.expect("edit result").unwrap().contains("Constant k"));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     /// Icon annotations of three Modelica Standard Library classes through the GUI worker:
