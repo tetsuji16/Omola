@@ -146,7 +146,7 @@ fn tree_row(
         action.toggle = expandable;
         action.open_new_tab = !expandable;
     }
-    response.on_hover_ui(|ui| {
+    let response = response.on_hover_ui(|ui| {
         let tooltip = tooltip();
         if !tooltip.is_empty() {
             ui.label(tooltip);
@@ -219,6 +219,7 @@ fn component_rows(
         false,
         component_icon(node),
         &label,
+        || node.comment.clone(),
         None,
     );
     if action.toggle {
