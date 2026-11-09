@@ -129,6 +129,8 @@ FMI export and import are delegated to OMC. `omola fmi capabilities` reports the
 
 The compiler is resolved in this order: a non-empty `OMOLA_OMC` executable path, then `omc.exe` from `PATH` on Windows (or `omc` on Unix). A configured path that does not exist is reported directly; it does not silently fall back to PATH. The adapter reports the OMC version with each successful command result, rejects invalid Modelica class names and stop times before creating a script, and removes its temporary `.mos` file and compiler workspace after success or failure. Simulation passes OMC a unique prefix in that isolated workspace, then copies the resulting MAT file to `<output-prefix>_res.mat`; existing result files are not overwritten. This allows output prefixes containing spaces despite OMC's generated makefile path handling.
 
+When a cancellable OMC command is stopped, Unix terminates its process group and Windows uses a Job Object to stop OMC and its child processes together. If Windows Job Object setup is unavailable, cancellation falls back to terminating OMC itself.
+
 ## Linux development container
 
 The development image starts from the official `openmodelica/openmodelica:v1.27.1-minimal` image and installs the stable Rust toolchain. It is a development environment, not a redistributable Omola runtime image. The OpenModelica minimal image does not include Modelica libraries; no MSL or Dymola files are copied into the repository or image. Install only libraries whose licenses and provenance are compatible with your use.

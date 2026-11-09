@@ -667,6 +667,12 @@ impl Omc {
             command.process_group(0);
         }
         let mut child = command.spawn().map_err(launch_failed)?;
+        #[cfg(windows)]
+        let mut job = JobHandle::create();
+        #[cfg(windows)]
+        if job.as_ref().is_some_and(|job| !job.assign(&child)) {
+            job = None;
+        }
         let mut out = child.stdout.take().expect("stdout piped");
         let mut err = child.stderr.take().expect("stderr piped");
         let out_t = std::thread::spawn(move || {
@@ -690,6 +696,9 @@ impl Omc {
                 });
             }
             if flag.load(Ordering::Relaxed) {
+                #[cfg(windows)]
+                kill_tree(&mut child, job.as_ref());
+                #[cfg(not(windows))]
                 kill_tree(&mut child);
                 let _ = child.wait();
                 return Err(BackendError::Cancelled);
@@ -699,40 +708,113 @@ impl Omc {
     }
 }
 
+#[cfg(unix)]
 fn kill_tree(child: &mut std::process::Child) {
-    #[cfg(unix)]
-    {
-        let pid = child.id();
-        // `kill` is usually a shell builtin; /bin/kill is the procps binary on Linux.
+    let pid = child.id();
+    // `kill` is usually a shell builtin; /bin/kill is the procps binary on Linux.
+    for prog in ["/bin/kill", "kill"] {
+        if std::process::Command::new(prog)
+            .args(["-TERM", &format!("-{pid}")])
+            .status()
+            .is_ok()
+        {
+            break;
+        }
+    }
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    if child.try_wait().ok().flatten().is_none() {
         for prog in ["/bin/kill", "kill"] {
             if std::process::Command::new(prog)
-                .args(["-TERM", &format!("-{pid}")])
+                .args(["-KILL", &format!("-{pid}")])
                 .status()
                 .is_ok()
             {
                 break;
             }
         }
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        if child.try_wait().ok().flatten().is_none() {
-            for prog in ["/bin/kill", "kill"] {
-                if std::process::Command::new(prog)
-                    .args(["-KILL", &format!("-{pid}")])
-                    .status()
-                    .is_ok()
-                {
-                    break;
-                }
-            }
-            std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    // Fallback so we never hang if the group-kill binary is unavailable.
+    if child.try_wait().ok().flatten().is_none() {
+        let _ = child.kill();
+    }
+}
+
+#[cfg(windows)]
+struct JobHandle(windows_sys::Win32::Foundation::HANDLE);
+
+#[cfg(windows)]
+impl JobHandle {
+    fn create() -> Option<Self> {
+        use std::{mem, ptr};
+        use windows_sys::Win32::System::JobObjects::{
+            CreateJobObjectW, JobObjectExtendedLimitInformation,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        };
+        let handle = unsafe {
+            // SAFETY: Null security attributes and name request a private unnamed job object.
+            CreateJobObjectW(ptr::null(), ptr::null())
+        };
+        if handle.is_null() {
+            return None;
         }
-        // Fallback so we never hang if the group-kill binary is unavailable.
-        if child.try_wait().ok().flatten().is_none() {
-            let _ = child.kill();
+        let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe {
+            // SAFETY: The Windows limit-information C struct permits zero in every field.
+            mem::zeroed()
+        };
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let configured = unsafe {
+            // SAFETY: `limits` is initialized and its size matches the selected information class.
+            windows_sys::Win32::System::JobObjects::SetInformationJobObject(
+                handle,
+                JobObjectExtendedLimitInformation,
+                &mut limits as *mut _ as *mut _,
+                mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+        };
+        if configured == 0 {
+            unsafe {
+                // SAFETY: `handle` was returned by CreateJobObjectW above and is owned here.
+                windows_sys::Win32::Foundation::CloseHandle(handle);
+            }
+            return None;
+        }
+        Some(Self(handle))
+    }
+
+    fn assign(&self, child: &std::process::Child) -> bool {
+        use std::os::windows::io::AsRawHandle;
+        unsafe {
+            // SAFETY: The child handle remains owned by `child`; this call only assigns its process.
+            windows_sys::Win32::System::JobObjects::AssignProcessToJobObject(
+                self.0,
+                child.as_raw_handle() as windows_sys::Win32::Foundation::HANDLE,
+            ) != 0
         }
     }
-    #[cfg(not(unix))]
-    {
+
+    fn terminate(&self) -> bool {
+        unsafe {
+            // SAFETY: `self.0` is a live job handle owned by this guard.
+            windows_sys::Win32::System::JobObjects::TerminateJobObject(self.0, 1) != 0
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for JobHandle {
+    fn drop(&mut self) {
+        unsafe {
+            // SAFETY: This guard uniquely owns the valid handle returned by CreateJobObjectW.
+            windows_sys::Win32::Foundation::CloseHandle(self.0);
+        }
+    }
+}
+
+#[cfg(windows)]
+fn kill_tree(child: &mut std::process::Child, job: Option<&JobHandle>) {
+    if !job.is_some_and(JobHandle::terminate) {
+        // Job Object setup can be unavailable in restricted environments; retain legacy behavior.
         let _ = child.kill();
     }
 }
@@ -1014,6 +1096,8 @@ fn find_on_path(name: &str) -> Option<PathBuf> {
 mod tests {
     use super::*;
 
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn installation_candidates_prefer_home_then_newest_version() {
         let root = env::temp_dir().join(unique_name("pf"));
@@ -1227,6 +1311,7 @@ mod tests {
 
     #[test]
     fn fake_executable_receives_script_and_is_cleaned_after_success_and_failure() {
+        let _env_lock = ENV_LOCK.lock().unwrap();
         struct RestoreEnv(Vec<(&'static str, Option<OsString>)>);
         impl Drop for RestoreEnv {
             fn drop(&mut self) {
@@ -1318,6 +1403,7 @@ fn main() {
     #[cfg(unix)]
     #[test]
     fn cancel_flag_stops_long_running_fake_omc_within_two_seconds() {
+        let _env_lock = ENV_LOCK.lock().unwrap();
         use std::os::unix::fs::PermissionsExt;
         let dir = TempDir::new("cancel").unwrap();
         let fake = dir.path.join("fake-omc");
@@ -1357,6 +1443,64 @@ sleep 30
             env::set_var("OMOLA_OMC", old);
         } else {
             env::remove_var("OMOLA_OMC");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn cancel_flag_terminates_job_object_children_on_windows() {
+        struct RestoreOmola(Option<OsString>);
+        impl Drop for RestoreOmola {
+            fn drop(&mut self) {
+                if let Some(value) = &self.0 {
+                    env::set_var("OMOLA_OMC", value);
+                } else {
+                    env::remove_var("OMOLA_OMC");
+                }
+            }
+        }
+
+        let _env_lock = ENV_LOCK.lock().unwrap();
+        let dir = TempDir::new("cancel-job-object").unwrap();
+        let fake = dir.path.join("fake-omc.bat");
+        fs::write(
+            &fake,
+            "@echo off\r\nif \"%~1\"==\"--version\" (echo OpenModelica 1.27.1 fake & exit /b 0)\r\ncmd /C ping -n 30 127.0.0.1 > NUL\r\n",
+        )
+        .unwrap();
+        let _restore = RestoreOmola(env::var_os("OMOLA_OMC"));
+        env::set_var("OMOLA_OMC", &fake);
+        let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag_setter = flag.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            flag_setter.store(true, std::sync::atomic::Ordering::Relaxed);
+        });
+        let omc = Omc::discover().unwrap().with_cancel_flag(flag);
+        let started = std::time::Instant::now();
+        let result = omc.run_script("print(1);");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "cancellation took {:?}",
+            started.elapsed()
+        );
+        assert!(matches!(result, Err(BackendError::Cancelled)), "{result:?}");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            let tasks = Command::new("tasklist")
+                .args(["/FI", "IMAGENAME eq PING.EXE", "/FO", "CSV", "/NH"])
+                .output()
+                .unwrap();
+            let listing = String::from_utf8_lossy(&tasks.stdout).to_ascii_uppercase();
+            if !listing.contains("PING.EXE") || std::time::Instant::now() >= deadline {
+                assert!(
+                    !listing.contains("PING.EXE"),
+                    "ping.exe remained after cancellation: {listing}"
+                );
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
         }
     }
 }
