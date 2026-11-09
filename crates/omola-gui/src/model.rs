@@ -149,6 +149,135 @@ pub fn scan_classes(text: &str) -> Vec<ClassEntry> {
     out
 }
 
+/// Byte range of a class definition, including its declaration and matching `end`.
+pub fn class_range(text: &str, qualified: &str) -> Option<std::ops::Range<usize>> {
+    let toks = tokenize_spanned(text);
+    let mut stack: Vec<(String, usize, String)> = Vec::new();
+    let mut found = None;
+    let mut i = 0;
+    while i < toks.len() {
+        let t = toks[i].0.as_str();
+        if t == "end" {
+            if let (Some((name, start, q)), Some(end_name), Some(semi)) =
+                (stack.pop(), toks.get(i + 1), toks.get(i + 2))
+            {
+                if name == end_name.0 && semi.0 == ";" {
+                    if q == qualified {
+                        found = Some(start..semi.2);
+                    }
+                } else {
+                    stack.push((name, start, q));
+                }
+            }
+            i += 1;
+            continue;
+        }
+        if CLASS_KEYWORDS.contains(&t) {
+            let mut j = i + 1;
+            while toks
+                .get(j)
+                .is_some_and(|x| CLASS_KEYWORDS.contains(&x.0.as_str()))
+            {
+                j += 1;
+            }
+            if let Some((name, _, _)) = toks.get(j) {
+                if is_identifier(name) {
+                    let q = stack
+                        .iter()
+                        .map(|x| x.0.as_str())
+                        .chain(std::iter::once(name.as_str()))
+                        .collect::<Vec<_>>()
+                        .join(".");
+                    let line_start = text[..toks[i].1].rfind('\n').map_or(0, |x| x + 1);
+                    let short = toks.get(j + 1).is_some_and(|x| x.0 == "=");
+                    if short {
+                        if q == qualified {
+                            let end = toks.iter().skip(j + 1).find(|x| x.0 == ";").map(|x| x.2)?;
+                            found = Some(line_start..end);
+                        }
+                    } else {
+                        stack.push((name.clone(), line_start, q));
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    found
+}
+
+/// Replace exactly one definition returned by OMC `list()`, preserving its original indentation.
+pub fn replace_class_text(text: &str, qualified: &str, source: &str) -> Option<String> {
+    let range = class_range(text, qualified)?;
+    let original = &text[range.clone()];
+    let indent = original
+        .lines()
+        .next()
+        .unwrap_or("")
+        .chars()
+        .take_while(|c| c.is_whitespace())
+        .collect::<String>();
+    let replacement = source
+        .lines()
+        .map(|line| {
+            if line.is_empty() {
+                String::new()
+            } else {
+                format!("{indent}{line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut updated = text.to_owned();
+    updated.replace_range(range, &replacement);
+    Some(updated)
+}
+
+fn tokenize_spanned(text: &str) -> Vec<(String, usize, usize)> {
+    let chars: Vec<(usize, char)> = text.char_indices().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let (start, c) = chars[i];
+        if c.is_whitespace() {
+            i += 1;
+        } else if c == '/' && chars.get(i + 1).is_some_and(|x| x.1 == '/') {
+            while i < chars.len() && chars[i].1 != '\n' {
+                i += 1;
+            }
+        } else if c == '/' && chars.get(i + 1).is_some_and(|x| x.1 == '*') {
+            i += 2;
+            while i + 1 < chars.len() && !(chars[i].1 == '*' && chars[i + 1].1 == '/') {
+                i += 1;
+            }
+            i = (i + 2).min(chars.len());
+        } else if c == '"' {
+            i += 1;
+            while i < chars.len() && chars[i].1 != '"' {
+                if chars[i].1 == '\\' {
+                    i += 1;
+                }
+                i += 1;
+            }
+            i = (i + 1).min(chars.len());
+            let end = chars.get(i).map_or(text.len(), |x| x.0);
+            out.push((text[start..end].into(), start, end));
+        } else if c == '_' || c.is_ascii_alphanumeric() {
+            i += 1;
+            while i < chars.len() && (chars[i].1 == '_' || chars[i].1.is_ascii_alphanumeric()) {
+                i += 1;
+            }
+            let end = chars.get(i).map_or(text.len(), |x| x.0);
+            out.push((text[start..end].into(), start, end));
+        } else {
+            let end = start + c.len_utf8();
+            out.push((c.to_string(), start, end));
+            i += 1;
+        }
+    }
+    out
+}
+
 /// The class to check/simulate by default: the first non-package class, else the first class.
 pub fn default_class(entries: &[ClassEntry]) -> Option<String> {
     entries
@@ -258,5 +387,23 @@ end Top;
     fn reads_description_strings() {
         let entries = scan_classes("model A \"Desc\" end A;");
         assert_eq!(entries[0].description.as_deref(), Some("Desc"));
+    }
+
+    #[test]
+    fn finds_top_level_and_nested_ranges_without_touching_comments() {
+        let text =
+            "// keep\npackage P\n  model M\n  end M;\n  model N end N;\nend P;\nmodel Q end Q;\n";
+        let r = class_range(text, "P.M").unwrap();
+        assert_eq!(&text[r], "  model M\n  end M;");
+        let r = class_range(text, "Q").unwrap();
+        assert_eq!(&text[r], "model Q end Q;");
+    }
+
+    #[test]
+    fn replacement_preserves_comments_other_classes_and_nested_indent() {
+        let before = "// header\npackage P\n  model M\n  end M;\nend P;\nmodel Q\nend Q;\n";
+        let after = replace_class_text(before, "P.M", "model M\nReal x;\nend M;").unwrap();
+        assert!(after.starts_with("// header\npackage P\n  model M\n  Real x;\n  end M;"));
+        assert!(after.ends_with("end P;\nmodel Q\nend Q;\n"));
     }
 }
