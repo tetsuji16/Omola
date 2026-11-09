@@ -6,6 +6,7 @@
 mod app;
 mod backend;
 mod cache;
+mod decimate;
 mod diagram;
 mod diagram_view;
 mod graphics;

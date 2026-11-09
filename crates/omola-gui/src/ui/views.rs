@@ -314,10 +314,10 @@ impl OmolaApp {
         let painter = ui.painter_at(panel);
         painter.rect_filled(panel, 0.0, Color32::WHITE);
         // Collect the curves first so the borrow of `runs` ends before drawing.
-        let diagrams: Vec<Vec<Curve>> = self
+        let diagrams: Vec<Vec<Curve<'_>>> = self
             .diagrams
             .iter()
-            .map(|diagram| self.curves(&diagram.signals))
+            .map(|diagram| Self::curves(&self.runs, &diagram.signals))
             .collect();
         if diagrams.is_empty() {
             return;
@@ -468,14 +468,14 @@ impl OmolaApp {
     }
 
     /// Curves of `signals`; the name carries the run label when several results exist.
-    fn curves(&self, signals: &[PlotSignal]) -> Vec<Curve> {
+    fn curves<'a>(runs: &'a [crate::app::ResultRun], signals: &[PlotSignal]) -> Vec<Curve<'a>> {
         signals
             .iter()
             .enumerate()
             .filter_map(|(index, signal)| {
-                let run = self.run(signal.run_id)?;
+                let run = runs.iter().find(|run| run.id == signal.run_id)?;
                 let values = run.outcome.result.series(&signal.variable)?;
-                let name = if self.runs.len() > 1 {
+                let name = if runs.len() > 1 {
                     format!("{}.{}", run.label, signal.variable)
                 } else {
                     signal.variable.clone()
@@ -483,8 +483,8 @@ impl OmolaApp {
                 Some(Curve {
                     name,
                     color: CURVE_COLORS[index % CURVE_COLORS.len()],
-                    time: run.outcome.result.time.clone(),
-                    values: values.to_vec(),
+                    time: &run.outcome.result.time,
+                    values,
                 })
             })
             .collect()
@@ -529,7 +529,7 @@ fn sane(a: f64, b: f64) -> (f64, f64) {
 }
 
 /// Grid, tick labels and curves of one diagram.
-fn draw_diagram(painter: &egui::Painter, map: &Mapping, curves: &[Curve], y_step: Option<f64>) {
+fn draw_diagram(painter: &egui::Painter, map: &Mapping, curves: &[Curve<'_>], y_step: Option<f64>) {
     let frame = map.frame;
     let (x0, x1) = map.x;
     let (y0, y1) = map.y;
@@ -589,11 +589,16 @@ fn draw_diagram(painter: &egui::Painter, map: &Mapping, curves: &[Curve], y_step
     }
     let clip = painter.with_clip_rect(frame);
     for curve in curves {
-        let points: Vec<egui::Pos2> = curve
-            .time
-            .iter()
-            .zip(&curve.values)
-            .map(|(t, v)| map.to_screen(*t, *v))
+        let indices = crate::decimate::min_max_indices(
+            curve.time,
+            curve.values,
+            map.x.0,
+            map.x.1,
+            frame.width().ceil() as usize,
+        );
+        let points: Vec<egui::Pos2> = indices
+            .into_iter()
+            .map(|i| map.to_screen(curve.time[i], curve.values[i]))
             .collect();
         clip.add(egui::Shape::line(points, Stroke::new(1.0, curve.color)));
     }
@@ -601,7 +606,7 @@ fn draw_diagram(painter: &egui::Painter, map: &Mapping, curves: &[Curve], y_step
 }
 
 /// Measurement cursor: a vertical line at `t` and `name = value` for every curve.
-fn draw_cursor(painter: &egui::Painter, map: &Mapping, curves: &[Curve], t: f64) {
+fn draw_cursor(painter: &egui::Painter, map: &Mapping, curves: &[Curve<'_>], t: f64) {
     let x = map.to_screen(t, map.y.0).x.round() + 0.5;
     painter.vline(
         x,
@@ -611,7 +616,7 @@ fn draw_cursor(painter: &egui::Painter, map: &Mapping, curves: &[Curve], t: f64)
     let font = FontId::proportional(11.5);
     let mut y = map.frame.top() + 4.0;
     for curve in curves {
-        let Some(value) = crate::series::value_at(&curve.time, &curve.values, t) else {
+        let Some(value) = crate::series::value_at(curve.time, curve.values, t) else {
             continue;
         };
         painter.text(
@@ -625,17 +630,17 @@ fn draw_cursor(painter: &egui::Painter, map: &Mapping, curves: &[Curve], t: f64)
     }
 }
 
-struct Curve {
+struct Curve<'a> {
     name: String,
     color: Color32,
-    time: Vec<f64>,
-    values: Vec<f64>,
+    time: &'a [f64],
+    values: &'a [f64],
 }
 
-fn data_bounds<'a>(curves: impl Iterator<Item = &'a Curve>) -> Option<(f64, f64, f64, f64)> {
+fn data_bounds<'a>(curves: impl Iterator<Item = &'a Curve<'a>>) -> Option<(f64, f64, f64, f64)> {
     let mut bounds: Option<(f64, f64, f64, f64)> = None;
     for curve in curves {
-        for (x, y) in curve.time.iter().zip(&curve.values) {
+        for (x, y) in curve.time.iter().zip(curve.values.iter()) {
             if !x.is_finite() || !y.is_finite() {
                 continue;
             }
