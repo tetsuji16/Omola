@@ -384,7 +384,14 @@ impl OmolaApp {
                 small_button(ui, ICON_REDO, DARK, "Redo", false, false);
             });
         });
-        clipboard_group(ui);
+        let delete_enabled = self
+            .active
+            .as_deref()
+            .is_some_and(|c| self.is_user_class(c))
+            && self.selected_component.is_some();
+        if clipboard_group(ui, delete_enabled) {
+            self.delete_selected_component();
+        }
         group(ui, "Draw", |ui| {
             column(ui, |ui| {
                 small_button(ui, ICON_HORIZONTAL_RULE, BLUE, "Line", false, false);
@@ -487,7 +494,7 @@ impl OmolaApp {
                 small_button(ui, ICON_MARKDOWN, DARK, "Markdown", !read_only, false);
             });
         });
-        clipboard_group(ui);
+        clipboard_group(ui, false);
         group(ui, "Find", |ui| {
             if big_button(ui, ICON_SEARCH, DARK, "Find", true, self.find_open).clicked() {
                 self.find_open = !self.find_open;
@@ -569,7 +576,7 @@ impl OmolaApp {
                 small_button(ui, ICON_REDO, DARK, "Redo", false, false);
             });
         });
-        clipboard_group(ui);
+        clipboard_group(ui, false);
         group(ui, "Find", |ui| {
             column(ui, |ui| {
                 if small_button(ui, ICON_SEARCH, DARK, "Find", true, false).clicked() {
@@ -890,17 +897,19 @@ impl OmolaApp {
     }
 }
 
-fn clipboard_group(ui: &mut egui::Ui) {
+fn clipboard_group(ui: &mut egui::Ui, delete_enabled: bool) -> bool {
+    let mut delete = false;
     group(ui, "Clipboard", |ui| {
         big_button(ui, ICON_CONTENT_CUT, DARK, "Cut", false, false);
         big_button(ui, ICON_CONTENT_COPY, DARK, "Copy", false, false);
         big_button(ui, ICON_CONTENT_PASTE, DARK, "Paste", false, false);
         column(ui, |ui| {
-            small_button(ui, ICON_CLOSE, RED, "Delete", false, false);
+            delete = small_button(ui, ICON_CLOSE, RED, "Delete", delete_enabled, false).clicked();
             small_button(ui, ICON_FILE_COPY, DARK, "Duplicate", false, false);
             small_button(ui, ICON_SELECT_ALL, DARK, "Select All", false, false);
         });
     });
+    delete
 }
 
 fn display_method(m: &str) -> String {
