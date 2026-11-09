@@ -176,6 +176,89 @@ pub enum PathDialog {
     ExportCsv(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenameDialog {
+    pub class: String,
+    pub old: String,
+    pub new_text: String,
+}
+
+pub fn component_name_error(new: &str, existing: &[String], old: &str) -> Option<&'static str> {
+    const KEYWORDS: &[&str] = &[
+        "algorithm",
+        "and",
+        "annotation",
+        "block",
+        "break",
+        "class",
+        "connect",
+        "connector",
+        "constant",
+        "der",
+        "discrete",
+        "each",
+        "else",
+        "elseif",
+        "elsewhen",
+        "encapsulated",
+        "end",
+        "enumeration",
+        "equation",
+        "expandable",
+        "extends",
+        "external",
+        "false",
+        "final",
+        "flow",
+        "for",
+        "function",
+        "if",
+        "import",
+        "impure",
+        "in",
+        "initial",
+        "inner",
+        "input",
+        "loop",
+        "model",
+        "not",
+        "operator",
+        "or",
+        "outer",
+        "output",
+        "package",
+        "parameter",
+        "partial",
+        "protected",
+        "public",
+        "pure",
+        "record",
+        "redeclare",
+        "replaceable",
+        "return",
+        "stream",
+        "then",
+        "true",
+        "type",
+        "when",
+        "while",
+        "within",
+    ];
+    let mut chars = new.chars();
+    if !matches!(chars.next(),Some(c) if c=='_'||c.is_ascii_alphabetic())
+        || !chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
+    {
+        return Some("Not a valid Modelica identifier");
+    }
+    if KEYWORDS.contains(&new) {
+        return Some("Not a valid Modelica identifier");
+    }
+    if new != old && existing.iter().any(|n| n == new) {
+        return Some("Name already used");
+    }
+    None
+}
+
 /// Async result from a native file dialog (picked on a background thread).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DialogResult {
@@ -323,6 +406,7 @@ pub struct OmolaApp {
     pub omc_hint_shown: bool,
     pub frame_stats: crate::perf::FrameStats,
     pub pending_edit: Option<String>,
+    pub rename_dialog: Option<RenameDialog>,
     pub diagram_drag: Option<DiagramDrag>,
     pub pending_placement: Option<(String, Placement)>,
 }
@@ -444,6 +528,7 @@ impl OmolaApp {
             omc_hint_shown: false,
             frame_stats: crate::perf::FrameStats::disabled(),
             pending_edit: None,
+            rename_dialog: None,
             diagram_drag: None,
             pending_placement: None,
         }
@@ -1012,6 +1097,26 @@ impl OmolaApp {
             ops,
             libraries: libs,
         });
+    }
+
+    pub fn delete_selected_component(&mut self) {
+        let Some(class) = self.active.clone() else {
+            return;
+        };
+        if !self.is_user_class(&class) {
+            return self.error(LogTab::Syntax, "Library classes are read-only".into());
+        }
+        let Some(name) = self.selected_component.clone() else {
+            return;
+        };
+        let Some(Loadable::Ready(diagram)) = self.model_diagrams.get(&class) else {
+            return;
+        };
+        let ops = crate::diagram::delete_component_ops(diagram, &name);
+        if ops.len() > 1 {
+            self.apply_edit(&class, ops);
+            self.selected_component = None;
+        }
     }
 
     // ---------------------------------------------------------------- check & simulate
@@ -1912,6 +2017,31 @@ impl OmolaApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rename_validation_rejects_keywords_invalid_names_and_duplicates() {
+        assert_eq!(component_name_error("abc", &["old".into()], "old"), None);
+        assert_eq!(
+            component_name_error("1a", &[], "old"),
+            Some("Not a valid Modelica identifier")
+        );
+        assert_eq!(
+            component_name_error("model", &[], "old"),
+            Some("Not a valid Modelica identifier")
+        );
+        assert_eq!(
+            component_name_error("a b", &[], "old"),
+            Some("Not a valid Modelica identifier")
+        );
+        assert_eq!(
+            component_name_error("", &[], "old"),
+            Some("Not a valid Modelica identifier")
+        );
+        assert_eq!(
+            component_name_error("taken", &["taken".into()], "old"),
+            Some("Name already used")
+        );
+    }
     use omola_core::mat::{ResultVariable, TrajectoryResult};
 
     fn outcome(class: &str) -> SimulationOutcome {

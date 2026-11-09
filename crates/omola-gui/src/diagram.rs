@@ -56,6 +56,28 @@ pub struct Diagram {
     pub connections: Vec<Connection>,
 }
 
+/// Connections whose endpoints belong to `component`, avoiding prefix collisions (c1 vs c10).
+pub fn connections_of(diagram: &Diagram, component: &str) -> Vec<(String, String)> {
+    let owns = |name: &str| name == component || name.starts_with(&format!("{component}."));
+    diagram
+        .connections
+        .iter()
+        .filter(|c| owns(&c.from) || owns(&c.to))
+        .map(|c| (c.from.clone(), c.to.clone()))
+        .collect()
+}
+
+pub fn delete_component_ops(diagram: &Diagram, component: &str) -> Vec<crate::edit::EditOp> {
+    let mut ops = connections_of(diagram, component)
+        .into_iter()
+        .map(|(from, to)| crate::edit::EditOp::DeleteConnection { from, to })
+        .collect::<Vec<_>>();
+    ops.push(crate::edit::EditOp::DeleteComponent {
+        name: component.into(),
+    });
+    ops
+}
+
 impl Default for Diagram {
     fn default() -> Self {
         Self {
@@ -500,6 +522,49 @@ use std::collections::BTreeMap;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn delete_ops_remove_only_component_connections_before_component() {
+        let d = Diagram {
+            connections: vec![
+                Connection {
+                    from: "c1.y".into(),
+                    to: "g.u".into(),
+                    points: vec![],
+                    color: [0; 3],
+                },
+                Connection {
+                    from: "c10.y".into(),
+                    to: "g2.u".into(),
+                    points: vec![],
+                    color: [0; 3],
+                },
+                Connection {
+                    from: "c1.p[2]".into(),
+                    to: "g.u".into(),
+                    points: vec![],
+                    color: [0; 3],
+                },
+            ],
+            ..Diagram::default()
+        };
+        assert_eq!(
+            connections_of(&d, "c1"),
+            vec![
+                ("c1.y".into(), "g.u".into()),
+                ("c1.p[2]".into(), "g.u".into())
+            ]
+        );
+        let ops = delete_component_ops(&d, "c1");
+        assert_eq!(ops.len(), 3);
+        assert!(
+            matches!(ops.last(),Some(crate::edit::EditOp::DeleteComponent{name}) if name=="c1")
+        );
+        assert!(matches!(
+            ops[0],
+            crate::edit::EditOp::DeleteConnection { .. }
+        ));
+    }
     use crate::graphics::Extent;
 
     #[test]

@@ -469,6 +469,10 @@ impl OmolaApp {
                 }
             });
             let rotate = ui.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::R));
+            let delete = ui.input(|i| i.key_pressed(egui::Key::Delete));
+            if delete && user_class && self.selected_component.is_some() {
+                self.delete_selected_component();
+            }
             if let Some(name) = selected {
                 if user_class && self.pending_edit.is_none() {
                     if let Some(comp) = diagram.components.iter().find(|c| c.name == name) {
@@ -550,6 +554,70 @@ impl OmolaApp {
                 && crate::diagram_view::hit_component(&diagram, point).is_some()
             {
                 self.info(crate::backend::LogTab::Syntax, "read-only".into());
+            }
+        }
+        if response.secondary_clicked() {
+            if let Some(pos) = response.hover_pos() {
+                let p = crate::diagram_view::to_diagram(
+                    pos,
+                    &diagram.coordinate_extent,
+                    rect,
+                    self.diagram_zoom,
+                    self.diagram_pan,
+                );
+                if let Some(i) = crate::diagram_view::hit_component(&diagram, p) {
+                    self.selected_component = Some(diagram.components[i].name.clone());
+                }
+            }
+        }
+        let mut action = None;
+        response.context_menu(|ui| {
+            let selected = self.selected_component.clone();
+            let enabled = user_class
+                && selected
+                    .as_ref()
+                    .is_some_and(|n| diagram.components.iter().any(|c| &c.name == n));
+            if ui
+                .add_enabled(enabled, egui::Button::new("Rename..."))
+                .clicked()
+            {
+                action = Some("rename");
+                ui.close();
+            }
+            if ui
+                .add_enabled(enabled, egui::Button::new("Delete"))
+                .clicked()
+            {
+                action = Some("delete");
+                ui.close();
+            }
+            ui.separator();
+            if ui
+                .add_enabled(enabled, egui::Button::new("Rotate 90"))
+                .clicked()
+            {
+                action = Some("rotate");
+                ui.close();
+            }
+        });
+        if let Some(name) = self.selected_component.clone() {
+            match action {
+                Some("rename") => {
+                    self.rename_dialog = Some(crate::app::RenameDialog {
+                        class: class.to_owned(),
+                        old: name.clone(),
+                        new_text: name,
+                    })
+                }
+                Some("delete") => self.delete_selected_component(),
+                Some("rotate") => {
+                    if let Some(comp) = diagram.components.iter().find(|c| c.name == name) {
+                        let (p, op) = crate::diagram_view::placement_edit(comp, [0.0, 0.0], 90.0);
+                        self.pending_placement = Some((name, p));
+                        self.apply_edit(class, vec![op]);
+                    }
+                }
+                _ => {}
             }
         }
     }

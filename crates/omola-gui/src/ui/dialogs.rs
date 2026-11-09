@@ -1,6 +1,6 @@
 //! Modal-ish windows: Simulation Setup and the temporary path dialogs.
 
-use crate::app::{OmolaApp, PathDialog};
+use crate::app::{component_name_error, OmolaApp, PathDialog, RenameDialog};
 use std::path::PathBuf;
 
 impl OmolaApp {
@@ -8,6 +8,7 @@ impl OmolaApp {
         let ctx = ui.ctx().clone();
         self.setup_dialog(&ctx);
         self.path_dialog_window(&ctx);
+        self.rename_dialog_window(&ctx);
     }
 
     fn setup_dialog(&mut self, ctx: &egui::Context) {
@@ -195,6 +196,70 @@ impl OmolaApp {
                 PathDialog::SaveAs(_) => PathDialog::SaveAs(text),
                 PathDialog::RunScript(_) => PathDialog::RunScript(text),
                 PathDialog::ExportCsv(_) => PathDialog::ExportCsv(text),
+            });
+        }
+    }
+
+    fn rename_dialog_window(&mut self, ctx: &egui::Context) {
+        let Some(mut dialog) = self.rename_dialog.clone() else {
+            return;
+        };
+        let mut open = true;
+        let mut submit = false;
+        let mut cancel = false;
+        let mut existing = Vec::new();
+        if let Some(crate::app::Loadable::Ready(d)) = self.model_diagrams.get(&dialog.class) {
+            existing.extend(d.components.iter().map(|c| c.name.clone()));
+        }
+        egui::Window::new("Rename component")
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.label(format!("Rename {}", dialog.old));
+                let edit = ui.text_edit_singleline(&mut dialog.new_text);
+                if edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    submit = true;
+                }
+                if let Some(error) = component_name_error(&dialog.new_text, &existing, &dialog.old)
+                {
+                    ui.colored_label(egui::Color32::RED, error);
+                }
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(
+                            component_name_error(&dialog.new_text, &existing, &dialog.old)
+                                .is_none(),
+                            egui::Button::new("OK"),
+                        )
+                        .clicked()
+                    {
+                        submit = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+        if !open || cancel {
+            self.rename_dialog = None;
+        } else if submit && component_name_error(&dialog.new_text, &existing, &dialog.old).is_none()
+        {
+            self.rename_dialog = None;
+            let new_name = dialog.new_text.clone();
+            self.apply_edit(
+                &dialog.class,
+                vec![crate::edit::EditOp::RenameComponent {
+                    old: dialog.old,
+                    new: new_name.clone(),
+                }],
+            );
+            self.selected_component = Some(new_name);
+        } else {
+            self.rename_dialog = Some(RenameDialog {
+                class: dialog.class,
+                old: dialog.old,
+                new_text: dialog.new_text,
             });
         }
     }
