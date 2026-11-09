@@ -293,6 +293,23 @@ pub fn component_bounds(placement: &Placement) -> Extent {
     Extent { x1, y1, x2, y2 }
 }
 
+/// Index of the topmost component whose box contains `p` (diagram coordinates).
+///
+/// Components are painted in order, so the last one containing the point is the one the
+/// user sees on top and therefore the one a click selects (G29).
+pub fn hit_component(diagram: &Diagram, p: [f64; 2]) -> Option<usize> {
+    diagram
+        .components
+        .iter()
+        .enumerate()
+        .rev()
+        .find(|(_, c)| {
+            let b = component_bounds(&c.placement);
+            (b.x1..=b.x2).contains(&p[0]) && (b.y1..=b.y2).contains(&p[1])
+        })
+        .map(|(index, _)| index)
+}
+
 /// Parse a graphic entry (Rectangle, Line, Polygon, Ellipse, Text, Bitmap).
 fn parse_graphic(entry: &Value) -> Result<Option<Graphic>, String> {
     let name = entry
@@ -780,5 +797,62 @@ mod tests {
         assert_eq!(conn.from, "resistor1.p");
         assert_eq!(conn.to, "capacitor1.p");
         assert_eq!(conn.points.len(), 3);
+    }
+
+    fn placed(name: &str, origin: [f64; 2], extent: Extent, rotation_deg: f64) -> PlacedComponent {
+        PlacedComponent {
+            name: name.into(),
+            type_name: "T".into(),
+            placement: Placement {
+                extent,
+                origin,
+                rotation_deg,
+            },
+            icon: None,
+        }
+    }
+
+    fn square() -> Extent {
+        Extent {
+            x1: -10.0,
+            y1: -10.0,
+            x2: 10.0,
+            y2: 10.0,
+        }
+    }
+
+    #[test]
+    fn a_click_picks_the_component_that_is_drawn_last() {
+        let diagram = Diagram {
+            components: vec![
+                placed("first", [0.0, 0.0], square(), 0.0),
+                placed("second", [5.0, 5.0], square(), 0.0),
+            ],
+            ..Diagram::default()
+        };
+        // Both boxes contain (4, 4); the later one is on top.
+        assert_eq!(hit_component(&diagram, [4.0, 4.0]), Some(1));
+        // Only the first box reaches down here (the second starts at -5).
+        assert_eq!(hit_component(&diagram, [-8.0, -8.0]), Some(0));
+        // Outside every box.
+        assert_eq!(hit_component(&diagram, [100.0, 100.0]), None);
+        assert_eq!(hit_component(&Diagram::default(), [0.0, 0.0]), None);
+    }
+
+    #[test]
+    fn a_click_on_a_rotated_component_uses_its_rotated_box() {
+        // 20x40 at 90 degrees is 40 wide and 20 high, centred on the origin.
+        let tall = Extent {
+            x1: -10.0,
+            y1: -20.0,
+            x2: 10.0,
+            y2: 20.0,
+        };
+        let diagram = Diagram {
+            components: vec![placed("tall", [0.0, 0.0], tall, 90.0)],
+            ..Diagram::default()
+        };
+        assert_eq!(hit_component(&diagram, [15.0, 0.0]), Some(0));
+        assert_eq!(hit_component(&diagram, [0.0, 15.0]), None);
     }
 }

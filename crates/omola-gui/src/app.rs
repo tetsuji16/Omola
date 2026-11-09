@@ -8,6 +8,7 @@
 use crate::backend::{
     ClassContext, Event, Job, LogLevel, LogTab, SimulationOutcome, SimulationSetup, Worker,
 };
+use crate::diagram::Placement;
 use crate::html::{self, Block};
 use crate::library::{self, ClassDoc, LibrarySpec, LoadedLibrary};
 use crate::model::{default_class, scan_classes, ClassEntry as UserClass, Document};
@@ -268,6 +269,49 @@ pub struct PersistedState {
 /// Storage key for [`PersistedState`] in eframe's `Storage`.
 const STATE_KEY: &str = "omola_gui_state";
 
+/// A component being dragged in the Diagram layer (G29).
+#[derive(Debug, Clone, PartialEq)]
+pub struct DiagramDrag {
+    pub component: String,
+    /// Pointer position in diagram coordinates when the drag started.
+    pub start: [f64; 2],
+    /// Movement so far, already snapped to the grid unless Shift was held.
+    pub offset: [f64; 2],
+}
+
+/// The placement a finished drag results in, or `None` for a click that did not move (G29).
+///
+/// A zero offset means the user clicked without dragging, and a click must not rewrite the
+/// model, so the caller sends nothing at all.
+pub fn dragged(placement: &Placement, offset: [f64; 2]) -> Option<Placement> {
+    if offset == [0.0, 0.0] {
+        return None;
+    }
+    let mut moved = placement.clone();
+    moved.origin = [moved.origin[0] + offset[0], moved.origin[1] + offset[1]];
+    Some(moved)
+}
+
+/// The edit list for one move: exactly one `SetPlacement` (G29).
+///
+/// One drag is one edit, so a dropped or slow drag cannot leave half a move behind.
+pub fn placement_ops(
+    component: &str,
+    type_name: &str,
+    placement: &Placement,
+) -> Vec<crate::edit::EditOp> {
+    vec![crate::edit::EditOp::SetPlacement {
+        component: component.to_owned(),
+        type_name: type_name.to_owned(),
+        extent: [
+            [placement.extent.x1, placement.extent.y1],
+            [placement.extent.x2, placement.extent.y2],
+        ],
+        origin: placement.origin,
+        rotation: placement.rotation_deg,
+    }]
+}
+
 pub struct OmolaApp {
     pub tab: RibbonTab,
     pub graphics_layer: Layer,
@@ -309,6 +353,10 @@ pub struct OmolaApp {
     pub selected_component: Option<String>,
     /// Class whose [`Job::EditModel`] is in flight; a second edit of the same class waits.
     pub pending_edit: Option<String>,
+    /// A component being dragged in the Diagram layer (G29).
+    pub diagram_drag: Option<DiagramDrag>,
+    /// Placement shown instead of the loaded one until `Event::ModelEdited` arrives (G29).
+    pub pending_placement: Option<(String, Placement)>,
     pub doc_view: DocView,
     pub find_open: bool,
     pub find_query: String,
@@ -446,6 +494,8 @@ impl OmolaApp {
             diagram_pan: egui::Vec2::ZERO,
             selected_component: None,
             pending_edit: None,
+            diagram_drag: None,
+            pending_placement: None,
             doc_view: DocView::Formatted,
             find_open: false,
             find_query: String::new(),
@@ -1034,28 +1084,32 @@ impl OmolaApp {
     /// own copy of the class, and `list()` returns the new definition, which replaces the old
     /// one in the document. That keeps the class valid and the editor text the single source
     /// of truth.
-    #[allow(dead_code)] // the Diagram layer calls this from G29 on
-    pub fn apply_edit(&mut self, class: &str, ops: Vec<crate::edit::EditOp>) {
+    ///
+    /// Returns whether the edit was sent; `false` means a message was logged instead.
+    pub fn apply_edit(&mut self, class: &str, ops: Vec<crate::edit::EditOp>) -> bool {
         if ops.is_empty() {
-            return;
+            return false;
         }
         if !self.is_user_class(class) {
-            return self.error(
+            self.error(
                 LogTab::Syntax,
                 format!("{class} is a library class and cannot be edited."),
             );
+            return false;
         }
         let Some(doc) = self.doc_of(class) else {
-            return self.error(
+            self.error(
                 LogTab::Syntax,
                 format!("{class} is not open in the editor."),
             );
+            return false;
         };
         if let Some(pending) = &self.pending_edit {
-            return self.info(
+            self.info(
                 LogTab::Syntax,
                 format!("Waiting for the running edit of {pending} to finish."),
             );
+            return false;
         }
         self.pending_edit = Some(class.to_owned());
         self.worker.submit(Job::EditModel {
@@ -1064,6 +1118,23 @@ impl OmolaApp {
             ops,
             libraries: self.context_for(class).libraries,
         });
+        true
+    }
+
+    /// Move/resize/rotate `component` to `placement` and show the new box until OMC answers.
+    ///
+    /// The Diagram layer draws [`Self::pending_placement`] over the last loaded diagram, so a
+    /// drag feels immediate even though the text is rewritten by OMC (G29).
+    pub fn move_component(
+        &mut self,
+        class: &str,
+        component: &str,
+        type_name: &str,
+        placement: Placement,
+    ) {
+        if self.apply_edit(class, placement_ops(component, type_name, &placement)) {
+            self.pending_placement = Some((component.to_owned(), placement));
+        }
     }
 
     /// The rewritten class text came back: swap it in, or report why it did not (G28).
@@ -1071,6 +1142,9 @@ impl OmolaApp {
         if self.pending_edit.as_deref() == Some(class) {
             self.pending_edit = None;
         }
+        // The optimistic box is replaced by the loaded diagram either way (G29).
+        self.pending_placement = None;
+        self.diagram_drag = None;
         let text = match result {
             Ok(text) => text,
             Err(message) => {
@@ -2938,5 +3012,55 @@ mod tests {
         );
         app.undo();
         assert_eq!(app.documents[0].text, "model A\n  Real hand;\nend A;\n");
+    }
+
+    fn gain_placement() -> Placement {
+        Placement {
+            extent: crate::graphics::Extent {
+                x1: -10.0,
+                y1: -10.0,
+                x2: 10.0,
+                y2: 10.0,
+            },
+            origin: [20.0, -4.0],
+            rotation_deg: 0.0,
+        }
+    }
+
+    #[test]
+    fn a_click_without_movement_is_not_an_edit() {
+        assert_eq!(dragged(&gain_placement(), [0.0, 0.0]), None);
+    }
+
+    #[test]
+    fn a_drag_moves_only_the_origin() {
+        let before = gain_placement();
+        let after = dragged(&before, [2.0, -4.0]).expect("moved");
+        assert_eq!(after.origin, [22.0, -8.0]);
+        // The box and the rotation belong to the component, not to the drag.
+        assert_eq!(after.extent, before.extent);
+        assert_eq!(after.rotation_deg, before.rotation_deg);
+    }
+
+    #[test]
+    fn a_move_sends_exactly_one_placement_edit() {
+        let ops = placement_ops("gain1", "Modelica.Blocks.Math.Gain", &gain_placement());
+        assert_eq!(ops.len(), 1);
+        match &ops[0] {
+            crate::edit::EditOp::SetPlacement {
+                component,
+                type_name,
+                extent,
+                origin,
+                rotation,
+            } => {
+                assert_eq!(component, "gain1");
+                assert_eq!(type_name, "Modelica.Blocks.Math.Gain");
+                assert_eq!(*extent, [[-10.0, -10.0], [10.0, 10.0]]);
+                assert_eq!(*origin, [20.0, -4.0]);
+                assert_eq!(*rotation, 0.0);
+            }
+            other => panic!("expected SetPlacement, got {other:?}"),
+        }
     }
 }

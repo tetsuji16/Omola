@@ -25,6 +25,61 @@ fn scale_of(extent: &Extent, rect: Rect, zoom: f32) -> f32 {
     }
     (rect.width() / w.abs() as f32).min(rect.height() / h.abs() as f32) * zoom
 }
+
+/// Inverse of [`to_screen`]: a screen position in diagram coordinates (G29).
+///
+/// The y axis is flipped: screen y grows downwards, diagram y upwards.
+pub fn to_diagram(p: Pos2, extent: &Extent, rect: Rect, zoom: f32, pan: Vec2) -> [f64; 2] {
+    let cx = (extent.x1 + extent.x2) / 2.0;
+    let cy = (extent.y1 + extent.y2) / 2.0;
+    let scale = scale_of(extent, rect, zoom);
+    if !scale.is_finite() || scale.abs() < 1e-9 {
+        return [cx, cy];
+    }
+    let c = rect.center() + pan;
+    [
+        cx + (p.x - c.x) as f64 / scale as f64,
+        cy - (p.y - c.y) as f64 / scale as f64,
+    ]
+}
+
+/// The Modelica grid step used when a component is dragged (G29).
+pub const GRID: f64 = 2.0;
+
+/// Round `v` to the nearest multiple of `grid`; a grid of 0 (or less) leaves `v` alone.
+///
+/// A value exactly between two grid lines goes away from zero, which is what
+/// `f64::round` does.
+pub fn snap(v: f64, grid: f64) -> f64 {
+    if grid <= 0.0 || !v.is_finite() {
+        return v;
+    }
+    (v / grid).round() * grid
+}
+
+/// Draw the selection frame of a component: a dashed accent box with corner handles.
+pub fn paint_selection(painter: &Painter, bounds: Rect) {
+    let corners = [
+        bounds.left_top(),
+        bounds.right_top(),
+        bounds.right_bottom(),
+        bounds.left_bottom(),
+        bounds.left_top(),
+    ];
+    painter.add(EguiShape::Vec(EguiShape::dashed_line(
+        &corners,
+        Stroke::new(1.0, crate::theme::ACCENT),
+        4.0,
+        3.0,
+    )));
+    for corner in corners[..4].iter() {
+        painter.rect_filled(
+            Rect::from_center_size(*corner, Vec2::splat(6.0)),
+            0.0,
+            crate::theme::ACCENT,
+        );
+    }
+}
 fn col(rgb: [u8; 3]) -> Color32 {
     Color32::from_rgb(rgb[0], rgb[1], rgb[2])
 }
@@ -294,4 +349,53 @@ fn bounds_screen_rect(
         screen.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max),
     );
     Rect::from_min_max(min, max)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rect() -> Rect {
+        Rect::from_min_size(Pos2::new(10.0, 20.0), Vec2::new(400.0, 300.0))
+    }
+
+    fn extent() -> Extent {
+        Extent {
+            x1: -100.0,
+            y1: -100.0,
+            x2: 100.0,
+            y2: 100.0,
+        }
+    }
+
+    #[test]
+    fn to_diagram_inverts_to_screen() {
+        for (zoom, pan) in [
+            (1.0f32, Vec2::ZERO),
+            (2.5, Vec2::new(-30.0, 12.0)),
+            (0.4, Vec2::new(80.0, -40.0)),
+        ] {
+            for p in [[0.0, 0.0], [50.0, -25.0], [-99.0, 77.0]] {
+                let screen = to_screen(p, &extent(), rect(), zoom, pan);
+                let back = to_diagram(screen, &extent(), rect(), zoom, pan);
+                assert!(
+                    (back[0] - p[0]).abs() < 1e-2 && (back[1] - p[1]).abs() < 1e-2,
+                    "{p:?} came back as {back:?} at zoom {zoom}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn snap_rounds_to_the_grid() {
+        assert_eq!(snap(3.0, GRID), 4.0);
+        assert_eq!(snap(-3.0, GRID), -4.0);
+        // Exactly between two grid lines: away from zero.
+        assert_eq!(snap(1.0, GRID), 2.0);
+        assert_eq!(snap(-1.0, GRID), -2.0);
+        assert_eq!(snap(0.9, GRID), 0.0);
+        assert_eq!(snap(-0.9, GRID), 0.0);
+        // A grid of 0 turns snapping off.
+        assert_eq!(snap(7.5, 0.0), 7.5);
+    }
 }
