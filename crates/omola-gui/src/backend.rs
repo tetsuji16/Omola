@@ -69,6 +69,37 @@ mod edit_integration_test {
         assert!(result.expect("edit result").unwrap().contains("Constant k"));
         let _ = std::fs::remove_dir_all(root);
     }
+
+    #[test]
+    #[ignore = "needs OpenModelica with MSL 4.1.0; run with --ignored and OMOLA_OMC set"]
+    fn edit_model_adds_connection_with_real_omc() {
+        if std::env::var_os("OMOLA_OMC").is_none() {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("omola-gui-connect-{}", std::process::id()));
+        let worker = Worker::spawn(root.join("work"), || {});
+        worker.submit(Job::EditModel {
+            doc_text: "model A Modelica.Blocks.Sources.Sine sine; Modelica.Blocks.Continuous.FirstOrder firstOrder; end A;".into(),
+            file_name: "A.mo".into(), class: "A".into(),
+            ops: vec![EditOp::AddConnection { from: "sine.y".into(), to: "firstOrder.u".into(), points: vec![[0.0, 0.0], [10.0, 0.0]] }],
+            libraries: vec![LibrarySpec::new("Modelica", Some("4.1.0"))],
+        });
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let mut result = None;
+        while result.is_none() && Instant::now() < deadline {
+            for event in worker.poll() {
+                if let Event::ModelEdited { result: r, .. } = event {
+                    result = Some(r);
+                }
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(result
+            .expect("edit result")
+            .unwrap()
+            .contains("connect(sine.y, firstOrder.u)"));
+        let _ = std::fs::remove_dir_all(root);
+    }
 }
 
 impl Default for SimulationSetup {

@@ -408,6 +408,8 @@ pub struct OmolaApp {
     pub pending_edit: Option<String>,
     pub rename_dialog: Option<RenameDialog>,
     pub diagram_drag: Option<DiagramDrag>,
+    pub connection_drag: Option<ConnectionDrag>,
+    pub selected_connection: Option<usize>,
     pub pending_placement: Option<(String, Placement)>,
 }
 
@@ -416,6 +418,13 @@ pub struct DiagramDrag {
     pub component: String,
     pub start: [f64; 2],
     pub offset: [f64; 2],
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConnectionDrag {
+    pub from: String,
+    pub start: [f64; 2],
+    pub current: [f64; 2],
 }
 
 /// Shown once when no OpenModelica compiler is found.
@@ -530,6 +539,8 @@ impl OmolaApp {
             pending_edit: None,
             rename_dialog: None,
             diagram_drag: None,
+            connection_drag: None,
+            selected_connection: None,
             pending_placement: None,
         }
     }
@@ -1461,6 +1472,7 @@ impl OmolaApp {
                 Event::ModelEdited { class, result } => {
                     self.pending_edit = None;
                     self.pending_placement = None;
+                    self.selected_connection = None;
                     match result {
                         Ok(source) => {
                             if let Some(doc) = self.doc_of(&class) {
