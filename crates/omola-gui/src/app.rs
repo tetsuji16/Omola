@@ -184,6 +184,8 @@ pub enum DialogResult {
 
 /// Maximum number of entries in the "Recent files" menu.
 pub const MAX_RECENT_FILES: usize = 8;
+pub const MAX_LOG_ENTRIES: usize = 2_000;
+pub const MAX_LOG_ENTRY_CHARS: usize = 200_000;
 
 /// Add `path` to the front of `list`, removing duplicates and trimming to `MAX_RECENT_FILES`.
 pub fn push_recent(list: &mut Vec<PathBuf>, path: PathBuf) {
@@ -1106,7 +1108,7 @@ impl OmolaApp {
     }
 
     pub fn info(&mut self, tab: LogTab, text: String) {
-        self.logs.push(LogEntry {
+        self.push_log(LogEntry {
             tab,
             level: LogLevel::Info,
             text,
@@ -1115,7 +1117,7 @@ impl OmolaApp {
 
     pub fn error(&mut self, tab: LogTab, text: String) {
         self.log_tab = tab;
-        self.logs.push(LogEntry {
+        self.push_log(LogEntry {
             tab,
             level: LogLevel::Error,
             text,
@@ -1123,11 +1125,43 @@ impl OmolaApp {
     }
 
     pub fn warn(&mut self, tab: LogTab, text: String) {
-        self.logs.push(LogEntry {
+        self.push_log(LogEntry {
             tab,
             level: LogLevel::Warning,
             text,
         });
+    }
+
+    fn push_log(&mut self, mut entry: LogEntry) {
+        let char_count = entry.text.chars().count();
+        if char_count > MAX_LOG_ENTRY_CHARS {
+            let start_char = char_count - MAX_LOG_ENTRY_CHARS;
+            let start_byte = entry
+                .text
+                .char_indices()
+                .nth(start_char)
+                .map_or(entry.text.len(), |(i, _)| i);
+            let tail = entry.text.split_off(start_byte);
+            entry.text = format!("... (earlier output truncated)\n{tail}");
+        }
+        self.logs.push(entry);
+        self.error_locations_log_len = None;
+        if self.logs.len() > MAX_LOG_ENTRIES {
+            let excess = self.logs.len() - MAX_LOG_ENTRIES;
+            self.logs.drain(..excess);
+            self.error_from_log_index = self.error_from_log_index.saturating_sub(excess);
+        }
+    }
+
+    pub fn clear_logs_for_tab(&mut self, tab: LogTab) {
+        let old_start = self.error_from_log_index.min(self.logs.len());
+        let retained_before_start = self.logs[..old_start]
+            .iter()
+            .filter(|entry| entry.tab != tab)
+            .count();
+        self.logs.retain(|entry| entry.tab != tab);
+        self.error_from_log_index = retained_before_start;
+        self.error_locations_log_len = None;
     }
 
     /// Seed the Simulation Setup dialog from a class's `experiment` annotation.
@@ -1175,14 +1209,14 @@ impl OmolaApp {
                     } else if matches!(tab, LogTab::Translation | LogTab::Simulation) {
                         self.log_tab = tab;
                     }
-                    self.logs.push(LogEntry { tab, level, text });
+                    self.push_log(LogEntry { tab, level, text });
                 }
                 Event::Command(text) => self.command_history.push(text),
                 Event::OmcVersion(version) => {
                     if version.is_none() && self.omc_version.is_none() && !self.omc_hint_shown {
                         self.omc_hint_shown = true;
                         self.log_tab = LogTab::Version;
-                        self.logs.push(LogEntry {
+                        self.push_log(LogEntry {
                             tab: LogTab::Version,
                             level: LogLevel::Warning,
                             text: OMC_SETUP_HINT.into(),
@@ -1809,6 +1843,39 @@ mod tests {
     }
 
     #[test]
+    fn log_history_is_bounded_and_discards_oldest_entries() {
+        let mut app = app();
+        for i in 0..=MAX_LOG_ENTRIES {
+            app.info(LogTab::Syntax, i.to_string());
+        }
+        assert_eq!(app.logs.len(), MAX_LOG_ENTRIES);
+        assert_eq!(app.logs.first().unwrap().text, "1");
+    }
+
+    #[test]
+    fn long_unicode_log_entries_keep_the_tail_at_character_boundaries() {
+        let mut app = app();
+        app.info(LogTab::Syntax, "あ".repeat(MAX_LOG_ENTRY_CHARS + 1));
+        let text = &app.logs[0].text;
+        assert!(text.starts_with("... (earlier output truncated)\n"));
+        assert!(text.ends_with('あ'));
+        assert_eq!(
+            text.chars().count(),
+            MAX_LOG_ENTRY_CHARS + "... (earlier output truncated)\n".chars().count()
+        );
+    }
+
+    #[test]
+    fn clearing_logs_removes_only_the_selected_tab() {
+        let mut app = app();
+        app.info(LogTab::Simulation, "run output".into());
+        app.info(LogTab::Syntax, "syntax output".into());
+        app.clear_logs_for_tab(LogTab::Simulation);
+        assert_eq!(app.logs.len(), 1);
+        assert_eq!(app.logs[0].tab, LogTab::Syntax);
+    }
+
+    #[test]
     fn variable_tree_cache_reuses_entries_and_tracks_filter_toggles() {
         let mut app = app();
         let mut run = outcome("BouncingBall");
@@ -2287,7 +2354,7 @@ mod tests {
     #[test]
     fn error_locations_are_rebuilt_only_from_the_current_run() {
         let mut app = app();
-        app.logs.push(LogEntry {
+        app.push_log(LogEntry {
             tab: LogTab::Syntax,
             level: LogLevel::Error,
             text: "[A.mo:3:1-3:2:writable] Error: old".into(),
@@ -2297,7 +2364,7 @@ mod tests {
 
         // A new Check must not keep the markers of the previous run.
         app.start_error_scan();
-        app.logs.push(LogEntry {
+        app.push_log(LogEntry {
             tab: LogTab::Syntax,
             level: LogLevel::Error,
             text: "[A.mo:9:1-9:2:writable] Error: new".into(),
