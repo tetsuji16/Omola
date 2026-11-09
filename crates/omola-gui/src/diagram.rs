@@ -36,6 +36,13 @@ pub struct PlacedComponent {
     pub type_name: String,
     pub placement: Placement,
     pub icon: Option<Icon>,
+    pub connectors: Vec<ConnectorPin>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConnectorPin {
+    pub name: String,
+    pub extent: Extent,
 }
 
 /// A connection between two components' connectors.
@@ -76,6 +83,101 @@ pub fn delete_component_ops(diagram: &Diagram, component: &str) -> Vec<crate::ed
         name: component.into(),
     });
     ops
+}
+
+pub fn move_component_ops(
+    diagram: &Diagram,
+    component: &str,
+    placement: &Placement,
+) -> Vec<crate::edit::EditOp> {
+    let mut ops = Vec::new();
+    if let Some(c) = diagram.components.iter().find(|c| c.name == component) {
+        ops.push(crate::edit::EditOp::SetPlacement {
+            component: c.name.clone(),
+            type_name: c.type_name.clone(),
+            extent: [
+                [placement.extent.x1, placement.extent.y1],
+                [placement.extent.x2, placement.extent.y2],
+            ],
+            origin: placement.origin,
+            rotation: placement.rotation_deg,
+        });
+        for connection in &diagram.connections {
+            let from = connection.from == component
+                || connection.from.starts_with(&format!("{component}."));
+            let to =
+                connection.to == component || connection.to.starts_with(&format!("{component}."));
+            if !from && !to {
+                continue;
+            }
+            let mut moved = c.clone();
+            moved.placement = placement.clone();
+            let a = endpoint_position(diagram, &connection.from, Some((&moved, component)))
+                .or_else(|| connection.points.first().copied());
+            let b = endpoint_position(diagram, &connection.to, Some((&moved, component)))
+                .or_else(|| connection.points.last().copied());
+            let (Some(a), Some(b)) = (a, b) else {
+                continue;
+            };
+            let points = crate::diagram_view::orthogonal_route(a, b);
+            ops.push(crate::edit::EditOp::DeleteConnection {
+                from: connection.from.clone(),
+                to: connection.to.clone(),
+            });
+            ops.push(crate::edit::EditOp::AddConnection {
+                from: connection.from.clone(),
+                to: connection.to.clone(),
+                points,
+            });
+        }
+    }
+    ops
+}
+
+fn endpoint_position(
+    diagram: &Diagram,
+    endpoint: &str,
+    moved: Option<(&PlacedComponent, &str)>,
+) -> Option<[f64; 2]> {
+    let (component_name, pin_name) = endpoint.split_once('.')?;
+    let comp = if let Some((c, _name)) = moved.filter(|(_, name)| *name == component_name) {
+        c
+    } else {
+        diagram
+            .components
+            .iter()
+            .find(|c| c.name == component_name)?
+    };
+    let pin = comp.connectors.iter().find(|p| p.name == pin_name)?;
+    Some(crate::diagram_view::pin_position(comp, pin))
+}
+
+pub fn new_connection_op(
+    diagram: &Diagram,
+    from: String,
+    to: String,
+    points: Vec<[f64; 2]>,
+) -> Option<crate::edit::EditOp> {
+    let (from_component, from_pin) = from.split_once('.')?;
+    let (to_component, to_pin) = to.split_once('.')?;
+    if from == to || from_component == to_component {
+        return None;
+    }
+    if diagram
+        .connections
+        .iter()
+        .any(|c| (c.from == from && c.to == to) || (c.from == to && c.to == from))
+    {
+        return None;
+    }
+    if endpoint_position(diagram, &from, None).is_none()
+        || endpoint_position(diagram, &to, None).is_none()
+        || from_pin.is_empty()
+        || to_pin.is_empty()
+    {
+        return None;
+    }
+    Some(crate::edit::EditOp::AddConnection { from, to, points })
 }
 
 impl Default for Diagram {
@@ -147,12 +249,15 @@ pub fn parse_diagram(
             };
 
             let icon = icons.get(&type_name).cloned();
+            let mut connectors = Vec::new();
+            collect_connector_pins(element.get("type").unwrap_or(&Value::Null), &mut connectors);
 
             diagram.components.push(PlacedComponent {
                 name,
                 type_name,
                 placement,
                 icon,
+                connectors,
             });
         }
     }
@@ -227,6 +332,39 @@ pub fn parse_diagram(
     }
 
     Ok(diagram)
+}
+
+fn collect_connector_pins(class: &Value, pins: &mut Vec<ConnectorPin>) {
+    let Some(elements) = class.get("elements").and_then(Value::as_array) else {
+        return;
+    };
+    for element in elements {
+        match element.get("$kind").and_then(Value::as_str) {
+            Some("component")
+                if element
+                    .get("type")
+                    .and_then(|t| t.get("restriction"))
+                    .and_then(Value::as_str)
+                    .is_some_and(|r| r == "connector" || r == "expandable connector") =>
+            {
+                if let (Some(name), Some(annotation)) = (
+                    element.get("name").and_then(Value::as_str),
+                    element.get("annotation"),
+                ) {
+                    if annotation.get("Placement").is_some() {
+                        pins.push(ConnectorPin {
+                            name: name.to_owned(),
+                            extent: parse_placement(annotation).extent,
+                        });
+                    }
+                }
+            }
+            Some("extends") => {
+                collect_connector_pins(element.get("baseClass").unwrap_or(&Value::Null), pins)
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Parse a placement annotation into a `Placement` struct.
@@ -745,6 +883,103 @@ mod tests {
         assert!(!d.own_graphics.is_empty());
         assert_eq!(d.coordinate_extent.x1, -100.0);
         assert_eq!(d.coordinate_extent.x2, 100.0);
+    }
+
+    #[test]
+    fn parse_connector_pins_from_instance_fixture() {
+        let json: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/instance_MSLFirstOrder.json"
+        ))
+        .unwrap();
+        let d = parse_diagram(&json, &BTreeMap::new()).unwrap();
+        let component = d
+            .components
+            .iter()
+            .find(|c| c.connectors.iter().any(|p| p.name == "u"))
+            .unwrap();
+        assert!(component.connectors.iter().any(|p| p.name == "u"));
+        assert!(component.connectors.iter().any(|p| p.name == "y"));
+        let u = component.connectors.iter().find(|p| p.name == "u").unwrap();
+        assert_eq!(
+            (u.extent.x1, u.extent.y1, u.extent.x2, u.extent.y2),
+            (-140.0, -20.0, -100.0, 20.0)
+        );
+    }
+
+    #[test]
+    fn moving_component_edits_placement_and_attached_connection_together() {
+        let pin = || ConnectorPin {
+            name: "p".into(),
+            extent: Extent {
+                x1: 0.0,
+                y1: 0.0,
+                x2: 0.0,
+                y2: 0.0,
+            },
+        };
+        let component = |name: &str, origin| PlacedComponent {
+            name: name.into(),
+            type_name: "C".into(),
+            placement: Placement {
+                origin,
+                ..Placement::default()
+            },
+            icon: None,
+            connectors: vec![pin()],
+        };
+        let d = Diagram {
+            components: vec![component("a", [0.0, 0.0]), component("b", [10.0, 0.0])],
+            connections: vec![Connection {
+                from: "a.p".into(),
+                to: "b.p".into(),
+                points: vec![[0.0, 0.0], [10.0, 0.0]],
+                color: [0; 3],
+            }],
+            ..Diagram::default()
+        };
+        let placement = Placement {
+            origin: [4.0, 0.0],
+            ..Placement::default()
+        };
+        let ops = move_component_ops(&d, "a", &placement);
+        assert!(matches!(ops.as_slice(), [
+            crate::edit::EditOp::SetPlacement { component, .. },
+            crate::edit::EditOp::DeleteConnection { from, to },
+            crate::edit::EditOp::AddConnection { from: added_from, to: added_to, points },
+        ] if component == "a" && from == "a.p" && to == "b.p" && added_from == from && added_to == to && points[0] == [4.0, 0.0] && points[1] == [10.0, 0.0]));
+    }
+
+    #[test]
+    fn duplicate_or_same_component_connections_are_rejected() {
+        let pin = |name: &str| ConnectorPin {
+            name: name.into(),
+            extent: Extent {
+                x1: 0.0,
+                y1: 0.0,
+                x2: 0.0,
+                y2: 0.0,
+            },
+        };
+        let component = |name: &str| PlacedComponent {
+            name: name.into(),
+            type_name: "C".into(),
+            placement: Placement::default(),
+            icon: None,
+            connectors: vec![pin("p"), pin("q")],
+        };
+        let d = Diagram {
+            components: vec![component("a"), component("b")],
+            connections: vec![Connection {
+                from: "a.p".into(),
+                to: "b.p".into(),
+                points: vec![],
+                color: [0; 3],
+            }],
+            ..Diagram::default()
+        };
+        assert!(new_connection_op(&d, "a.p".into(), "a.q".into(), vec![]).is_none());
+        assert!(new_connection_op(&d, "b.p".into(), "a.p".into(), vec![]).is_none());
+        assert!(new_connection_op(&d, "a.p".into(), "b.q".into(), vec![]).is_some());
     }
 
     #[test]

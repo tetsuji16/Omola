@@ -385,7 +385,21 @@ impl OmolaApp {
                     self.diagram_zoom,
                     self.diagram_pan,
                 );
-                if let Some(i) = crate::diagram_view::hit_component(&diagram, point) {
+                let pin_hit = crate::diagram_view::hit_pin(
+                    &diagram,
+                    point,
+                    6.0 / diagram_scale(&diagram, rect, self.diagram_zoom),
+                );
+                if let Some((ci, pi)) = pin_hit.filter(|_| user_class) {
+                    let comp = &diagram.components[ci];
+                    let pin = &comp.connectors[pi];
+                    let at = crate::diagram_view::pin_position(comp, pin);
+                    self.connection_drag = Some(crate::app::ConnectionDrag {
+                        from: format!("{}.{}", comp.name, pin.name),
+                        start: at,
+                        current: point,
+                    });
+                } else if let Some(i) = crate::diagram_view::hit_component(&diagram, point) {
                     let name = diagram.components[i].name.clone();
                     self.selected_component = Some(name.clone());
                     self.component_expanded.insert(name.clone());
@@ -403,6 +417,17 @@ impl OmolaApp {
         }
         if response.dragged_by(egui::PointerButton::Primary) {
             if let (Some(drag), Some(pos)) =
+                (&mut self.connection_drag, response.interact_pointer_pos())
+            {
+                drag.current = crate::diagram_view::to_diagram(
+                    pos,
+                    &diagram.coordinate_extent,
+                    rect,
+                    self.diagram_zoom,
+                    self.diagram_pan,
+                );
+            }
+            if let (Some(drag), Some(pos)) =
                 (&mut self.diagram_drag, response.interact_pointer_pos())
             {
                 let current = crate::diagram_view::to_diagram(
@@ -416,6 +441,39 @@ impl OmolaApp {
             }
         }
         if response.drag_stopped_by(egui::PointerButton::Primary) {
+            if let Some(drag) = self.connection_drag.take() {
+                if user_class && self.pending_edit.is_none() {
+                    if let Some(pos) = response
+                        .hover_pos()
+                        .or_else(|| response.interact_pointer_pos())
+                    {
+                        let p = crate::diagram_view::to_diagram(
+                            pos,
+                            &diagram.coordinate_extent,
+                            rect,
+                            self.diagram_zoom,
+                            self.diagram_pan,
+                        );
+                        if let Some((ci, pi)) = crate::diagram_view::hit_pin(
+                            &diagram,
+                            p,
+                            6.0 / diagram_scale(&diagram, rect, self.diagram_zoom),
+                        ) {
+                            let comp = &diagram.components[ci];
+                            let pin = &comp.connectors[pi];
+                            let to = format!("{}.{}", comp.name, pin.name);
+                            let end = crate::diagram_view::pin_position(comp, pin);
+                            let route = crate::diagram_view::orthogonal_route(drag.start, end);
+                            if let Some(op) =
+                                crate::diagram::new_connection_op(&diagram, drag.from, to, route)
+                            {
+                                self.selected_connection = None;
+                                self.apply_edit(class, vec![op]);
+                            }
+                        }
+                    }
+                }
+            }
             if let Some(drag) = self.diagram_drag.take() {
                 let final_offset = response
                     .hover_pos()
@@ -443,10 +501,15 @@ impl OmolaApp {
                             ]
                         };
                         if delta != [0.0, 0.0] && self.pending_edit.is_none() {
-                            let (placement, op) =
+                            let (placement, _) =
                                 crate::diagram_view::placement_edit(comp, delta, 0.0);
                             self.pending_placement = Some((comp.name.clone(), placement.clone()));
-                            self.apply_edit(class, vec![op]);
+                            self.apply_edit(
+                                class,
+                                crate::diagram::move_component_ops(
+                                    &diagram, &comp.name, &placement,
+                                ),
+                            );
                         }
                     }
                 }
@@ -470,20 +533,37 @@ impl OmolaApp {
             });
             let rotate = ui.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::R));
             let delete = ui.input(|i| i.key_pressed(egui::Key::Delete));
-            if delete && user_class && self.selected_component.is_some() {
+            if delete
+                && user_class
+                && self.pending_edit.is_none()
+                && self.selected_connection.is_some()
+            {
+                if let Some(index) = self.selected_connection.take() {
+                    if let Some(c) = diagram.connections.get(index) {
+                        self.apply_edit(
+                            class,
+                            vec![crate::edit::EditOp::DeleteConnection {
+                                from: c.from.clone(),
+                                to: c.to.clone(),
+                            }],
+                        );
+                    }
+                }
+            } else if delete && user_class && self.selected_component.is_some() {
                 self.delete_selected_component();
             }
             if let Some(name) = selected {
                 if user_class && self.pending_edit.is_none() {
                     if let Some(comp) = diagram.components.iter().find(|c| c.name == name) {
                         if movement.is_some() || rotate {
-                            let (p, op) = crate::diagram_view::placement_edit(
+                            let (p, _) = crate::diagram_view::placement_edit(
                                 comp,
                                 movement.unwrap_or([0.0, 0.0]),
                                 if rotate { 90.0 } else { 0.0 },
                             );
+                            let ops = crate::diagram::move_component_ops(&diagram, &name, &p);
                             self.pending_placement = Some((name, p));
-                            self.apply_edit(class, vec![op]);
+                            self.apply_edit(class, ops);
                         }
                     }
                 }
@@ -496,6 +576,86 @@ impl OmolaApp {
             self.diagram_zoom,
             self.diagram_pan,
         );
+        let scale = diagram_scale(&diagram, rect, self.diagram_zoom);
+        let hovered_diagram = response.hover_pos().map(|pos| {
+            crate::diagram_view::to_diagram(
+                pos,
+                &diagram.coordinate_extent,
+                rect,
+                self.diagram_zoom,
+                self.diagram_pan,
+            )
+        });
+        if let Some(p) = hovered_diagram {
+            if let Some((ci, pi)) = crate::diagram_view::hit_pin(&diagram, p, 6.0 / scale) {
+                let c = &diagram.components[ci];
+                let at = crate::diagram_view::pin_position(c, &c.connectors[pi]);
+                painter.circle_filled(
+                    crate::diagram_view::to_screen(
+                        at,
+                        &diagram.coordinate_extent,
+                        rect,
+                        self.diagram_zoom,
+                        self.diagram_pan,
+                    ),
+                    5.0,
+                    theme::ACCENT,
+                );
+            }
+        }
+        for comp in &diagram.components {
+            for pin in &comp.connectors {
+                let at = crate::diagram_view::pin_position(comp, pin);
+                let screen = crate::diagram_view::to_screen(
+                    at,
+                    &diagram.coordinate_extent,
+                    rect,
+                    self.diagram_zoom,
+                    self.diagram_pan,
+                );
+                painter.circle_filled(screen, 2.5, Color32::from_rgb(40, 90, 150));
+            }
+        }
+        if let Some(index) = self
+            .selected_connection
+            .filter(|i| *i < diagram.connections.len())
+        {
+            let conn = &diagram.connections[index];
+            let pts: Vec<_> = conn
+                .points
+                .iter()
+                .map(|p| {
+                    crate::diagram_view::to_screen(
+                        *p,
+                        &diagram.coordinate_extent,
+                        rect,
+                        self.diagram_zoom,
+                        self.diagram_pan,
+                    )
+                })
+                .collect();
+            if pts.len() >= 2 {
+                painter.add(egui::Shape::line(pts, Stroke::new(3.0, theme::ACCENT)));
+            }
+        }
+        if let Some(drag) = &self.connection_drag {
+            let route = crate::diagram_view::orthogonal_route(drag.start, drag.current);
+            let pts: Vec<_> = route
+                .iter()
+                .map(|p| {
+                    crate::diagram_view::to_screen(
+                        *p,
+                        &diagram.coordinate_extent,
+                        rect,
+                        self.diagram_zoom,
+                        self.diagram_pan,
+                    )
+                })
+                .collect();
+            if pts.len() >= 2 {
+                painter.add(egui::Shape::line(pts, Stroke::new(2.0, theme::ACCENT)));
+            }
+        }
         // Selection outline and four grab handles.
         if let Some(name) = self.selected_component.as_deref() {
             if let Some(comp) = draw_diagram.components.iter().find(|c| c.name == name) {
@@ -543,10 +703,20 @@ impl OmolaApp {
                     format!("{} : {} (read-only)", comp.name, comp.type_name)
                 });
                 if response.clicked_by(egui::PointerButton::Primary) {
-                    self.selected_component = Some(comp.name.clone());
-                    self.component_expanded.insert(comp.name.clone());
+                    if let Some(ci) =
+                        crate::diagram_view::hit_connection(&diagram, point, 4.0 / scale)
+                    {
+                        self.selected_connection = Some(ci);
+                        self.selected_component = None;
+                    } else {
+                        self.selected_connection = None;
+                        self.selected_component = Some(comp.name.clone());
+                        self.component_expanded.insert(comp.name.clone());
+                    }
                 }
             } else if response.clicked_by(egui::PointerButton::Primary) {
+                self.selected_connection =
+                    crate::diagram_view::hit_connection(&diagram, point, 4.0 / scale);
                 self.selected_component = None;
             }
             if !user_class
@@ -833,6 +1003,13 @@ impl Mapping {
 }
 
 /// Guard against a zero-width range so the mapping never divides by zero.
+fn diagram_scale(diagram: &crate::diagram::Diagram, rect: egui::Rect, zoom: f32) -> f64 {
+    let e = diagram.coordinate_extent;
+    let width = (e.x2 - e.x1).abs().max(1e-9);
+    let height = (e.y2 - e.y1).abs().max(1e-9);
+    ((rect.width() / width as f32).min(rect.height() / height as f32) * zoom).max(1e-6) as f64
+}
+
 fn sane(a: f64, b: f64) -> (f64, f64) {
     if b > a {
         (a, b)

@@ -3,6 +3,65 @@ use crate::diagram::{component_bounds, placement_transform, Diagram, PlacedCompo
 use crate::graphics::{Extent, Graphic, Shape, Style};
 use egui::{Align2, Color32, FontId, Painter, Pos2, Rect, Shape as EguiShape, Stroke, Vec2};
 
+pub fn pin_position(component: &PlacedComponent, pin: &crate::diagram::ConnectorPin) -> [f64; 2] {
+    let local = [
+        (pin.extent.x1 + pin.extent.x2) / 2.0,
+        (pin.extent.y1 + pin.extent.y2) / 2.0,
+    ];
+    let icon_extent = component
+        .icon
+        .as_ref()
+        .map(|i| i.coordinate_extent)
+        .unwrap_or(Extent::DEFAULT);
+    crate::diagram::placement_transform(local, &icon_extent, &component.placement)
+}
+
+pub fn hit_pin(diagram: &Diagram, p: [f64; 2], tolerance: f64) -> Option<(usize, usize)> {
+    diagram
+        .components
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(ci, c)| {
+            c.connectors.iter().enumerate().find_map(|(pi, pin)| {
+                let at = pin_position(c, pin);
+                ((at[0] - p[0]).hypot(at[1] - p[1]) <= tolerance).then_some((ci, pi))
+            })
+        })
+}
+
+pub fn orthogonal_route(a: [f64; 2], b: [f64; 2]) -> Vec<[f64; 2]> {
+    if (a[1] - b[1]).abs() < 1e-9 {
+        return vec![a, b];
+    }
+    let mx = snap((a[0] + b[0]) / 2.0, 2.0);
+    vec![a, [mx, a[1]], [mx, b[1]], b]
+}
+
+pub fn point_segment_distance(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
+    let ab = [b[0] - a[0], b[1] - a[1]];
+    let d = ab[0] * ab[0] + ab[1] * ab[1];
+    if d <= f64::EPSILON {
+        return (p[0] - a[0]).hypot(p[1] - a[1]);
+    }
+    let t = (((p[0] - a[0]) * ab[0] + (p[1] - a[1]) * ab[1]) / d).clamp(0.0, 1.0);
+    (p[0] - (a[0] + t * ab[0])).hypot(p[1] - (a[1] + t * ab[1]))
+}
+
+pub fn hit_connection(diagram: &Diagram, p: [f64; 2], tolerance: f64) -> Option<usize> {
+    diagram
+        .connections
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(i, c)| {
+            c.points
+                .windows(2)
+                .any(|s| point_segment_distance(p, s[0], s[1]) <= tolerance)
+                .then_some(i)
+        })
+}
+
 pub fn to_screen(p: [f64; 2], extent: &Extent, rect: Rect, zoom: f32, pan: Vec2) -> Pos2 {
     let (w, h) = (extent.x2 - extent.x1, extent.y2 - extent.y1);
     if w.abs() < 1e-9 || h.abs() < 1e-9 {
@@ -395,12 +454,14 @@ mod edit_tests {
             type_name: "A".into(),
             placement: p.clone(),
             icon: None,
+            connectors: vec![],
         });
         d.components.push(PlacedComponent {
             name: "last".into(),
             type_name: "A".into(),
             placement: p,
             icon: None,
+            connectors: vec![],
         });
         assert_eq!(hit_component(&d, [0.0, 9.0]), Some(1));
         assert_eq!(hit_component(&d, [20.0, 20.0]), None);
@@ -418,10 +479,67 @@ mod edit_tests {
             type_name: "T".into(),
             placement: Placement::default(),
             icon: None,
+            connectors: vec![],
         };
         let (p, op) = placement_edit(&comp, [2.0, -4.0], 90.0);
         assert_eq!(p.origin, [2.0, -4.0]);
         assert_eq!(p.rotation_deg, 90.0);
         assert!(matches!(op,crate::edit::EditOp::SetPlacement{component,..} if component=="k"));
+    }
+
+    #[test]
+    fn route_hits_and_pin_positions_follow_component_placement() {
+        assert_eq!(
+            orthogonal_route([1.0, 2.0], [9.0, 2.0]),
+            vec![[1.0, 2.0], [9.0, 2.0]]
+        );
+        assert_eq!(
+            orthogonal_route([9.0, 8.0], [-1.0, -2.0]),
+            vec![[9.0, 8.0], [4.0, 8.0], [4.0, -2.0], [-1.0, -2.0]]
+        );
+        assert_eq!(
+            point_segment_distance([2.0, 3.0], [0.0, 0.0], [4.0, 0.0]),
+            3.0
+        );
+        assert_eq!(
+            point_segment_distance([8.0, 0.0], [0.0, 0.0], [4.0, 0.0]),
+            4.0
+        );
+        let pin = crate::diagram::ConnectorPin {
+            name: "p".into(),
+            extent: Extent {
+                x1: 0.0,
+                y1: 0.0,
+                x2: 0.0,
+                y2: 0.0,
+            },
+        };
+        let mut c = PlacedComponent {
+            name: "a".into(),
+            type_name: "C".into(),
+            placement: Placement {
+                origin: [20.0, 10.0],
+                ..Placement::default()
+            },
+            icon: None,
+            connectors: vec![pin],
+        };
+        let expected = pin_position(&c, &c.connectors[0]);
+        assert_eq!(expected, [20.0, 10.0]);
+        let mut d = Diagram {
+            components: vec![c.clone()],
+            ..Diagram::default()
+        };
+        d.connections.push(crate::diagram::Connection {
+            from: "a.p".into(),
+            to: "b.p".into(),
+            points: vec![[20.0, 10.0], [30.0, 10.0]],
+            color: [0; 3],
+        });
+        assert_eq!(hit_pin(&d, expected, 0.1), Some((0, 0)));
+        assert_eq!(hit_connection(&d, [25.0, 13.0], 3.1), Some(0));
+        assert_eq!(hit_connection(&d, [25.0, 13.0], 2.9), None);
+        c.placement.origin[0] += 2.0;
+        assert_eq!(pin_position(&c, &c.connectors[0]), [22.0, 10.0]);
     }
 }
