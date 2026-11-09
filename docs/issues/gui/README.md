@@ -144,6 +144,13 @@ Dymola 風レイアウト(タイトル行・リボン・ブラウザ・モデル
 | [G32](G32-diagram-connect.md) | Diagram 層でコネクタ間をドラッグして結線する / 結線を削除する | 中〜難 | G28, G29 |
 | [G33](G33-component-parameter-dialog.md) | 部品のパラメータダイアログ | 中 | G28 |
 | [G34](G34-undo-redo.md) | モデル編集の Undo / Redo | 易〜中 | G28 |
+| [G35](G35-plot-options-tab.md) | 【不具合】Plot Options タブがクリックできない → プロット設定のリボン | 中 | — |
+| [G36](G36-diagram-component-icons.md) | 【不具合】Diagram 層で部品のアイコンが描かれず空の四角になる | 中 | — |
+| [G37](G37-doc-images-windows.md) | 【不具合】Documentation 層の画像が Windows で表示されない | 易 | — |
+| [G38](G38-variable-browser-value-overflow.md) | 【不具合】Variable Browser の値が長い指数表記で名前に重なる | 易 | — |
+| [G39](G39-plot-legend.md) | プロットの凡例: 折り返し・見分けられる色と線種 | 易〜中 | — |
+| [G40](G40-library-text-readonly-editor.md) | ライブラリのクラスの Text 層を行番号・色分け付きの読み取り専用エディタで | 易〜中 | G24 |
+| [G41](G41-title-and-tab-overlap.md) | 【不具合】タイトル行・下段モデルタブの文字の重なり | 易 | — |
 
 並行して進めてよいもの: G02, G03, G09, G10, G11, G13, G14 は互いに独立。
 
@@ -155,7 +162,15 @@ Dymola 風レイアウト(タイトル行・リボン・ブラウザ・モデル
 4. **残り機能**: G14(再)・G27 は独立。
 5. **Diagram 編集**: G28 → (G29, G30, G33, G34) → G31, G32。
 
-同じファイルを触るため、同時に進めると衝突しやすい組み合わせ: G19/G20(`browsers.rs`)、G20/G22/G14(`app.rs`)、G23/G24/G25(`text_editor.rs`)、G29〜G32(`views.rs` の `diagram_layer`)。
+### 2026-11-09 追加(実 OMC・Windows での画面確認から、G35〜G41)
+
+PID_Controller を MSL から開いて Graphics / Documentation / Text / Simulation を確認した結果です。
+
+6. **不具合を先に**: G36(Diagram のアイコン)・G37(ドキュメント画像)・G38(値の重なり)・G41(タイトルの重なり)は互いに独立。
+7. **プロット**: G35(Plot Options)→ G39(凡例)。どちらも `views.rs` の `plot_window()` を触るので同時に進めない。
+8. **Text 層**: G40 は G24 のマージ後。
+
+同じファイルを触るため、同時に進めると衝突しやすい組み合わせ: G19/G20(`browsers.rs`)、G20/G22/G14(`app.rs`)、G23/G24/G25(`text_editor.rs`)、G29〜G32・G36(`views.rs` の `diagram_layer` / `diagram_view.rs`)、G35/G39(`plot_window`)、G23/G24/G40(`text_editor.rs`)。
 **同じファイルを触る issue を同時に進めると衝突します。** PR は小さく、1 issue = 1 PR にしてください。
 
 ## 7. PR の書き方
