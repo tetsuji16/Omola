@@ -1130,6 +1130,86 @@ impl OmolaApp {
         }
     }
 
+    fn record_undo_snapshot(&mut self, doc: usize, text: String) {
+        let Some(document) = self.documents.get_mut(doc) else {
+            return;
+        };
+        if document.undo.last() != Some(&text) {
+            document.undo.push(text);
+            if document.undo.len() > 100 {
+                document.undo.remove(0);
+            }
+        }
+        document.redo.clear();
+    }
+
+    pub fn undo(&mut self) {
+        self.restore_history(false);
+    }
+
+    pub fn redo(&mut self) {
+        self.restore_history(true);
+    }
+
+    pub fn can_undo(&self) -> bool {
+        self.active_doc()
+            .is_some_and(|doc| !self.documents[doc].undo.is_empty())
+    }
+
+    pub fn can_redo(&self) -> bool {
+        self.active_doc()
+            .is_some_and(|doc| !self.documents[doc].redo.is_empty())
+    }
+
+    fn restore_history(&mut self, redo: bool) {
+        if self.pending_edit.is_some() {
+            return;
+        }
+        let Some(class) = self.active.clone() else {
+            return;
+        };
+        let Some(doc) = self.doc_of(&class) else {
+            return;
+        };
+        let current = self.documents[doc].text.clone();
+        let replacement = {
+            let document = &mut self.documents[doc];
+            if redo {
+                if let Some(text) = document.redo.pop() {
+                    document.undo.push(current);
+                    Some(text)
+                } else {
+                    None
+                }
+            } else {
+                if let Some(text) = document.undo.pop() {
+                    document.redo.push(current);
+                    Some(text)
+                } else {
+                    None
+                }
+            }
+        };
+        let Some(replacement) = replacement else {
+            return;
+        };
+        self.documents[doc].text = replacement;
+        self.user_text_changed(doc);
+        self.model_diagrams.remove(&class);
+        self.icons.remove(&class);
+        if self
+            .components
+            .as_ref()
+            .is_some_and(|(name, _)| name == &class)
+        {
+            self.components = None;
+        }
+        self.components_pending = None;
+        self.request_diagram(&class);
+        self.request_icon(&class);
+        self.request_components(&class);
+    }
+
     // ---------------------------------------------------------------- check & simulate
 
     pub fn check(&mut self) {
@@ -1470,42 +1550,47 @@ impl OmolaApp {
                     }
                 }
                 Event::ModelEdited { class, result } => {
-                    self.pending_edit = None;
                     self.pending_placement = None;
                     self.selected_connection = None;
-                    match result {
-                        Ok(source) => {
-                            if let Some(doc) = self.doc_of(&class) {
-                                if let Some(updated) = crate::model::replace_class_text(
-                                    &self.documents[doc].text,
-                                    &class,
-                                    &source,
-                                ) {
-                                    self.documents[doc].text = updated;
-                                    self.user_text_changed(doc);
-                                    self.model_diagrams.remove(&class);
-                                    self.icons.remove(&class);
-                                    if self.components.as_ref().is_some_and(|(c, _)| c == &class) {
-                                        self.components = None;
-                                    }
-                                    self.components_pending = None;
-                                    self.request_diagram(&class);
-                                    self.request_icon(&class);
-                                    self.request_components(&class);
-                                } else {
-                                    self.error(
-                                        LogTab::Syntax,
-                                        format!(
-                                            "Could not locate class {class} in the editor buffer"
-                                        ),
-                                    );
-                                }
-                            }
+                    self.handle_model_edited_event(Event::ModelEdited { class, result });
+                }
+            }
+        }
+    }
+
+    fn handle_model_edited_event(&mut self, event: Event) {
+        let Event::ModelEdited { class, result } = event else {
+            return;
+        };
+        self.pending_edit = None;
+        match result {
+            Ok(source) => {
+                if let Some(doc) = self.doc_of(&class) {
+                    if let Some(updated) =
+                        crate::model::replace_class_text(&self.documents[doc].text, &class, &source)
+                    {
+                        let old_text = self.documents[doc].text.clone();
+                        self.record_undo_snapshot(doc, old_text);
+                        self.documents[doc].text = updated;
+                        self.user_text_changed(doc);
+                        self.model_diagrams.remove(&class);
+                        self.icons.remove(&class);
+                        if self.components.as_ref().is_some_and(|(c, _)| c == &class) {
+                            self.components = None;
                         }
-                        Err(message) => self.error(LogTab::Syntax, message),
+                        self.components_pending = None;
+                        self.request_diagram(&class);
+                        self.request_icon(&class);
+                        self.request_components(&class);
+                    } else {
+                        self.error(
+                            LogTab::Syntax,
+                            format!("Could not locate class {class} in the editor buffer"),
+                        );
                     }
                 }
             }
+            Err(message) => self.error(LogTab::Syntax, message),
         }
     }
 
@@ -2014,6 +2099,20 @@ impl OmolaApp {
         let save = KeyboardShortcut::new(Modifiers::COMMAND, Key::S);
         let simulate = KeyboardShortcut::new(Modifiers::NONE, Key::F9);
         let find = KeyboardShortcut::new(Modifiers::COMMAND, Key::F);
+        let undo = KeyboardShortcut::new(Modifiers::COMMAND, Key::Z);
+        let redo = KeyboardShortcut::new(Modifiers::COMMAND, Key::Y);
+        let redo_alternate = KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z);
+        let text_edit_has_focus =
+            self.layer() == Layer::Text && ui.ctx().memory(|memory| memory.focused().is_some());
+        if !text_edit_has_focus {
+            if ui.input_mut(|i| i.consume_shortcut(&undo)) {
+                self.undo();
+            } else if ui.input_mut(|i| i.consume_shortcut(&redo))
+                || ui.input_mut(|i| i.consume_shortcut(&redo_alternate))
+            {
+                self.redo();
+            }
+        }
         if ui.input_mut(|i| i.consume_shortcut(&save)) {
             self.save();
         }
@@ -2079,6 +2178,64 @@ mod tests {
             std::env::temp_dir().join("omola-gui-unused"),
             || {},
         ))
+    }
+
+    fn history_app() -> OmolaApp {
+        let mut app = app();
+        app.documents
+            .push(Document::new_untitled("model A\nend A;"));
+        app.refresh_outline();
+        app.active = Some("A".into());
+        app
+    }
+
+    fn apply_snapshot_edit(app: &mut OmolaApp, text: &str) {
+        let doc = app.active_doc().unwrap();
+        let before = app.documents[doc].text.clone();
+        app.record_undo_snapshot(doc, before);
+        app.documents[doc].text = text.into();
+    }
+
+    #[test]
+    fn graphical_edit_snapshots_undo_twice_and_redo_once() {
+        let mut app = history_app();
+        let original = app.documents[0].text.clone();
+        let after_add = "model A\n  Modelica.Blocks.Sources.Constant c;\nend A;";
+        let after_move = "model A\n  Modelica.Blocks.Sources.Constant c annotation(Placement(transformation(origin={1, 2})));\nend A;";
+        for source in [after_add, after_move] {
+            app.handle_model_edited_event(Event::ModelEdited {
+                class: "A".into(),
+                result: Ok(source.into()),
+            });
+        }
+
+        app.undo();
+        assert!(app.documents[0].text.contains("Constant c;"));
+        assert!(!app.documents[0].text.contains("origin={1, 2}"));
+        app.undo();
+        assert_eq!(app.documents[0].text, original);
+        app.redo();
+        assert!(app.documents[0].text.contains("Constant c;"));
+    }
+
+    #[test]
+    fn new_graphical_edit_after_undo_clears_redo() {
+        let mut app = history_app();
+        apply_snapshot_edit(&mut app, "model A\n  Real x;\nend A;");
+        app.undo();
+        assert!(app.can_redo());
+        apply_snapshot_edit(&mut app, "model A\n  Real y;\nend A;");
+        assert!(!app.can_redo());
+    }
+
+    #[test]
+    fn undo_history_is_capped_at_one_hundred_snapshots() {
+        let mut app = history_app();
+        for i in 0..101 {
+            app.record_undo_snapshot(0, format!("snapshot {i}"));
+        }
+        assert_eq!(app.documents[0].undo.len(), 100);
+        assert_eq!(app.documents[0].undo.first().unwrap(), "snapshot 1");
     }
 
     #[test]
@@ -2228,6 +2385,18 @@ mod tests {
         assert_eq!(app.package_search_cache.as_ref().unwrap().1.len(), 501);
         app.update_package_search_cache();
         assert_eq!(app.package_search_cache.as_ref().unwrap().1.as_ptr(), first);
+    }
+
+    #[test]
+    fn failed_graphical_edit_does_not_add_an_undo_snapshot() {
+        let mut app = history_app();
+        app.pending_edit = Some("A".into());
+        app.handle_model_edited_event(Event::ModelEdited {
+            class: "A".into(),
+            result: Err("OMC rejected the edit".into()),
+        });
+        assert!(app.documents[0].undo.is_empty());
+        assert!(!app.can_undo());
     }
 
     #[test]
