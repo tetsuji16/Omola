@@ -537,7 +537,10 @@ impl OmolaApp {
         let mut expand: Vec<(String, bool)> = Vec::new();
         let mut reset: Vec<String> = Vec::new();
         self.variable_time_row(ui);
-        let filter = self.variable_filter.to_lowercase();
+        let run_ids: Vec<u64> = self.runs.iter().map(|r| r.id).collect();
+        for id in run_ids {
+            self.var_tree_for(id);
+        }
         let latest = self.runs.last().map(|r| r.id);
         let time = self.variable_time;
         Self::browser_frame(ui, |ui| {
@@ -632,35 +635,25 @@ impl OmolaApp {
                             overrides: &self.pending_overrides,
                             expanded: &self.variable_expanded,
                         };
-                        let names: Vec<(usize, &str)> = variable_order(self, run)
-                            .into_iter()
-                            .filter_map(|i| {
-                                let var = &result.variables[i];
-                                if var.name == "time" {
-                                    return None;
-                                }
-                                let shown = if var.is_parameter {
-                                    self.variable_show_parameters
-                                } else {
-                                    self.variable_show_time_varying
-                                };
-                                if !shown {
-                                    return None;
-                                }
-                                if !filter.is_empty() && !var.name.to_lowercase().contains(&filter)
-                                {
-                                    return None;
-                                }
-                                Some((i, var.name.as_str()))
-                            })
-                            .collect();
                         let mut actions = VarActions::default();
-                        if filter.is_empty() {
-                            let tree = crate::var_tree::build_variable_tree(&names);
-                            variable_rows(ui, &tree, 0, "", &ctx, result, widths, &mut actions);
+                        let Some(cache) = self.var_tree_cache.get(&run.id) else {
+                            continue;
+                        };
+                        if cache.key.filter.is_empty() {
+                            variable_rows(
+                                ui,
+                                &cache.tree,
+                                0,
+                                "",
+                                &ctx,
+                                result,
+                                widths,
+                                &mut actions,
+                            );
                         } else {
                             // A search shows matching variables as a flat list.
-                            for (i, name) in &names {
+                            for i in cache.flat.iter().take(500) {
+                                let name = &result.variables[*i].name;
                                 variable_row(
                                     ui,
                                     0,
@@ -672,6 +665,12 @@ impl OmolaApp {
                                     result,
                                     widths,
                                     &mut actions,
+                                );
+                            }
+                            if cache.flat.len() > 500 {
+                                ui.label(
+                                    RichText::new(format!("... {} more", cache.flat.len() - 500))
+                                        .color(theme::TEXT_WEAK),
                                 );
                             }
                         }
@@ -1045,7 +1044,7 @@ fn variable_row(
 }
 
 /// Display order: declaration order in the user's source when available, else file order.
-fn variable_order(app: &OmolaApp, run: &crate::app::ResultRun) -> Vec<usize> {
+pub(crate) fn variable_order(app: &OmolaApp, run: &crate::app::ResultRun) -> Vec<usize> {
     let vars = &run.outcome.result.variables;
     let mut order: Vec<usize> = (0..vars.len()).collect();
     let text = app
