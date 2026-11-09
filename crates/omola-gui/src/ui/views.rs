@@ -17,6 +17,13 @@ pub const CURVE_COLORS: [Color32; 6] = [
     Color32::from_rgb(0xD0, 0x7A, 0x00),
 ];
 
+fn collect_component_names(nodes: &[crate::instance::ComponentNode], out: &mut Vec<String>) {
+    for node in nodes {
+        out.push(node.name.clone());
+        collect_component_names(&node.children, out);
+    }
+}
+
 /// Label of a model tab: the short class name, plus `*` while the document has unsaved edits.
 pub fn tab_label(qualified_name: &str, dirty: bool) -> String {
     let name = crate::library::short_name(qualified_name);
@@ -247,6 +254,55 @@ impl OmolaApp {
         let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 0.0, Color32::WHITE);
+        if let Some(payload) = response.dnd_release_payload::<super::browsers::ClassPayload>() {
+            if !self.is_user_class(class) {
+                self.error(
+                    crate::backend::LogTab::Syntax,
+                    "Library classes are read-only".into(),
+                );
+            } else if let (Some(pos), Some(Loadable::Ready(diagram))) =
+                (response.hover_pos(), self.model_diagrams.get(class))
+            {
+                let point = crate::diagram_view::to_diagram(
+                    pos,
+                    &diagram.coordinate_extent,
+                    rect,
+                    self.diagram_zoom,
+                    self.diagram_pan,
+                );
+                let origin = [
+                    crate::diagram_view::snap(point[0], 2.0),
+                    crate::diagram_view::snap(point[1], 2.0),
+                ];
+                let mut existing = Vec::new();
+                if let Some(Loadable::Ready(d)) = self.model_diagrams.get(class) {
+                    existing.extend(d.components.iter().map(|c| c.name.clone()));
+                }
+                if let Some((c, nodes)) = &self.components {
+                    if c == class {
+                        collect_component_names(nodes, &mut existing);
+                    }
+                }
+                let short = payload
+                    .qualified
+                    .rsplit('.')
+                    .next()
+                    .unwrap_or(&payload.qualified);
+                let name = super::browsers::unique_component_name(short, &existing);
+                if !name.is_empty() {
+                    self.selected_component = Some(name.clone());
+                    self.apply_edit(
+                        class,
+                        vec![crate::edit::EditOp::AddComponent {
+                            name,
+                            type_name: payload.qualified.clone(),
+                            extent: [[-10.0, -10.0], [10.0, 10.0]],
+                            origin,
+                        }],
+                    );
+                }
+            }
+        }
         // wheel zoom around cursor
         let scroll = ui.input(|i| i.zoom_delta());
         if scroll != 1.0 && scroll > 0.0 {

@@ -11,6 +11,40 @@ use egui_material_icons::MaterialIcon;
 const ROW: f32 = 20.0;
 const INDENT: f32 = 16.0;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ClassPayload {
+    pub qualified: String,
+    pub restriction: String,
+}
+
+pub(crate) fn draggable_restriction(restriction: &str) -> bool {
+    !matches!(
+        restriction,
+        "package" | "function" | "operator function" | "type" | "record"
+    )
+}
+
+pub(crate) fn unique_component_name(type_short: &str, existing: &[String]) -> String {
+    if type_short.starts_with('\'') {
+        return String::new();
+    }
+    let mut chars = type_short.chars();
+    let base = chars
+        .next()
+        .map(|c| c.to_lowercase().collect::<String>() + chars.as_str())
+        .unwrap_or_default();
+    if !existing.contains(&base) {
+        return base;
+    }
+    for i in 1.. {
+        let candidate = format!("{base}{i}");
+        if !existing.contains(&candidate) {
+            return candidate;
+        }
+    }
+    unreachable!()
+}
+
 /// Icon and colour for a class restriction.
 fn class_icon(restriction: &str, name: &str) -> (MaterialIcon, Color32) {
     if name == "ModelicaReference" {
@@ -46,9 +80,10 @@ fn tree_row(
     icon: (MaterialIcon, Color32),
     label: &str,
     tooltip: impl FnOnce() -> String,
+    payload: Option<ClassPayload>,
 ) -> RowAction {
     let width = ui.available_width().max(120.0);
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, ROW), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, ROW), Sense::click_and_drag());
     let painter = ui.painter_at(rect);
     if selected {
         painter.rect_filled(rect, 0.0, theme::SELECT_BG);
@@ -111,12 +146,30 @@ fn tree_row(
         action.toggle = expandable;
         action.open_new_tab = !expandable;
     }
-    response.on_hover_ui(|ui| {
+    let response = response.on_hover_ui(|ui| {
         let tooltip = tooltip();
         if !tooltip.is_empty() {
             ui.label(tooltip);
         }
     });
+    if let Some(payload) = payload {
+        response.dnd_set_drag_payload(payload.clone());
+        if response.dragged() {
+            if let Some(pos) = ui.ctx().pointer_interact_pos() {
+                let painter = ui.ctx().layer_painter(egui::LayerId::new(
+                    egui::Order::Tooltip,
+                    egui::Id::unique(("package-class-drag", payload.qualified.clone())),
+                ));
+                painter.text(
+                    pos + Vec2::new(12.0, 12.0),
+                    Align2::LEFT_TOP,
+                    payload.qualified,
+                    FontId::proportional(13.0),
+                    Color32::from_rgba_unmultiplied(45, 65, 90, 150),
+                );
+            }
+        }
+    }
     action
 }
 
@@ -167,6 +220,7 @@ fn component_rows(
         component_icon(node),
         &label,
         || node.comment.clone(),
+        None,
     );
     if action.toggle {
         toggles.push(key.clone());
@@ -329,6 +383,7 @@ impl OmolaApp {
                         (ICON_HOURGLASS_EMPTY, theme::TEXT_WEAK),
                         &format!("{} (loading...)", spec.name),
                         String::new,
+                        None,
                     );
                 }
                 LibraryState::Failed(spec, message) => {
@@ -345,6 +400,7 @@ impl OmolaApp {
                             "{message}\n\nInstall it with Tools > Install Libraries, or run scripts/setup-* (docs/install.md)."
                         )
                         },
+                        None,
                     );
                 }
             }
@@ -385,6 +441,12 @@ impl OmolaApp {
                     format!("{name}\n{comment}")
                 }
             },
+            self.class_details(name).and_then(|(restriction, _)| {
+                draggable_restriction(restriction).then(|| ClassPayload {
+                    qualified: name.to_owned(),
+                    restriction: restriction.to_owned(),
+                })
+            }),
         );
         if action.toggle || action.open || action.open_new_tab {
             actions.push((name.to_owned(), action));
@@ -444,6 +506,10 @@ impl OmolaApp {
                         class_icon(restriction, name),
                         name,
                         || comment.to_owned(),
+                        draggable_restriction(restriction).then(|| ClassPayload {
+                            qualified: name.to_owned(),
+                            restriction: restriction.to_owned(),
+                        }),
                     );
                     if a.open || a.open_new_tab {
                         actions.push((name.to_owned(), a));
@@ -1120,6 +1186,31 @@ pub fn format_value(v: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn component_name_is_unique_and_lowercases_only_the_first_character() {
+        assert_eq!(unique_component_name("Constant", &[]), "constant");
+        assert_eq!(
+            unique_component_name("Constant", &["constant".into()]),
+            "constant1"
+        );
+        assert_eq!(
+            unique_component_name("Constant", &["constant".into(), "constant1".into()]),
+            "constant2"
+        );
+        assert_eq!(unique_component_name("PID", &[]), "pID");
+        assert_eq!(unique_component_name("'quoted'", &[]), "");
+    }
+
+    #[test]
+    fn non_component_restrictions_do_not_create_drag_payloads() {
+        for r in ["package", "function", "operator function", "type", "record"] {
+            assert!(!draggable_restriction(r));
+        }
+        for r in ["model", "block", "connector"] {
+            assert!(draggable_restriction(r));
+        }
+    }
 
     #[test]
     fn units_and_values() {
