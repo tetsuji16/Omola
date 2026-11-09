@@ -3,7 +3,7 @@ use crate::diagram::{component_bounds, placement_transform, Diagram, PlacedCompo
 use crate::graphics::{Extent, Graphic, Shape, Style};
 use egui::{Align2, Color32, FontId, Painter, Pos2, Rect, Shape as EguiShape, Stroke, Vec2};
 
-fn to_screen(p: [f64; 2], extent: &Extent, rect: Rect, zoom: f32, pan: Vec2) -> Pos2 {
+pub fn to_screen(p: [f64; 2], extent: &Extent, rect: Rect, zoom: f32, pan: Vec2) -> Pos2 {
     let (w, h) = (extent.x2 - extent.x1, extent.y2 - extent.y1);
     if w.abs() < 1e-9 || h.abs() < 1e-9 {
         return rect.center() + pan;
@@ -17,6 +17,25 @@ fn to_screen(p: [f64; 2], extent: &Extent, rect: Rect, zoom: f32, pan: Vec2) -> 
         c.x + (p[0] - cx) as f32 * scale,
         c.y - (p[1] - cy) as f32 * scale,
     )
+}
+
+/// Convert a screen position back into diagram coordinates (Modelica y points upward).
+pub fn to_diagram(pos: Pos2, extent: &Extent, rect: Rect, zoom: f32, pan: Vec2) -> [f64; 2] {
+    let (w, h) = (extent.x2 - extent.x1, extent.y2 - extent.y1);
+    if w.abs() < 1e-9 || h.abs() < 1e-9 {
+        return [0.0, 0.0];
+    }
+    let scale = (rect.width() / w.abs() as f32).min(rect.height() / h.abs() as f32) * zoom;
+    if scale.abs() < 1e-9 {
+        return [0.0, 0.0];
+    }
+    let center = rect.center() + pan;
+    let cx = (extent.x1 + extent.x2) / 2.0;
+    let cy = (extent.y1 + extent.y2) / 2.0;
+    [
+        cx + ((pos.x - center.x) / scale) as f64,
+        cy - ((pos.y - center.y) / scale) as f64,
+    ]
 }
 fn scale_of(extent: &Extent, rect: Rect, zoom: f32) -> f32 {
     let (w, h) = (extent.x2 - extent.x1, extent.y2 - extent.y1);
@@ -268,6 +287,48 @@ pub fn component_screen_rect(
     bounds_screen_rect(&comp.placement, &diagram.coordinate_extent, rect, zoom, pan)
 }
 
+/// Component at a diagram coordinate; later-painted components win when boxes overlap.
+pub fn hit_component(diagram: &Diagram, p: [f64; 2]) -> Option<usize> {
+    diagram
+        .components
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(i, comp)| {
+            let b = component_bounds(&comp.placement);
+            (p[0] >= b.x1 && p[0] <= b.x2 && p[1] >= b.y1 && p[1] <= b.y2).then_some(i)
+        })
+}
+
+pub fn snap(v: f64, grid: f64) -> f64 {
+    if !grid.is_finite() || grid <= 0.0 {
+        return v;
+    }
+    (v / grid).round() * grid
+}
+
+pub fn placement_edit(
+    comp: &PlacedComponent,
+    delta: [f64; 2],
+    rotation_delta: f64,
+) -> (Placement, crate::edit::EditOp) {
+    let mut placement = comp.placement.clone();
+    placement.origin[0] += delta[0];
+    placement.origin[1] += delta[1];
+    placement.rotation_deg = (placement.rotation_deg + rotation_delta).rem_euclid(360.0);
+    let op = crate::edit::EditOp::SetPlacement {
+        component: comp.name.clone(),
+        type_name: comp.type_name.clone(),
+        extent: [
+            [placement.extent.x1, placement.extent.y1],
+            [placement.extent.x2, placement.extent.y2],
+        ],
+        origin: placement.origin,
+        rotation: placement.rotation_deg,
+    };
+    (placement, op)
+}
+
 /// Screen rectangle of a placement's bounding box.
 ///
 /// `component_bounds` already applies `origin` and `rotation`, so nothing is added here;
@@ -294,4 +355,73 @@ fn bounds_screen_rect(
         screen.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max),
     );
     Rect::from_min_max(min, max)
+}
+
+#[cfg(test)]
+mod edit_tests {
+    use super::*;
+    use crate::diagram::{Diagram, PlacedComponent, Placement};
+    use crate::graphics::Extent;
+
+    #[test]
+    fn screen_diagram_conversion_round_trips_zoom_and_pan() {
+        let ex = Extent::DEFAULT;
+        let rect = Rect::from_min_size(Pos2::new(10.0, 20.0), Vec2::new(800.0, 600.0));
+        for (zoom, pan) in [
+            (1.0, Vec2::ZERO),
+            (2.0, Vec2::new(40.0, -15.0)),
+            (0.4, Vec2::new(-8.0, 21.0)),
+        ] {
+            let p = [23.5, -41.25];
+            let got = to_diagram(to_screen(p, &ex, rect, zoom, pan), &ex, rect, zoom, pan);
+            assert!((got[0] - p[0]).abs() < 1e-4 && (got[1] - p[1]).abs() < 1e-4);
+        }
+    }
+    #[test]
+    fn hit_prefers_later_components_and_handles_rotated_bounds() {
+        let mut d = Diagram::default();
+        let p = Placement {
+            extent: Extent {
+                x1: -10.0,
+                y1: -5.0,
+                x2: 10.0,
+                y2: 5.0,
+            },
+            origin: [0.0, 0.0],
+            rotation_deg: 90.0,
+        };
+        d.components.push(PlacedComponent {
+            name: "first".into(),
+            type_name: "A".into(),
+            placement: p.clone(),
+            icon: None,
+        });
+        d.components.push(PlacedComponent {
+            name: "last".into(),
+            type_name: "A".into(),
+            placement: p,
+            icon: None,
+        });
+        assert_eq!(hit_component(&d, [0.0, 9.0]), Some(1));
+        assert_eq!(hit_component(&d, [20.0, 20.0]), None);
+    }
+    #[test]
+    fn snap_handles_negative_and_ties() {
+        assert_eq!(snap(-2.4, 2.0), -2.0);
+        assert_eq!(snap(-3.0, 2.0), -4.0);
+        assert_eq!(snap(3.0, 2.0), 4.0);
+    }
+    #[test]
+    fn drag_produces_one_placement_edit_and_rotation_is_counterclockwise_step() {
+        let comp = PlacedComponent {
+            name: "k".into(),
+            type_name: "T".into(),
+            placement: Placement::default(),
+            icon: None,
+        };
+        let (p, op) = placement_edit(&comp, [2.0, -4.0], 90.0);
+        assert_eq!(p.origin, [2.0, -4.0]);
+        assert_eq!(p.rotation_deg, 90.0);
+        assert!(matches!(op,crate::edit::EditOp::SetPlacement{component,..} if component=="k"));
+    }
 }
