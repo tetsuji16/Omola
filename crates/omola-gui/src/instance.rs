@@ -24,6 +24,50 @@ pub struct ParamRow {
     pub choices: Vec<String>,
 }
 
+fn decode_modelica_string(value: String) -> String {
+    let Some(inner) = value.strip_prefix('"').and_then(|s| s.strip_suffix('"')) else {
+        return value;
+    };
+    let mut decoded = String::with_capacity(inner.len());
+    let mut chars = inner.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('"') => decoded.push('"'),
+                Some('\\') => decoded.push('\\'),
+                Some('n') => decoded.push('\n'),
+                Some('r') => decoded.push('\r'),
+                Some('t') => decoded.push('\t'),
+                Some(other) => {
+                    decoded.push('\\');
+                    decoded.push(other);
+                }
+                None => decoded.push('\\'),
+            }
+        } else {
+            decoded.push(c);
+        }
+    }
+    decoded
+}
+
+fn encode_modelica_string(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len() + 2);
+    encoded.push('"');
+    for c in value.chars() {
+        match c {
+            '"' => encoded.push_str("\\\""),
+            '\\' => encoded.push_str("\\\\"),
+            '\n' => encoded.push_str("\\n"),
+            '\r' => encoded.push_str("\\r"),
+            '\t' => encoded.push_str("\\t"),
+            _ => encoded.push(c),
+        }
+    }
+    encoded.push('"');
+    encoded
+}
+
 pub fn parse_parameter_rows(type_json: &Value, component_json: Option<&Value>) -> Vec<ParamRow> {
     let modifiers = component_json.and_then(|c| c.get("modifiers"));
     let mut out = Vec::new();
@@ -76,18 +120,21 @@ fn collect_parameters(
                         .to_owned(),
                     _ => continue,
                 };
-                let default_value =
-                    element
-                        .get("modifiers")
-                        .and_then(modifier_default)
-                        .or_else(|| {
-                            element
-                                .pointer("/value/binding")
-                                .and_then(binding_expression)
-                        });
-                let current_value = modifiers
+                let mut default_value = element
+                    .get("modifiers")
+                    .and_then(modifier_default)
+                    .or_else(|| {
+                        element
+                            .pointer("/value/binding")
+                            .and_then(binding_expression)
+                    });
+                let mut current_value = modifiers
                     .and_then(|m| m.get(name))
                     .and_then(binding_expression);
+                if type_name == "String" {
+                    default_value = default_value.map(decode_modelica_string);
+                    current_value = current_value.map(decode_modelica_string);
+                }
                 let unit = element
                     .get("modifiers")
                     .and_then(|m| m.get("unit"))
@@ -207,13 +254,21 @@ pub fn parameter_edits(
                         .as_ref()
                         .map(|default| crate::edit::EditOp::SetModifier {
                             path: format!("{component}.{}", row.name),
-                            value: Some(default.clone()),
+                            value: Some(if row.type_name == "String" {
+                                encode_modelica_string(default)
+                            } else {
+                                default.clone()
+                            }),
                         })
                 }
                 (Some(current), false) if current == draft => None,
                 (_, false) => Some(crate::edit::EditOp::SetModifier {
                     path: format!("{component}.{}", row.name),
-                    value: Some(draft.to_owned()),
+                    value: Some(if row.type_name == "String" {
+                        encode_modelica_string(draft)
+                    } else {
+                        draft.to_owned()
+                    }),
                 }),
             }
         })
@@ -473,6 +528,27 @@ mod tests {
         let edits = parameter_edits("plant", &rows, &["3".into(), String::new()]);
         assert!(
             matches!(edits.as_slice(), [crate::edit::EditOp::SetModifier { path, value: Some(v) }, crate::edit::EditOp::SetModifier { path: reset, value: Some(default) }] if path == "plant.k" && v == "3" && reset == "plant.T" && default == "0.25")
+        );
+    }
+
+    #[test]
+    fn string_parameter_edits_escape_literals_and_restore_the_default() {
+        let rows = [ParamRow {
+            name: "label".into(),
+            type_name: "String".into(),
+            default_value: Some("default".into()),
+            current_value: Some("old".into()),
+            unit: String::new(),
+            comment: String::new(),
+            choices: Vec::new(),
+        }];
+        let edited = parameter_edits("plant", &rows, &["a\"b\\c".into()]);
+        assert!(
+            matches!(edited.as_slice(), [crate::edit::EditOp::SetModifier { path, value: Some(v) }] if path == "plant.label" && v == "\"a\\\"b\\\\c\"")
+        );
+        let reset = parameter_edits("plant", &rows, &[String::new()]);
+        assert!(
+            matches!(reset.as_slice(), [crate::edit::EditOp::SetModifier { path, value: Some(v) }] if path == "plant.label" && v == "\"default\"")
         );
     }
 }

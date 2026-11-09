@@ -89,6 +89,31 @@ fn validate(s: &str) -> Result<(), String> {
     }
 }
 
+fn is_modelica_string_literal(value: &str) -> bool {
+    let mut chars = value.chars().peekable();
+    if chars.next() != Some('"') {
+        return false;
+    }
+    let mut escaped = false;
+    let mut closed = false;
+    while let Some(c) = chars.next() {
+        if escaped {
+            if !matches!(c, '"' | '\\' | 'n' | 'r' | 't') {
+                return false;
+            }
+            escaped = false;
+        } else if c == '\\' {
+            escaped = true;
+        } else if c == '"' {
+            closed = true;
+            break;
+        } else if matches!(c, '\n' | '\r') {
+            return false;
+        }
+    }
+    closed && !escaped && chars.next().is_none()
+}
+
 /// Build a checked OMC script. User strings are restricted to Modelica identifiers and expressions.
 pub fn edit_script(class: &str, ops: &[EditOp]) -> Result<String, String> {
     validate(class)?;
@@ -157,6 +182,7 @@ pub fn edit_script(class: &str, ops: &[EditOp]) -> Result<String, String> {
             EditOp::SetModifier { path, value } => {
                 validate(path)?;
                 let code = match value {
+                    Some(v) if is_modelica_string_literal(v) => format!("$Code(={v})"),
                     Some(v) if !v.contains([';', '\n', '\r', '"']) => format!("$Code(={v})"),
                     Some(_) => {
                         return Err(
@@ -278,5 +304,23 @@ mod tests {
         )
         .unwrap_err()
         .contains("declared default"));
+    }
+
+    #[test]
+    fn accepts_escaped_string_literals_but_rejects_trailing_script() {
+        let op = EditOp::SetModifier {
+            path: "plant.label".into(),
+            value: Some("\"a\\\"b\\\\c; d\"".into()),
+        };
+        let script = edit_script("A", &[op]).unwrap();
+        assert!(script.contains("$Code(=\"a\\\"b\\\\c; d\")"));
+        assert!(edit_script(
+            "A",
+            &[EditOp::SetModifier {
+                path: "plant.label".into(),
+                value: Some("\"safe\"; print(1)".into()),
+            }]
+        )
+        .is_err());
     }
 }
