@@ -3,7 +3,8 @@ use crate::diagram::{component_bounds, placement_transform, Diagram, PlacedCompo
 use crate::graphics::{Extent, Graphic, Shape, Style};
 use egui::{Align2, Color32, FontId, Painter, Pos2, Rect, Shape as EguiShape, Stroke, Vec2};
 
-fn to_screen(p: [f64; 2], extent: &Extent, rect: Rect, zoom: f32, pan: Vec2) -> Pos2 {
+/// Diagram coordinates to screen, the inverse of [`to_diagram`].
+pub fn to_screen(p: [f64; 2], extent: &Extent, rect: Rect, zoom: f32, pan: Vec2) -> Pos2 {
     let (w, h) = (extent.x2 - extent.x1, extent.y2 - extent.y1);
     if w.abs() < 1e-9 || h.abs() < 1e-9 {
         return rect.center() + pan;

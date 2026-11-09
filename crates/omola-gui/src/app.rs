@@ -8,7 +8,7 @@
 use crate::backend::{
     ClassContext, Event, Job, LogLevel, LogTab, SimulationOutcome, SimulationSetup, Worker,
 };
-use crate::diagram::Placement;
+use crate::diagram::{Diagram, Placement};
 use crate::html::{self, Block};
 use crate::library::{self, ClassDoc, LibrarySpec, LoadedLibrary};
 use crate::model::{default_class, scan_classes, ClassEntry as UserClass, Document};
@@ -269,6 +269,15 @@ pub struct PersistedState {
 /// Storage key for [`PersistedState`] in eframe's `Storage`.
 const STATE_KEY: &str = "omola_gui_state";
 
+/// A connection being dragged out of a pin (G32).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PinDrag {
+    /// `component.pin` of the fixed end.
+    pub from: String,
+    /// Pointer position in diagram coordinates.
+    pub cursor: [f64; 2],
+}
+
 /// A component being dragged in the Diagram layer (G29).
 #[derive(Debug, Clone, PartialEq)]
 pub struct DiagramDrag {
@@ -351,6 +360,65 @@ pub fn delete_ops(diagram: &crate::diagram::Diagram, component: &str) -> Vec<cra
     ops
 }
 
+/// The edits a move sends: the new placement, plus a rerouted copy of every connection
+/// that touches the component (G32).
+///
+/// The connections are replaced rather than edited because a `connect` statement has no
+/// "move one end" operation; `DeleteConnection` + `AddConnection` with the new points is
+/// what the scripting API offers, and one `apply_edit` keeps the class valid between them.
+pub fn move_ops(
+    diagram: &crate::diagram::Diagram,
+    component: &str,
+    type_name: &str,
+    placement: &Placement,
+) -> Vec<crate::edit::EditOp> {
+    let mut ops = placement_ops(component, type_name, placement);
+    for conn in &diagram.connections {
+        if !(crate::diagram::connector_belongs_to(&conn.from, component)
+            || crate::diagram::connector_belongs_to(&conn.to, component))
+        {
+            continue;
+        }
+        let points = crate::diagram::rerouted_points(diagram, conn, component, placement);
+        ops.push(crate::edit::EditOp::DeleteConnection {
+            from: conn.from.clone(),
+            to: conn.to.clone(),
+        });
+        ops.push(crate::edit::EditOp::AddConnection {
+            from: conn.from.clone(),
+            to: conn.to.clone(),
+            points,
+        });
+    }
+    ops
+}
+
+/// The edit a connection drag sends, or `None` when the pair is not connectable (G32).
+///
+/// Same pin, two pins of one component and an existing connection are all rejected here,
+/// before anything reaches OMC. Type compatibility is left to Check.
+pub fn connection_ops(diagram: &Diagram, from: &str, to: &str) -> Option<Vec<crate::edit::EditOp>> {
+    let (from_component, _) = from.split_once('.')?;
+    let (to_component, _) = to.split_once('.')?;
+    if from == to || from_component == to_component {
+        return None;
+    }
+    let already = diagram
+        .connections
+        .iter()
+        .any(|c| (c.from == from && c.to == to) || (c.from == to && c.to == from));
+    if already {
+        return None;
+    }
+    let a = crate::diagram::connector_position(diagram, from)?;
+    let b = crate::diagram::connector_position(diagram, to)?;
+    Some(vec![crate::edit::EditOp::AddConnection {
+        from: from.to_owned(),
+        to: to.to_owned(),
+        points: crate::diagram::orthogonal_route(a, b),
+    }])
+}
+
 /// The rename dialog of the Diagram layer (G31).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenameDialog {
@@ -408,6 +476,10 @@ pub struct OmolaApp {
     pub context_component: Option<String>,
     /// Open rename dialog of the Diagram layer (G31).
     pub rename_dialog: Option<RenameDialog>,
+    /// Connection being dragged out of a pin (G32).
+    pub pin_drag: Option<PinDrag>,
+    /// Selected connection as `(from, to)`; the index would change on every reload (G32).
+    pub selected_connection: Option<(String, String)>,
     pub doc_view: DocView,
     pub find_open: bool,
     pub find_query: String,
@@ -549,6 +621,8 @@ impl OmolaApp {
             pending_placement: None,
             context_component: None,
             rename_dialog: None,
+            pin_drag: None,
+            selected_connection: None,
             doc_view: DocView::Formatted,
             find_open: false,
             find_query: String::new(),
@@ -1185,8 +1259,38 @@ impl OmolaApp {
         type_name: &str,
         placement: Placement,
     ) {
-        if self.apply_edit(class, placement_ops(component, type_name, &placement)) {
+        // The connections of the component have to move with it (G32).
+        let ops = match self.model_diagrams.get(class) {
+            Some(Loadable::Ready(diagram)) => move_ops(diagram, component, type_name, &placement),
+            _ => placement_ops(component, type_name, &placement),
+        };
+        if self.apply_edit(class, ops) {
             self.pending_placement = Some((component.to_owned(), placement));
+        }
+    }
+
+    /// Connect two pins with a right-angled route (G32).
+    ///
+    /// Same pin, two pins of one component and an existing connection are all ignored
+    /// without touching the model. Type compatibility is left to Check.
+    pub fn connect_pins(&mut self, class: &str, from: &str, to: &str, diagram: &Diagram) {
+        let Some(ops) = connection_ops(diagram, from, to) else {
+            return;
+        };
+        if self.apply_edit(class, ops) {
+            self.selected_connection = Some((from.to_owned(), to.to_owned()));
+            self.selected_component = None;
+        }
+    }
+
+    /// Delete the connection `from`-`to` (G32).
+    pub fn delete_connection(&mut self, class: &str, from: &str, to: &str) {
+        let op = crate::edit::EditOp::DeleteConnection {
+            from: from.to_owned(),
+            to: to.to_owned(),
+        };
+        if self.apply_edit(class, vec![op]) {
+            self.selected_connection = None;
         }
     }
 
@@ -3212,6 +3316,7 @@ mod tests {
                     type_name: "T".into(),
                     placement: gain_placement(),
                     icon: None,
+                    connectors: Vec::new(),
                 })
                 .collect(),
             ..Default::default()
@@ -3336,5 +3441,129 @@ mod tests {
         app.libraries = vec![library_with(&["Modelica", "Modelica.Blocks.Gain"])];
         app.active = Some("Modelica.Blocks.Gain".into());
         assert!(!app.can_delete_component());
+    }
+
+    fn pin(name: &str, x1: f64, x2: f64) -> crate::diagram::ConnectorPin {
+        crate::diagram::ConnectorPin {
+            name: name.into(),
+            extent: crate::graphics::Extent {
+                x1,
+                y1: -10.0,
+                x2,
+                y2: 10.0,
+            },
+        }
+    }
+
+    fn pinned(
+        name: &str,
+        origin: [f64; 2],
+        pins: Vec<crate::diagram::ConnectorPin>,
+    ) -> crate::diagram::PlacedComponent {
+        crate::diagram::PlacedComponent {
+            name: name.into(),
+            type_name: "T".into(),
+            placement: Placement {
+                extent: crate::graphics::Extent {
+                    x1: -10.0,
+                    y1: -10.0,
+                    x2: 10.0,
+                    y2: 10.0,
+                },
+                origin,
+                rotation_deg: 0.0,
+            },
+            icon: None,
+            connectors: pins,
+        }
+    }
+
+    /// `a.p` on the right of `a` at (10,0), `b.n` on the left of `b` at (30,0).
+    fn two_pinned_components() -> Diagram {
+        Diagram {
+            components: vec![
+                pinned("a", [0.0, 0.0], vec![pin("p", 90.0, 110.0)]),
+                pinned("b", [40.0, 0.0], vec![pin("n", -110.0, -90.0)]),
+            ],
+            ..Diagram::default()
+        }
+    }
+
+    #[test]
+    fn a_connection_needs_two_different_components() {
+        let diagram = two_pinned_components();
+        assert!(connection_ops(&diagram, "a.p", "a.p").is_none());
+        assert!(
+            connection_ops(&diagram, "a.p", "a.q").is_none(),
+            "same component"
+        );
+        assert!(
+            connection_ops(&diagram, "a.p", "b.missing").is_none(),
+            "unknown pin"
+        );
+
+        let ops = connection_ops(&diagram, "a.p", "b.n").expect("connectable");
+        assert_eq!(ops.len(), 1);
+        match &ops[0] {
+            crate::edit::EditOp::AddConnection { from, to, points } => {
+                assert_eq!((from.as_str(), to.as_str()), ("a.p", "b.n"));
+                // Same height, so the route is one straight segment.
+                assert_eq!(points, &vec![[10.0, 0.0], [30.0, 0.0]]);
+            }
+            other => panic!("expected AddConnection, got {other:?}"),
+        }
+
+        // A duplicate in either direction is ignored.
+        let mut wired = diagram.clone();
+        wired.connections.push(crate::diagram::Connection {
+            from: "a.p".into(),
+            to: "b.n".into(),
+            points: vec![[10.0, 0.0], [30.0, 0.0]],
+            color: [0, 0, 0],
+        });
+        assert!(connection_ops(&wired, "a.p", "b.n").is_none());
+        assert!(connection_ops(&wired, "b.n", "a.p").is_none());
+    }
+
+    #[test]
+    fn a_move_carries_the_connections_in_the_same_edit() {
+        let diagram = two_pinned_components();
+        let moved = Placement {
+            extent: crate::graphics::Extent {
+                x1: -10.0,
+                y1: -10.0,
+                x2: 10.0,
+                y2: 10.0,
+            },
+            origin: [0.0, 20.0],
+            rotation_deg: 0.0,
+        };
+        let ops = move_ops(&diagram, "a", "T", &moved);
+        assert_eq!(ops.len(), 1, "no connection touches a");
+
+        let mut wired = diagram;
+        wired.connections.push(crate::diagram::Connection {
+            from: "a.p".into(),
+            to: "b.n".into(),
+            points: vec![[10.0, 0.0], [30.0, 0.0]],
+            color: [0, 0, 0],
+        });
+        let ops = move_ops(&wired, "a", "T", &moved);
+        assert_eq!(ops.len(), 3, "placement, delete, add");
+        assert!(matches!(
+            &ops[0],
+            crate::edit::EditOp::SetPlacement { component, .. } if component == "a"
+        ));
+        assert!(matches!(
+            &ops[1],
+            crate::edit::EditOp::DeleteConnection { .. }
+        ));
+        match &ops[2] {
+            crate::edit::EditOp::AddConnection { points, .. } => {
+                assert_eq!(points.first(), Some(&[10.0, 20.0]), "end follows the move");
+                assert_eq!(points.last(), Some(&[30.0, 0.0]));
+            }
+            other => panic!("expected AddConnection, got {other:?}"),
+        }
     }
 }

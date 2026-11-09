@@ -29,6 +29,23 @@ impl Default for Placement {
     }
 }
 
+/// A connector pin of a placed component, in the component's icon coordinates (G32).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConnectorPin {
+    pub name: String,
+    pub extent: Extent,
+}
+
+impl ConnectorPin {
+    /// Centre of the pin, in icon coordinates.
+    pub fn centre(&self) -> [f64; 2] {
+        [
+            (self.extent.x1 + self.extent.x2) / 2.0,
+            (self.extent.y1 + self.extent.y2) / 2.0,
+        ]
+    }
+}
+
 /// A component placed on the diagram with its icon.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlacedComponent {
@@ -36,6 +53,8 @@ pub struct PlacedComponent {
     pub type_name: String,
     pub placement: Placement,
     pub icon: Option<Icon>,
+    /// Connector pins of the component's type, in icon coordinates (G32).
+    pub connectors: Vec<ConnectorPin>,
 }
 
 /// A connection between two components' connectors.
@@ -125,12 +144,17 @@ pub fn parse_diagram(
             };
 
             let icon = icons.get(&type_name).cloned();
+            let connectors = element
+                .get("type")
+                .map(parse_connectors)
+                .unwrap_or_default();
 
             diagram.components.push(PlacedComponent {
                 name,
                 type_name,
                 placement,
                 icon,
+                connectors,
             });
         }
     }
@@ -293,6 +317,193 @@ pub fn component_bounds(placement: &Placement) -> Extent {
     Extent { x1, y1, x2, y2 }
 }
 
+/// Connector pins declared by a class, including the ones it inherits (G32).
+///
+/// `getModelInstance` puts a component's type under `type`, and inherited elements under
+/// `type.elements[].$kind == "extends".baseClass`. A derived class declares its own
+/// connectors first, so the first occurrence of a name wins.
+fn parse_connectors(class: &Value) -> Vec<ConnectorPin> {
+    fn walk(class: &Value, depth: usize, out: &mut Vec<ConnectorPin>) {
+        if depth > 8 {
+            return;
+        }
+        let Some(elements) = class.get("elements").and_then(|e| e.as_array()) else {
+            return;
+        };
+        for element in elements {
+            match element.get("$kind").and_then(|k| k.as_str()) {
+                Some("extends") => {
+                    if let Some(base) = element.get("baseClass") {
+                        walk(base, depth + 1, out);
+                    }
+                }
+                Some("component") => {
+                    // A builtin type is a string and has no restriction.
+                    let Some(kind) = element.get("type") else {
+                        continue;
+                    };
+                    let restriction = kind
+                        .get("restriction")
+                        .and_then(|r| r.as_str())
+                        .unwrap_or_default();
+                    if !matches!(restriction, "connector" | "expandable connector") {
+                        continue;
+                    }
+                    let Some(name) = element.get("name").and_then(|n| n.as_str()) else {
+                        continue;
+                    };
+                    let Some(extent) = element
+                        .get("annotation")
+                        .and_then(|a| a.get("Placement"))
+                        .and_then(|p| p.get("transformation"))
+                        .and_then(|t| t.get("extent"))
+                        .and_then(extent_from_value)
+                    else {
+                        continue;
+                    };
+                    if !out.iter().any(|pin| pin.name == name) {
+                        out.push(ConnectorPin {
+                            name: name.to_owned(),
+                            extent,
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(class, 0, &mut out);
+    out
+}
+
+/// Diagram coordinates of a connector pin (G32).
+///
+/// The pin extent is in the component's icon coordinates, so it goes through the same
+/// `origin + R * S * p` transform as the icon itself, with `S` taken from the icon's
+/// coordinate system.
+pub fn pin_position(component: &PlacedComponent, pin: &ConnectorPin) -> [f64; 2] {
+    let icon_extent = component
+        .icon
+        .as_ref()
+        .map_or(Extent::DEFAULT, |icon| icon.coordinate_extent);
+    placement_transform(pin.centre(), &icon_extent, &component.placement)
+}
+
+/// Diagram coordinates of the connector named by a reference such as `gain1.u` (G32).
+pub fn connector_position(diagram: &Diagram, cref: &str) -> Option<[f64; 2]> {
+    let (component_name, pin_name) = cref.split_once('.')?;
+    let component = diagram
+        .components
+        .iter()
+        .find(|c| c.name == component_name)?;
+    // `c1.p[2]` names one element of the array connector `p`.
+    let pin_name = pin_name.split('[').next().unwrap_or(pin_name);
+    let pin = component.connectors.iter().find(|p| p.name == pin_name)?;
+    Some(pin_position(component, pin))
+}
+
+/// Whether the connector reference `cref` (`gain1.u`) belongs to `component` (`gain1`).
+///
+/// `c1` owns `c1.p[2]` but not `c10.out`.
+pub fn connector_belongs_to(cref: &str, component: &str) -> bool {
+    cref.strip_prefix(component)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
+}
+
+/// The pin closest to `p` within `tolerance`, as `(component index, pin index)` (G32).
+pub fn hit_pin(diagram: &Diagram, p: [f64; 2], tolerance: f64) -> Option<(usize, usize)> {
+    let mut best: Option<(f64, (usize, usize))> = None;
+    for (ci, component) in diagram.components.iter().enumerate() {
+        for (pi, pin) in component.connectors.iter().enumerate() {
+            let q = pin_position(component, pin);
+            let d = point_distance(p, q);
+            if d <= tolerance && best.is_none_or(|(closest, _)| d < closest) {
+                best = Some((d, (ci, pi)));
+            }
+        }
+    }
+    best.map(|(_, hit)| hit)
+}
+
+/// Three-segment right-angled route from `a` to `b` (G32).
+///
+/// The middle x is the midpoint snapped to the 2-unit grid, so a route runs horizontally,
+/// then vertically, then horizontally again. Points at the same height need one segment.
+pub fn orthogonal_route(a: [f64; 2], b: [f64; 2]) -> Vec<[f64; 2]> {
+    if (a[1] - b[1]).abs() < 1e-9 {
+        return vec![a, b];
+    }
+    let mx = crate::diagram_view::snap((a[0] + b[0]) / 2.0, crate::diagram_view::GRID);
+    vec![a, [mx, a[1]], [mx, b[1]], b]
+}
+
+/// Distance between two points.
+fn point_distance(a: [f64; 2], b: [f64; 2]) -> f64 {
+    ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2)).sqrt()
+}
+
+/// Distance from `p` to the segment `a`-`b` (G32).
+pub fn point_segment_distance(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let length_sq = dx * dx + dy * dy;
+    if length_sq < 1e-18 {
+        return point_distance(p, a);
+    }
+    let t = (((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / length_sq).clamp(0.0, 1.0);
+    point_distance(p, [a[0] + t * dx, a[1] + t * dy])
+}
+
+/// Index of the connection whose polyline passes within `tolerance` of `p` (G32).
+pub fn hit_connection(diagram: &Diagram, p: [f64; 2], tolerance: f64) -> Option<usize> {
+    let mut best: Option<(f64, usize)> = None;
+    for (index, conn) in diagram.connections.iter().enumerate() {
+        for pair in conn.points.windows(2) {
+            let d = point_segment_distance(p, pair[0], pair[1]);
+            if d <= tolerance && best.is_none_or(|(closest, _)| d < closest) {
+                best = Some((d, index));
+            }
+        }
+    }
+    best.map(|(_, index)| index)
+}
+
+/// New route for `conn` after `component` moved to `placement` (G32).
+///
+/// Both ends are looked up as pins; the moved component uses the new placement, the other
+/// one keeps its loaded placement. If a pin cannot be found the old points are kept, which
+/// is what a connection to a component without a known icon needs.
+pub fn rerouted_points(
+    diagram: &Diagram,
+    conn: &Connection,
+    component: &str,
+    placement: &Placement,
+) -> Vec<[f64; 2]> {
+    let position = |cref: &str| -> Option<[f64; 2]> {
+        let (component_name, pin_name) = cref.split_once('.')?;
+        let found = diagram
+            .components
+            .iter()
+            .find(|c| c.name == component_name)?;
+        let pin_name = pin_name.split('[').next().unwrap_or(pin_name);
+        let pin = found.connectors.iter().find(|p| p.name == pin_name)?;
+        let effective = if component_name == component {
+            placement
+        } else {
+            &found.placement
+        };
+        let icon_extent = found
+            .icon
+            .as_ref()
+            .map_or(Extent::DEFAULT, |icon| icon.coordinate_extent);
+        Some(placement_transform(pin.centre(), &icon_extent, effective))
+    };
+    match (position(&conn.from), position(&conn.to)) {
+        (Some(a), Some(b)) => orthogonal_route(a, b),
+        _ => conn.points.clone(),
+    }
+}
+
 /// Index of the topmost component whose box contains `p` (diagram coordinates).
 ///
 /// Components are painted in order, so the last one containing the point is the one the
@@ -316,14 +527,12 @@ pub fn hit_component(diagram: &Diagram, p: [f64; 2]) -> Option<usize> {
 /// dot, so `c1` matches `c1.p[2]` but not `c10.out`. Deleting a component has to delete
 /// these first: `deleteComponent` does not remove `connect` statements.
 pub fn connections_of(diagram: &Diagram, component: &str) -> Vec<(String, String)> {
-    let touches = |end: &str| {
-        end.strip_prefix(component)
-            .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
-    };
     diagram
         .connections
         .iter()
-        .filter(|c| touches(&c.from) || touches(&c.to))
+        .filter(|c| {
+            connector_belongs_to(&c.from, component) || connector_belongs_to(&c.to, component)
+        })
         .map(|c| (c.from.clone(), c.to.clone()))
         .collect()
 }
@@ -827,6 +1036,7 @@ mod tests {
                 rotation_deg,
             },
             icon: None,
+            connectors: Vec::new(),
         }
     }
 
@@ -911,5 +1121,158 @@ mod tests {
         // `c1` is not a prefix match for `c10`, and an unconnected component has nothing.
         assert!(connections_of(&diagram, "c3").is_empty());
         assert!(connections_of(&Diagram::default(), "c1").is_empty());
+    }
+
+    #[test]
+    fn the_pins_of_a_component_come_from_its_type() {
+        let json: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/instance_pid.json")).unwrap();
+        let diagram = parse_diagram(&json, &BTreeMap::new()).unwrap();
+        let pi = diagram
+            .components
+            .iter()
+            .find(|c| c.name == "PI")
+            .expect("PI");
+        let names: Vec<&str> = pi.connectors.iter().map(|p| p.name.as_str()).collect();
+        // Three inherited from `SVcontrol`, one declared by `LimPID` itself.
+        assert_eq!(names, ["u_s", "u_m", "y", "u_ff"]);
+        // The icon is 20 units wide, so the pins at -120 and +110 land at -12 and 11.
+        assert_eq!(connector_position(&diagram, "PI.u_s"), Some([-12.0, 0.0]));
+        assert_eq!(connector_position(&diagram, "PI.y"), Some([11.0, 0.0]));
+        // A name that is not a pin, and a component that is not there.
+        assert_eq!(connector_position(&diagram, "PI.k"), None);
+        assert_eq!(connector_position(&diagram, "nope.y"), None);
+    }
+
+    #[test]
+    fn a_pin_is_found_within_the_tolerance() {
+        let json: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/instance_pid.json")).unwrap();
+        let diagram = parse_diagram(&json, &BTreeMap::new()).unwrap();
+        let pi = diagram
+            .components
+            .iter()
+            .position(|c| c.name == "PI")
+            .expect("PI");
+        let (component, pin) = hit_pin(&diagram, [11.0, 0.5], 1.0).expect("pin y");
+        assert_eq!(component, pi);
+        assert_eq!(diagram.components[component].connectors[pin].name, "y");
+        assert_eq!(hit_pin(&diagram, [11.0, 30.0], 1.0), None);
+        assert_eq!(hit_pin(&Diagram::default(), [0.0, 0.0], 5.0), None);
+    }
+
+    #[test]
+    fn a_route_has_three_segments_unless_the_ends_share_a_height() {
+        assert_eq!(
+            orthogonal_route([0.0, 0.0], [10.0, 0.0]),
+            vec![[0.0, 0.0], [10.0, 0.0]]
+        );
+        let route = orthogonal_route([0.0, 0.0], [10.0, 6.0]);
+        assert_eq!(route.len(), 4);
+        assert_eq!(route[0], [0.0, 0.0]);
+        // The midpoint 5 is snapped to the 2-unit grid.
+        assert_eq!(route[1], [6.0, 0.0]);
+        assert_eq!(route[2], [6.0, 6.0]);
+        assert_eq!(route[3], [10.0, 6.0]);
+        // The other direction turns at the same x.
+        assert_eq!(orthogonal_route([10.0, 6.0], [0.0, 0.0])[1], [6.0, 6.0]);
+    }
+
+    #[test]
+    fn the_distance_to_a_segment_is_measured_to_the_line() {
+        let (a, b) = ([0.0, 0.0], [10.0, 0.0]);
+        assert_eq!(point_segment_distance([5.0, 0.0], a, b), 0.0);
+        assert_eq!(point_segment_distance([5.0, 3.0], a, b), 3.0);
+        // Past the end the nearest point is the end point itself.
+        assert_eq!(point_segment_distance([13.0, 4.0], a, b), 5.0);
+        // A zero-length segment is a point.
+        assert_eq!(point_segment_distance([3.0, 4.0], a, a), 5.0);
+    }
+
+    #[test]
+    fn a_connection_is_hit_within_the_tolerance() {
+        let diagram = Diagram {
+            connections: vec![connected("a.p", "b.n")],
+            ..Diagram::default()
+        };
+        // `connected` runs from (0,0) to (1,1).
+        assert_eq!(hit_connection(&diagram, [0.5, 0.5], 0.1), Some(0));
+        assert_eq!(hit_connection(&diagram, [0.5, 1.0], 0.1), None);
+        assert_eq!(hit_connection(&Diagram::default(), [0.0, 0.0], 5.0), None);
+    }
+
+    fn pinned(name: &str, origin: [f64; 2], pins: &[(&str, Extent)]) -> PlacedComponent {
+        PlacedComponent {
+            name: name.into(),
+            type_name: "T".into(),
+            placement: Placement {
+                extent: square(),
+                origin,
+                rotation_deg: 0.0,
+            },
+            icon: None,
+            connectors: pins
+                .iter()
+                .map(|(name, extent)| ConnectorPin {
+                    name: (*name).to_owned(),
+                    extent: *extent,
+                })
+                .collect(),
+        }
+    }
+
+    fn right_pin() -> Extent {
+        Extent {
+            x1: 90.0,
+            y1: -10.0,
+            x2: 110.0,
+            y2: 10.0,
+        }
+    }
+
+    fn left_pin() -> Extent {
+        Extent {
+            x1: -110.0,
+            y1: -10.0,
+            x2: -90.0,
+            y2: 10.0,
+        }
+    }
+
+    #[test]
+    fn moving_a_component_reroutes_its_connections() {
+        let diagram = Diagram {
+            components: vec![
+                pinned("a", [0.0, 0.0], &[("p", right_pin())]),
+                pinned("b", [40.0, 0.0], &[("n", left_pin())]),
+            ],
+            connections: vec![Connection {
+                from: "a.p".into(),
+                to: "b.n".into(),
+                points: vec![[10.0, 0.0], [30.0, 0.0]],
+                color: [0, 0, 0],
+            }],
+            ..Diagram::default()
+        };
+        let moved = Placement {
+            extent: square(),
+            origin: [0.0, 20.0],
+            rotation_deg: 0.0,
+        };
+        let points = rerouted_points(&diagram, &diagram.connections[0], "a", &moved);
+        // The end on `a` follows the new placement, the other end stays put.
+        assert_eq!(points.first(), Some(&[10.0, 20.0]));
+        assert_eq!(points.last(), Some(&[30.0, 0.0]));
+        // Without a known pin the old route is kept.
+        let unknown = Connection {
+            from: "a.missing".into(),
+            to: "b.n".into(),
+            points: vec![[1.0, 1.0], [2.0, 2.0]],
+            color: [0, 0, 0],
+        };
+        assert_eq!(
+            rerouted_points(&diagram, &unknown, "a", &moved),
+            unknown.points
+        );
     }
 }
