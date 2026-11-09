@@ -45,7 +45,7 @@ fn tree_row(
     selected: bool,
     icon: (MaterialIcon, Color32),
     label: &str,
-    tooltip: &str,
+    tooltip: impl FnOnce() -> String,
 ) -> RowAction {
     let width = ui.available_width().max(120.0);
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, ROW), Sense::click());
@@ -111,9 +111,12 @@ fn tree_row(
         action.toggle = expandable;
         action.open_new_tab = !expandable;
     }
-    if !tooltip.is_empty() {
-        response.on_hover_text(tooltip);
-    }
+    response.on_hover_ui(|ui| {
+        let tooltip = tooltip();
+        if !tooltip.is_empty() {
+            ui.label(tooltip);
+        }
+    });
     action
 }
 
@@ -163,7 +166,7 @@ fn component_rows(
         false,
         component_icon(node),
         &label,
-        &node.comment,
+        || node.comment.clone(),
     );
     if action.toggle {
         toggles.push(key.clone());
@@ -303,30 +306,17 @@ impl OmolaApp {
     fn package_tree(&mut self, ui: &mut egui::Ui) {
         let mut actions: Vec<(String, RowAction)> = Vec::new();
         // User classes first-level entries (the open file).
-        let user_roots: Vec<(String, String, String)> = self
+        let user_roots: Vec<String> = self
             .user_classes
             .iter()
             .filter(|c| c.depth == 0)
-            .map(|c| {
-                (
-                    c.qualified_name.clone(),
-                    c.kind.clone(),
-                    c.description.clone().unwrap_or_default(),
-                )
-            })
+            .map(|c| c.qualified_name.clone())
             .collect();
         for lib in &self.libraries {
             match lib {
                 LibraryState::Loaded(l) => {
-                    let root = l.root().map(|c| {
-                        (
-                            c.qualified_name.clone(),
-                            c.restriction.clone(),
-                            c.comment.clone(),
-                        )
-                    });
-                    if let Some(root) = root {
-                        self.tree_node(ui, 0, root, &mut actions);
+                    if let Some(root) = l.root() {
+                        self.tree_node(ui, 0, &root.qualified_name, &mut actions);
                     }
                 }
                 LibraryState::Loading(spec) => {
@@ -338,7 +328,7 @@ impl OmolaApp {
                         false,
                         (ICON_HOURGLASS_EMPTY, theme::TEXT_WEAK),
                         &format!("{} (loading...)", spec.name),
-                        "",
+                        String::new,
                     );
                 }
                 LibraryState::Failed(spec, message) => {
@@ -350,15 +340,17 @@ impl OmolaApp {
                         false,
                         (ICON_ERROR, Color32::from_rgb(0xC6, 0x28, 0x28)),
                         &format!("{} (not installed)", spec.name),
-                        &format!(
+                        || {
+                            format!(
                             "{message}\n\nInstall it with Tools > Install Libraries, or run scripts/setup-* (docs/install.md)."
-                        ),
+                        )
+                        },
                     );
                 }
             }
         }
         for root in user_roots {
-            self.tree_node(ui, 0, root, &mut actions);
+            self.tree_node(ui, 0, &root, &mut actions);
         }
         self.apply_tree_actions(actions);
     }
@@ -367,33 +359,38 @@ impl OmolaApp {
         &self,
         ui: &mut egui::Ui,
         depth: usize,
-        (name, restriction, comment): (String, String, String),
+        name: &str,
         actions: &mut Vec<(String, RowAction)>,
     ) {
-        let children = self.children_of(&name);
-        let expandable = !children.is_empty();
-        let expanded = self.expanded.contains(&name);
-        let label = crate::library::short_name(&name).to_owned();
-        let tooltip = if comment.is_empty() {
-            name.clone()
-        } else {
-            format!("{name}\n{comment}")
-        };
+        let expandable = self.has_children_of(name);
+        let expanded = self.expanded.contains(name);
+        let label = crate::library::short_name(name);
+        let icon = self
+            .class_details(name)
+            .map(|(r, _)| class_icon(r, name))
+            .unwrap_or_else(|| class_icon("", name));
         let action = tree_row(
             ui,
             depth,
             expandable,
             expanded,
-            self.active.as_deref() == Some(name.as_str()),
-            class_icon(&restriction, &name),
-            &label,
-            &tooltip,
+            self.active.as_deref() == Some(name),
+            icon,
+            label,
+            || {
+                let comment = self.class_details(name).map(|(_, c)| c).unwrap_or("");
+                if comment.is_empty() {
+                    name.to_owned()
+                } else {
+                    format!("{name}\n{comment}")
+                }
+            },
         );
         if action.toggle || action.open || action.open_new_tab {
-            actions.push((name.clone(), action));
+            actions.push((name.to_owned(), action));
         }
         if expanded {
-            for child in children {
+            for child in self.child_names(name) {
                 self.tree_node(ui, depth + 1, child, actions);
             }
         }
@@ -413,52 +410,47 @@ impl OmolaApp {
     }
 
     fn package_search(&mut self, ui: &mut egui::Ui) {
-        let query = self.package_filter.trim().to_lowercase();
-        let mut hits: Vec<(String, String, String)> = Vec::new();
-        for c in &self.user_classes {
-            if c.qualified_name.to_lowercase().contains(&query) {
-                hits.push((
-                    c.qualified_name.clone(),
-                    c.kind.clone(),
-                    c.description.clone().unwrap_or_default(),
-                ));
-            }
-        }
-        for lib in &self.libraries {
-            if let LibraryState::Loaded(l) = lib {
-                for c in &l.classes {
-                    if hits.len() >= 300 {
-                        break;
+        self.update_package_search_cache();
+        let hits = self
+            .package_search_cache
+            .as_ref()
+            .map(|(_, hits)| hits)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let truncated = hits.len() > 500;
+        let hit_count = hits.len().min(500);
+        let mut actions = Vec::new();
+        egui::ScrollArea::vertical().show_rows(
+            ui,
+            ROW,
+            hit_count + usize::from(truncated),
+            |ui, rows| {
+                for index in rows {
+                    if index >= hit_count {
+                        ui.label(
+                            RichText::new("... more results, refine your search")
+                                .color(theme::TEXT_WEAK),
+                        );
+                        continue;
                     }
-                    if crate::library::short_name(&c.qualified_name)
-                        .to_lowercase()
-                        .contains(&query)
-                    {
-                        hits.push((
-                            c.qualified_name.clone(),
-                            c.restriction.clone(),
-                            c.comment.clone(),
-                        ));
+                    let name = hits[index].as_str();
+                    let (restriction, comment) = self.class_details(name).unwrap_or(("", ""));
+                    let a = tree_row(
+                        ui,
+                        0,
+                        false,
+                        false,
+                        self.active.as_deref() == Some(name),
+                        class_icon(restriction, name),
+                        name,
+                        || comment.to_owned(),
+                    );
+                    if a.open || a.open_new_tab {
+                        actions.push((name.to_owned(), a));
                     }
                 }
-            }
-        }
-        let mut actions = Vec::new();
-        for (name, restriction, comment) in hits {
-            let a = tree_row(
-                ui,
-                0,
-                false,
-                false,
-                self.active.as_deref() == Some(name.as_str()),
-                class_icon(&restriction, &name),
-                &name,
-                &comment,
-            );
-            if a.open || a.open_new_tab {
-                actions.push((name, a));
-            }
-        }
+            },
+        );
         self.apply_tree_actions(actions);
     }
 
