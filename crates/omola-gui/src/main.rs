@@ -14,6 +14,7 @@ mod html;
 mod instance;
 mod library;
 mod model;
+mod perf;
 mod plot;
 mod series;
 mod text_editor;
