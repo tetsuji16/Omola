@@ -1016,7 +1016,7 @@ fn variable_row(
         } else {
             FontId::proportional(12.0)
         };
-        ui.painter().text(
+        ui.painter_at(name_rect).text(
             egui::pos2(name_rect.left() + text_x, name_rect.center().y),
             Align2::LEFT_CENTER,
             label,
@@ -1039,7 +1039,8 @@ fn variable_row(
             }
         }
         let (unit, description) = var.map(|v| split_unit(&v.description)).unwrap_or(("", ""));
-        let (value_rect, _) = ui.allocate_exact_size(Vec2::new(widths[1], VROW), Sense::hover());
+        let (value_rect, value_response) =
+            ui.allocate_exact_size(Vec2::new(widths[1], VROW), Sense::hover());
         if let Some(i) = leaf {
             if editable {
                 let value = result.values[i].first().copied().unwrap_or(f64::NAN);
@@ -1106,7 +1107,10 @@ fn variable_row(
                     Some(t) => crate::series::value_at(&result.time, &result.values[i], t),
                     None => result.values[i].last().copied(),
                 };
-                ui.painter().text(
+                value_response
+                    .clone()
+                    .on_hover_text(value.map(|v| v.to_string()).unwrap_or_default());
+                ui.painter_at(value_rect).text(
                     egui::pos2(value_rect.right() - 4.0, value_rect.center().y),
                     Align2::RIGHT_CENTER,
                     value.map(format_value).unwrap_or_default(),
@@ -1116,7 +1120,7 @@ fn variable_row(
             }
         }
         let (unit_rect, _) = ui.allocate_exact_size(Vec2::new(widths[2], VROW), Sense::hover());
-        ui.painter().text(
+        ui.painter_at(unit_rect).text(
             egui::pos2(unit_rect.left() + 4.0, unit_rect.center().y),
             Align2::LEFT_CENTER,
             unit,
@@ -1124,7 +1128,7 @@ fn variable_row(
             theme::TEXT,
         );
         let (d_rect, _) = ui.allocate_exact_size(Vec2::new(widths[3], VROW), Sense::hover());
-        ui.painter().text(
+        ui.painter_at(d_rect).text(
             egui::pos2(d_rect.left() + 4.0, d_rect.center().y),
             Align2::LEFT_CENTER,
             description,
@@ -1207,7 +1211,11 @@ pub fn format_value(v: f64) -> String {
         let s = s.trim_end_matches('0').trim_end_matches('.');
         s.to_owned()
     } else {
-        format!("{v:e}")
+        let formatted = format!("{v:.5e}");
+        let (mantissa, exponent) = formatted.split_once('e').unwrap_or((&formatted, "0"));
+        let mantissa = mantissa.trim_end_matches('0').trim_end_matches('.');
+        let exponent = exponent.parse::<i32>().unwrap_or(0);
+        format!("{mantissa}e{exponent}")
     }
 }
 
@@ -1250,6 +1258,14 @@ mod tests {
         assert_eq!(format_value(0.1), "0.1");
         assert_eq!(format_value(0.0), "0");
         assert_eq!(format_value(-0.25), "-0.25");
+        assert_eq!(format_value(4.685711245446625e-6), "4.68571e-6");
+        assert_eq!(format_value(-4.122342692112852e-6), "-4.12234e-6");
+        assert_eq!(format_value(1e-6), "1e-6");
+        assert_eq!(format_value(1.5e7), "1.5e7");
+        assert_eq!(format_value(1e-4), "0.0001");
+        assert_eq!(format_value(0.999e-4), "9.99e-5");
+        assert_eq!(format_value(1e7), "1e7");
+        assert_eq!(format_value(0.999e7), "9990000");
     }
 
     #[test]

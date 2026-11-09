@@ -56,13 +56,7 @@ impl OmolaApp {
             );
         }
         let right = plot_x.unwrap_or(rect.right() - 160.0);
-        ui.painter().text(
-            egui::pos2((rect.left() + 170.0 + right) / 2.0, rect.center().y),
-            Align2::CENTER_CENTER,
-            self.window_title(),
-            FontId::proportional(12.0),
-            theme::TEXT,
-        );
+        let mut quick_access_right = rect.left();
         ui.horizontal_centered(|ui| {
             ui.add_space(1.0);
             ui.spacing_mut().item_spacing.x = 2.5;
@@ -99,7 +93,8 @@ impl OmolaApp {
             {
                 self.worker.cancel();
             }
-            icon_button(ui, ICON_ARROW_DROP_DOWN, DARK, 14.0, false, false);
+            let response = icon_button(ui, ICON_ARROW_DROP_DOWN, DARK, 14.0, false, false);
+            quick_access_right = response.rect.right();
             if super::custom_title_bar() {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
@@ -128,6 +123,34 @@ impl OmolaApp {
                 });
             }
         });
+        let title = self.window_title();
+        let font = FontId::proportional(12.0);
+        let area = egui::Rect::from_min_max(
+            egui::pos2(quick_access_right + 8.0, rect.top()),
+            egui::pos2(right - 8.0, rect.bottom()),
+        );
+        if area.width() > 4.0 {
+            let full = ui
+                .painter()
+                .layout_no_wrap(title.clone(), font.clone(), theme::TEXT);
+            let truncated = full.size().x > area.width();
+            let shown = if truncated {
+                truncate_title(&title, area.width(), &font, ui)
+            } else {
+                title
+            };
+            let galley = ui.painter().layout_no_wrap(shown, font, theme::TEXT);
+            let x = if truncated {
+                area.left()
+            } else {
+                area.center().x
+            };
+            ui.painter_at(area).galley(
+                egui::pos2(x, area.center().y - galley.size().y / 2.0),
+                galley,
+                theme::TEXT,
+            );
+        }
     }
 
     pub fn ribbon_tabs(&mut self, ui: &mut egui::Ui) {
@@ -150,10 +173,12 @@ impl OmolaApp {
                 }
             }
             if self.tab == RibbonTab::Simulation {
-                let r = ribbon_tab(ui, "Plot Options", false);
+                let r = ribbon_tab(ui, "Plot Options", self.plot_options);
                 ui.ctx()
                     .data_mut(|d| d.insert_temp(egui::Id::NULL.with("plot_tab_x"), r.rect.left()));
-                r.on_hover_text("Plot options: use the Plot group of the Simulation tab");
+                if r.clicked() {
+                    self.plot_options = true;
+                }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
@@ -197,6 +222,7 @@ impl OmolaApp {
 
     pub fn select_tab(&mut self, tab: RibbonTab) {
         self.tab = tab;
+        self.plot_options = false;
         if tab == RibbonTab::Text {
             if let Some(active) = self.active.clone() {
                 self.request_text(&active);
@@ -271,15 +297,171 @@ impl OmolaApp {
             .show(ui, |ui| {
                 ui.horizontal_top(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
-                    match self.tab {
-                        RibbonTab::Graphics => self.graphics_ribbon(ui),
-                        RibbonTab::Documentation => self.documentation_ribbon(ui),
-                        RibbonTab::Text => self.text_ribbon(ui),
-                        RibbonTab::Simulation => self.simulation_ribbon(ui),
-                        RibbonTab::Tools => self.tools_ribbon(ui),
+                    if self.plot_options && self.tab == RibbonTab::Simulation {
+                        self.plot_options_ribbon(ui);
+                    } else {
+                        match self.tab {
+                            RibbonTab::Graphics => self.graphics_ribbon(ui),
+                            RibbonTab::Documentation => self.documentation_ribbon(ui),
+                            RibbonTab::Text => self.text_ribbon(ui),
+                            RibbonTab::Simulation => self.simulation_ribbon(ui),
+                            RibbonTab::Tools => self.tools_ribbon(ui),
+                        }
                     }
                 });
             });
+    }
+
+    fn plot_options_ribbon(&mut self, ui: &mut egui::Ui) {
+        fixed_group(ui, "View", 158.0, |ui, o| {
+            if place(ui, o, (6.0, 8.0, 142.0, 24.0), |ui| {
+                small_button(ui, ICON_ZOOM_OUT_MAP, DARK, "Rescale", true, false)
+            })
+            .clicked()
+            {
+                let i = self
+                    .active_diagram
+                    .min(self.diagrams.len().saturating_sub(1));
+                self.diagrams[i].y_view = None;
+                self.diagrams[i].style.x_view = None;
+            }
+            if place(ui, o, (6.0, 40.0, 142.0, 24.0), |ui| {
+                small_button(ui, ICON_ZOOM_OUT_MAP, DARK, "Rescale All", true, false)
+            })
+            .clicked()
+            {
+                for diagram in &mut self.diagrams {
+                    diagram.y_view = None;
+                    diagram.style.x_view = None;
+                }
+            }
+        });
+        fixed_group(ui, "Diagram", 158.0, |ui, o| {
+            if place(ui, o, (6.0, 8.0, 142.0, 24.0), |ui| {
+                small_button(ui, ICON_ADD_CHART, BLUE, "New diagram", true, false)
+            })
+            .clicked()
+            {
+                self.new_diagram();
+            }
+            if place(ui, o, (6.0, 40.0, 142.0, 24.0), |ui| {
+                small_button(
+                    ui,
+                    ICON_DELETE,
+                    DARK,
+                    "Remove diagram",
+                    self.diagrams.len() > 1,
+                    false,
+                )
+            })
+            .clicked()
+            {
+                self.remove_active_diagram();
+            }
+            if place(ui, o, (6.0, 72.0, 142.0, 24.0), |ui| {
+                small_button(
+                    ui,
+                    ICON_REMOVE,
+                    DARK,
+                    "Erase curves",
+                    !self.active_signals().is_empty(),
+                    false,
+                )
+            })
+            .clicked()
+            {
+                self.erase_curves();
+            }
+        });
+        fixed_group(ui, "Display", 220.0, |ui, o| {
+            let index = self
+                .active_diagram
+                .min(self.diagrams.len().saturating_sub(1));
+            place(ui, o, (6.0, 8.0, 95.0, 23.0), |ui| {
+                ui.checkbox(&mut self.diagrams[index].style.grid, "Grid")
+            });
+            place(ui, o, (6.0, 36.0, 205.0, 24.0), |ui| {
+                egui::ComboBox::from_id_salt("plot_legend_position")
+                    .selected_text(match self.diagrams[index].style.legend {
+                        crate::plot::LegendPos::Top => "Legend: Top",
+                        crate::plot::LegendPos::Bottom => "Legend: Bottom",
+                        crate::plot::LegendPos::Hidden => "Legend: Hidden",
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut self.diagrams[index].style.legend,
+                            crate::plot::LegendPos::Top,
+                            "Top",
+                        );
+                        ui.selectable_value(
+                            &mut self.diagrams[index].style.legend,
+                            crate::plot::LegendPos::Bottom,
+                            "Bottom",
+                        );
+                        ui.selectable_value(
+                            &mut self.diagrams[index].style.legend,
+                            crate::plot::LegendPos::Hidden,
+                            "Hidden",
+                        );
+                    })
+            });
+            place(ui, o, (6.0, 66.0, 205.0, 24.0), |ui| {
+                egui::ComboBox::from_id_salt("plot_line_width")
+                    .selected_text(format!(
+                        "Line width: {}",
+                        self.diagrams[index].style.line_width
+                    ))
+                    .show_ui(ui, |ui| {
+                        for width in [1.0, 1.5, 2.0, 3.0] {
+                            ui.selectable_value(
+                                &mut self.diagrams[index].style.line_width,
+                                width,
+                                width.to_string(),
+                            );
+                        }
+                    })
+            });
+        });
+        fixed_group(ui, "Time range", 256.0, |ui, o| {
+            for (i, label) in ["From", "To"].into_iter().enumerate() {
+                place(ui, o, (6.0, 10.0 + i as f32 * 31.0, 62.0, 23.0), |ui| {
+                    ui.label(label)
+                });
+                let id = egui::Id::NULL.with(("plot_time_range", i));
+                let mut value = ui
+                    .ctx()
+                    .data(|d| d.get_temp::<String>(id))
+                    .unwrap_or_default();
+                let response = place(ui, o, (70.0, 10.0 + i as f32 * 31.0, 100.0, 23.0), |ui| {
+                    ui.add(egui::TextEdit::singleline(&mut value).desired_width(96.0))
+                });
+                if response.changed() {
+                    ui.ctx().data_mut(|d| d.insert_temp(id, value.clone()));
+                }
+                if response.lost_focus() {
+                    let a = ui
+                        .ctx()
+                        .data(|d| d.get_temp::<String>(egui::Id::NULL.with(("plot_time_range", 0))))
+                        .unwrap_or_default();
+                    let b = ui
+                        .ctx()
+                        .data(|d| d.get_temp::<String>(egui::Id::NULL.with(("plot_time_range", 1))))
+                        .unwrap_or_default();
+                    let range = match (a.trim().parse::<f64>(), b.trim().parse::<f64>()) {
+                        (Ok(a), Ok(b)) if a.is_finite() && b.is_finite() && a < b => Some((a, b)),
+                        _ => None,
+                    };
+                    let index = self
+                        .active_diagram
+                        .min(self.diagrams.len().saturating_sub(1));
+                    self.diagrams[index].style.x_view = range;
+                    let index = self
+                        .active_diagram
+                        .min(self.diagrams.len().saturating_sub(1));
+                    self.diagrams[index].style.x_view = self.plot_x;
+                }
+            }
+        });
     }
 
     fn model_group(&mut self, ui: &mut egui::Ui, large: bool) {
@@ -898,6 +1080,30 @@ impl OmolaApp {
                 );
             });
         });
+    }
+}
+
+fn truncate_title(title: &str, max_width: f32, font: &FontId, ui: &egui::Ui) -> String {
+    let suffix = "...";
+    let mut end = title.len();
+    while !title.is_char_boundary(end) {
+        end -= 1;
+    }
+    loop {
+        let candidate = format!("{}{suffix}", &title[..end]);
+        let width = ui
+            .painter()
+            .layout_no_wrap(candidate.clone(), font.clone(), theme::TEXT)
+            .size()
+            .x;
+        if width <= max_width || end == 0 {
+            return candidate;
+        }
+        end = title[..end]
+            .char_indices()
+            .last()
+            .map(|(i, _)| i)
+            .unwrap_or(0);
     }
 }
 

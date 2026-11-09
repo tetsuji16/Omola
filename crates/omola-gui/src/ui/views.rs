@@ -2,7 +2,7 @@
 
 use super::widgets::{flat_tab, paint_icon};
 use crate::app::{Layer, Loadable, OmolaApp, PlotSignal};
-use crate::text_editor::{draw_text_editor, lines_for_file};
+use crate::text_editor::{draw_readonly_text_editor, draw_text_editor, lines_for_file};
 use crate::theme;
 use egui::{Align2, Color32, FontId, Rect, RichText, Sense, Stroke, Vec2};
 use egui_material_icons::icons::*;
@@ -16,6 +16,29 @@ pub const CURVE_COLORS: [Color32; 6] = [
     Color32::from_rgb(0x00, 0x00, 0x00),
     Color32::from_rgb(0xD0, 0x7A, 0x00),
 ];
+
+fn curve_pattern(index: usize) -> u8 {
+    (index / CURVE_COLORS.len()).min(2) as u8
+}
+
+fn legend_rows(widths: &[f32], available: f32) -> Vec<std::ops::Range<usize>> {
+    let mut rows = Vec::new();
+    let mut start = 0;
+    let mut used = 0.0;
+    for (index, width) in widths.iter().enumerate() {
+        let item = 31.0 + width + 18.0;
+        if index > start && used + item > available {
+            rows.push(start..index);
+            start = index;
+            used = 0.0;
+        }
+        used += item;
+    }
+    if start < widths.len() {
+        rows.push(start..widths.len());
+    }
+    rows
+}
 
 fn collect_component_names(nodes: &[crate::instance::ComponentNode], out: &mut Vec<String>) {
     for node in nodes {
@@ -178,30 +201,11 @@ impl OmolaApp {
                 ui.label(RichText::new(e).color(theme::TEXT_WEAK));
             }
             Some(Loadable::Ready(text)) => {
-                let font = FontId::monospace(13.0);
-                let layout = self
+                let editor = self
                     .library_text_layouts
                     .entry(class.to_owned())
-                    .or_insert_with(|| crate::text_editor::highlight_job(text, &font))
-                    .clone();
-                let mut text = text.as_str();
-                egui::ScrollArea::both()
-                    .id_salt(("lib_text", class))
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        let mut layouter =
-                            |ui: &egui::Ui, _buffer: &dyn egui::TextBuffer, _wrap| {
-                                ui.ctx().fonts_mut(|fonts| fonts.layout_job(layout.clone()))
-                            };
-                        ui.add(
-                            egui::TextEdit::multiline(&mut text)
-                                .code_editor()
-                                .font(font)
-                                .layouter(&mut layouter)
-                                .frame(egui::Frame::NONE)
-                                .desired_width(f32::INFINITY),
-                        );
-                    });
+                    .or_default();
+                draw_readonly_text_editor(ui, editor, text, None, &[]);
             }
         }
     }
@@ -818,9 +822,6 @@ impl OmolaApp {
             );
         }
         // Every diagram shares one time axis.
-        let x_range = self
-            .plot_x
-            .or_else(|| data_bounds(diagrams.iter().flatten()).map(|(x0, x1, _, _)| (x0, x1)));
         let count = diagrams.len();
         let slot_height = panel.height() / count as f32;
         let cursor_enabled = self.cursor_enabled;
@@ -829,30 +830,63 @@ impl OmolaApp {
                 egui::pos2(panel.left(), panel.top() + index as f32 * slot_height),
                 egui::vec2(panel.width(), slot_height),
             );
+            let style = self.diagrams[index].style.clone();
+            let x_range = style
+                .x_view
+                .or_else(|| data_bounds(curves.iter()).map(|(x0, x1, _, _)| (x0, x1)));
+            let widths: Vec<f32> = curves
+                .iter()
+                .map(|curve| {
+                    painter
+                        .layout_no_wrap(curve.name.clone(), FontId::proportional(12.0), theme::TEXT)
+                        .size()
+                        .x
+                })
+                .collect();
+            let rows = if style.legend == crate::plot::LegendPos::Hidden {
+                Vec::new()
+            } else {
+                legend_rows(&widths, (slot.width() - 80.0).max(1.0))
+            };
             let frame = egui::Rect::from_min_max(
-                egui::pos2(slot.left() + 53.0, slot.top() + 31.0),
+                egui::pos2(
+                    slot.left() + 53.0,
+                    slot.top() + 31.0 + rows.len().saturating_sub(1) as f32 * 16.0,
+                ),
                 egui::pos2(slot.right() - 24.0, slot.bottom() - 29.0),
             );
             if frame.width() < 40.0 || frame.height() < 40.0 {
                 continue;
             }
             // Legend above the frame.
-            let mut lx = frame.left() - 2.0;
-            for curve in curves {
-                let y = slot.top() + 16.5;
-                painter.hline(lx..=lx + 26.0, y, Stroke::new(1.0, curve.color));
-                let galley = painter.layout_no_wrap(
-                    curve.name.clone(),
-                    FontId::proportional(12.0),
-                    theme::TEXT,
-                );
-                let width = galley.size().x;
-                painter.galley(
-                    egui::pos2(lx + 31.0, y - galley.size().y / 2.0),
-                    galley,
-                    theme::TEXT,
-                );
-                lx += 31.0 + width + 18.0;
+            for (row_index, row) in rows.iter().enumerate() {
+                let mut lx = frame.left() - 2.0;
+                let y = if style.legend == crate::plot::LegendPos::Bottom {
+                    frame.bottom() + 16.0 + row_index as f32 * 16.0
+                } else {
+                    slot.top() + 16.5 + row_index as f32 * 16.0
+                };
+                for curve_index in row.clone() {
+                    let curve = &curves[curve_index];
+                    let line = vec![egui::pos2(lx, y), egui::pos2(lx + 26.0, y)];
+                    painter.add(curve_shape(
+                        line,
+                        curve.pattern,
+                        Stroke::new(2.0, curve.color),
+                    ));
+                    let galley = painter.layout_no_wrap(
+                        curve.name.clone(),
+                        FontId::proportional(12.0),
+                        theme::TEXT,
+                    );
+                    let width = galley.size().x;
+                    painter.galley(
+                        egui::pos2(lx + 31.0, y - galley.size().y / 2.0),
+                        galley,
+                        theme::TEXT,
+                    );
+                    lx += 31.0 + width + 18.0;
+                }
             }
             let active = index == self.active_diagram;
             let border = if active {
@@ -892,7 +926,7 @@ impl OmolaApp {
                 x: sane(x0, x1),
                 y: sane(y_range.0, y_range.1),
             };
-            draw_diagram(&painter, &map, curves, y_step);
+            draw_diagram(&painter, &map, curves, y_step, style.grid, style.line_width);
 
             // Interaction: click selects, drag a rectangle zooms, double-click resets.
             let response = ui.interact(
@@ -904,8 +938,8 @@ impl OmolaApp {
                 self.active_diagram = index;
             }
             if response.double_clicked() {
-                self.plot_x = None;
                 self.diagrams[index].y_view = None;
+                self.diagrams[index].style.x_view = None;
             }
             let drag_id = ui.scope_id().with(("plot_drag", index));
             if response.drag_started() {
@@ -933,7 +967,7 @@ impl OmolaApp {
                         let (ax, ay) = map.to_data(r.left_bottom());
                         let (bx, by) = map.to_data(r.right_top());
                         // x is shared by every diagram; y belongs to this one.
-                        self.plot_x = Some((ax, bx));
+                        self.diagrams[index].style.x_view = Some((ax, bx));
                         self.diagrams[index].y_view = Some((ay, by));
                         self.active_diagram = index;
                     }
@@ -969,6 +1003,7 @@ impl OmolaApp {
                 Some(Curve {
                     name,
                     color: CURVE_COLORS[index % CURVE_COLORS.len()],
+                    pattern: curve_pattern(index),
                     time: &run.outcome.result.time,
                     values,
                 })
@@ -1022,7 +1057,14 @@ fn sane(a: f64, b: f64) -> (f64, f64) {
 }
 
 /// Grid, tick labels and curves of one diagram.
-fn draw_diagram(painter: &egui::Painter, map: &Mapping, curves: &[Curve<'_>], y_step: Option<f64>) {
+fn draw_diagram(
+    painter: &egui::Painter,
+    map: &Mapping,
+    curves: &[Curve<'_>],
+    y_step: Option<f64>,
+    grid_visible: bool,
+    line_width: f32,
+) {
     let frame = map.frame;
     let (x0, x1) = map.x;
     let (y0, y1) = map.y;
@@ -1031,23 +1073,27 @@ fn draw_diagram(painter: &egui::Painter, map: &Mapping, curves: &[Curve<'_>], y_
         y_step.unwrap_or_else(|| nice_step((y1 - y0) / (frame.height() / 50.0).max(1.0) as f64));
     let grid = Stroke::new(1.0, Color32::from_rgb(0xEA, 0xEA, 0xEA));
     let axis = Color32::from_rgb(0x3A, 0x3A, 0x3A);
-    for x in ticks(x0, x1, minor_step(x_major)) {
-        let p = map.to_screen(x, y0);
-        painter.vline(p.x.round() + 0.5, frame.y_range(), grid);
+    if grid_visible {
+        for x in ticks(x0, x1, minor_step(x_major)) {
+            let p = map.to_screen(x, y0);
+            painter.vline(p.x.round() + 0.5, frame.y_range(), grid);
+        }
     }
-    for y in ticks(y0, y1, minor_step(y_major)) {
-        let p = map.to_screen(x0, y);
-        let stroke = if y.abs() < y_major * 1e-6 {
-            Stroke::new(1.0, Color32::from_rgb(0xCA, 0xCA, 0xCA))
-        } else {
-            grid
-        };
-        painter.hline(frame.x_range(), p.y.round() + 0.5, stroke);
-        painter.hline(
-            (frame.left() - 4.0)..=frame.left(),
-            p.y.round() + 0.5,
-            Stroke::new(1.0, axis),
-        );
+    if grid_visible {
+        for y in ticks(y0, y1, minor_step(y_major)) {
+            let p = map.to_screen(x0, y);
+            let stroke = if y.abs() < y_major * 1e-6 {
+                Stroke::new(1.0, Color32::from_rgb(0xCA, 0xCA, 0xCA))
+            } else {
+                grid
+            };
+            painter.hline(frame.x_range(), p.y.round() + 0.5, stroke);
+            painter.hline(
+                (frame.left() - 4.0)..=frame.left(),
+                p.y.round() + 0.5,
+                Stroke::new(1.0, axis),
+            );
+        }
     }
     let label_font = FontId::proportional(11.5);
     for x in ticks(x0, x1, x_major) {
@@ -1093,7 +1139,11 @@ fn draw_diagram(painter: &egui::Painter, map: &Mapping, curves: &[Curve<'_>], y_
             .into_iter()
             .map(|i| map.to_screen(curve.time[i], curve.values[i]))
             .collect();
-        clip.add(egui::Shape::line(points, Stroke::new(1.0, curve.color)));
+        clip.add(curve_shape(
+            points,
+            curve.pattern,
+            Stroke::new(line_width, curve.color),
+        ));
     }
     painter.rect_stroke(frame, 0.0, Stroke::new(1.0, axis), egui::StrokeKind::Inside);
 }
@@ -1126,8 +1176,22 @@ fn draw_cursor(painter: &egui::Painter, map: &Mapping, curves: &[Curve<'_>], t: 
 struct Curve<'a> {
     name: String,
     color: Color32,
+    pattern: u8,
     time: &'a [f64],
     values: &'a [f64],
+}
+
+fn curve_shape(points: Vec<egui::Pos2>, pattern: u8, stroke: Stroke) -> egui::Shape {
+    match pattern {
+        1 => egui::Shape::Vec(egui::Shape::dashed_line(&points, stroke, 5.0, 3.0)),
+        2 => egui::Shape::Vec(egui::Shape::dotted_line(
+            &points,
+            stroke.color,
+            7.0,
+            stroke.width / 2.0,
+        )),
+        _ => egui::Shape::line(points, stroke),
+    }
 }
 
 fn data_bounds<'a>(curves: impl Iterator<Item = &'a Curve<'a>>) -> Option<(f64, f64, f64, f64)> {
@@ -1263,7 +1327,7 @@ fn canvas_sheet(ui: &mut egui::Ui) -> (egui::Rect, egui::Rect) {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_tick, tab_label};
+    use super::{curve_pattern, format_tick, legend_rows, tab_label};
 
     #[test]
     fn tab_label_marks_unsaved_documents() {
@@ -1298,5 +1362,23 @@ mod tests {
         let x = nice_step(10.0 / (556.0f64 / 130.0).floor());
         assert!((x - 2.5).abs() < 1e-12, "{x}");
         assert!((minor_step(2.5) - 0.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn legend_wraps_when_it_exceeds_available_width() {
+        assert_eq!(legend_rows(&[50.0, 50.0, 50.0], 200.0), vec![0..2, 2..3]);
+        assert_eq!(
+            legend_rows(&[], 200.0),
+            Vec::<std::ops::Range<usize>>::new()
+        );
+    }
+
+    #[test]
+    fn curves_use_alternating_line_patterns_after_six_colors() {
+        assert_eq!(curve_pattern(0), 0);
+        assert_eq!(curve_pattern(5), 0);
+        assert_eq!(curve_pattern(6), 1);
+        assert_eq!(curve_pattern(11), 1);
+        assert_eq!(curve_pattern(12), 2);
     }
 }

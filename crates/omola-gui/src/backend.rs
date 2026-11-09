@@ -625,20 +625,45 @@ fn run_job(
 
             // Load icons for all component types
             let mut icons = std::collections::BTreeMap::new();
-            for type_name in component_types {
-                let icon_script = library::icon_script(&type_name, &context.libraries, None)
-                    .map_err(|e| e.to_string());
-                if let Ok(script) = icon_script {
-                    if let Ok(out) = omc.run_query_script(&script) {
-                        let sections = library::parse_sections(&out.output);
-                        let body = sections.get("icon").map(|s| s.trim()).unwrap_or("");
-                        if let Some(json_str) = crate::instance::extract_json(body) {
-                            if let Ok(value) = serde_json::from_str::<serde_json::Value>(json_str) {
-                                if let Ok(icon) = crate::graphics::parse_icon(&value) {
-                                    icons.insert(type_name, icon);
-                                }
+            let types: Vec<String> = component_types.into_iter().collect();
+            let loaded = library::icons_script(&types, &context.libraries)
+                .map_err(|e| e.to_string())
+                .and_then(|script| omc.run_query_script(&script).map_err(|e| e.to_string()));
+            match loaded {
+                Ok(out) => {
+                    let sections = library::parse_sections(&out.output);
+                    for type_name in types {
+                        let key = format!("icon:{type_name}");
+                        let parsed = sections
+                            .get(&key)
+                            .and_then(|body| crate::instance::extract_json(body))
+                            .ok_or_else(|| "OMC returned no icon JSON section".to_owned())
+                            .and_then(|json| {
+                                serde_json::from_str::<serde_json::Value>(json)
+                                    .map_err(|e| e.to_string())
+                            })
+                            .and_then(|value| {
+                                crate::graphics::parse_icon(&value).map_err(|e| e.to_string())
+                            });
+                        match parsed {
+                            Ok(icon) => {
+                                icons.insert(type_name, icon);
                             }
+                            Err(reason) => send(Event::Log(
+                                LogTab::Simulation,
+                                LogLevel::Warning,
+                                format!("icon of {type_name}: {reason}"),
+                            )),
                         }
+                    }
+                }
+                Err(reason) => {
+                    for type_name in types {
+                        send(Event::Log(
+                            LogTab::Simulation,
+                            LogLevel::Warning,
+                            format!("icon of {type_name}: {reason}"),
+                        ));
                     }
                 }
             }

@@ -333,7 +333,7 @@ pub struct OmolaApp {
     pub docs: BTreeMap<String, Loadable<DocPage>>,
     pub texts: BTreeMap<String, Loadable<String>>,
     /// Tokenized layout jobs for read-only library source text, keyed by class.
-    pub library_text_layouts: BTreeMap<String, egui::text::LayoutJob>,
+    pub library_text_layouts: BTreeMap<String, crate::text_editor::EditorState>,
     /// Component tree of the active class (`getModelInstance`, G06).
     pub components: Option<(String, Vec<crate::instance::ComponentNode>)>,
     /// Component nodes the user expanded, as dotted paths from the active class.
@@ -389,8 +389,10 @@ pub struct OmolaApp {
     pub cursor_enabled: bool,
     /// Values edited in the variable browser, applied as overrides on the next simulation.
     pub pending_overrides: BTreeMap<String, String>,
-    /// Shared x range of every diagram (x0, x1); `None` = fit to the data.
+    /// Legacy shared x range used by drag zoom and cleared when all diagrams are rescaled.
     pub plot_x: Option<(f64, f64)>,
+    /// Whether the contextual Plot Options ribbon is selected (Simulation remains active).
+    pub plot_options: bool,
     pub logs: Vec<LogEntry>,
     /// Source positions parsed from the log entries of the current Check / Simulate (G25).
     pub error_locations: Vec<SourceLocation>,
@@ -530,6 +532,7 @@ impl OmolaApp {
             cursor_enabled: false,
             pending_overrides: BTreeMap::new(),
             plot_x: None,
+            plot_options: false,
             logs: Vec::new(),
             error_locations: Vec::new(),
             error_locations_log_len: None,

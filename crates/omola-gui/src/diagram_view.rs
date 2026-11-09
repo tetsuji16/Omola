@@ -161,7 +161,8 @@ fn paint_graphics(
     zoom: f32,
     pan: Vec2,
     place: &dyn Fn([f64; 2], &Graphic) -> [f64; 2],
-    class_name: &str,
+    component_name: &str,
+    type_name: &str,
 ) {
     let scale = scale_of(extent, rect, zoom);
     for g in graphics {
@@ -249,7 +250,9 @@ fn paint_graphics(
                 let a = to_screen(place([ext.x1, ext.y1], g), extent, rect, zoom, pan);
                 let b = to_screen(place([ext.x2, ext.y2], g), extent, rect, zoom, pan);
                 let br = Rect::from_two_pos(a, b);
-                let label = text.replace("%name", class_name);
+                let label = text
+                    .replace("%name", component_name)
+                    .replace("%class", type_name);
                 if label.trim().is_empty() {
                     continue;
                 }
@@ -276,6 +279,7 @@ pub fn paint_diagram(painter: &Painter, rect: Rect, diagram: &Diagram, zoom: f32
         zoom,
         pan,
         &|p, g| crate::graphics::transform(p, g.origin, g.rotation_deg),
+        "",
         "",
     );
     for conn in &diagram.connections {
@@ -306,6 +310,7 @@ pub fn paint_diagram(painter: &Painter, rect: Rect, diagram: &Diagram, zoom: f32
                 zoom,
                 pan,
                 &|p, _g| placement_transform(p, &icon_extent, placement),
+                &comp.name,
                 &comp.type_name,
             );
         } else {
@@ -319,21 +324,25 @@ pub fn paint_diagram(painter: &Painter, rect: Rect, diagram: &Diagram, zoom: f32
                 egui::StrokeKind::Inside,
             );
         }
-        let bounds = component_bounds(&comp.placement);
-        let bottom = to_screen(
-            [(bounds.x1 + bounds.x2) / 2.0, bounds.y1],
-            extent,
-            rect,
-            zoom,
-            pan,
-        );
-        painter.text(
-            Pos2::new(bottom.x, bottom.y + 8.0),
-            Align2::CENTER_TOP,
-            comp.name.clone(),
-            FontId::proportional(11.0),
-            Color32::BLACK,
-        );
+        let has_name_text = comp.icon.as_ref().is_some_and(|icon| {
+            icon.graphics
+                .iter()
+                .any(|g| matches!(&g.shape, Shape::Text { text, .. } if text.contains("%name")))
+        });
+        if !has_name_text {
+            let r = bounds_screen_rect(&comp.placement, extent, rect, zoom, pan);
+            painter.text(
+                r.center(),
+                Align2::CENTER_CENTER,
+                comp.name.clone(),
+                FontId::proportional(11.0),
+                Color32::BLACK,
+            );
+        }
+        for pin in &comp.connectors {
+            let p = to_screen(pin_position(comp, pin), extent, rect, zoom, pan);
+            painter.circle_filled(p, 2.5, Color32::from_rgb(0x20, 0x60, 0xA0));
+        }
     }
 }
 pub fn component_screen_rect(

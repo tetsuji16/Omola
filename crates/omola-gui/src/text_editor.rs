@@ -128,10 +128,33 @@ pub fn draw_text_editor(
     path: Option<&PathBuf>,
     error_lines: &[usize], // 1-indexed line numbers with errors
 ) -> bool {
+    draw_text_editor_mode(ui, editor_state, text, path, error_lines, true)
+}
+
+/// Draw a selectable, copyable editor for library text without allowing edits.
+pub fn draw_readonly_text_editor(
+    ui: &mut Ui,
+    editor_state: &mut EditorState,
+    text: &str,
+    path: Option<&PathBuf>,
+    error_lines: &[usize],
+) {
+    let mut text = text;
+    let _ = draw_text_editor_mode(ui, editor_state, &mut text, path, error_lines, false);
+}
+
+fn draw_text_editor_mode<T: egui::TextBuffer>(
+    ui: &mut Ui,
+    editor_state: &mut EditorState,
+    text: &mut T,
+    path: Option<&PathBuf>,
+    error_lines: &[usize],
+    _editable: bool,
+) -> bool {
     let font = editor_font();
     let row_height = ui.ctx().fonts_mut(|f| f.row_height(&font));
     let char_width = ui.ctx().fonts_mut(|f| f.glyph_width(&font, '0'));
-    let line_count = text.lines().count().max(1);
+    let line_count = text.as_str().lines().count().max(1);
     let show_numbers = editor_state.show_line_numbers;
     let gutter_width = if show_numbers {
         (line_count.to_string().len() as f32 + 2.0) * char_width
@@ -258,7 +281,7 @@ pub fn draw_text_editor(
                         edit_state
                             .cursor
                             .set_char_range(Some(CCursorRange::one(CCursor::new(
-                                line_start_char(text, line),
+                                line_start_char(text.as_str(), line),
                             ))));
                         edit_state.store(ui.ctx(), id);
                     }
