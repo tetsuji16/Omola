@@ -93,8 +93,9 @@ impl OmolaApp {
             {
                 self.worker.cancel();
             }
-            let response = icon_button(ui, ICON_ARROW_DROP_DOWN, DARK, 14.0, false, false);
-            quick_access_right = response.rect.right();
+            quick_access_right = icon_button(ui, ICON_ARROW_DROP_DOWN, DARK, 14.0, false, false)
+                .rect
+                .right();
             if super::custom_title_bar() {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
@@ -123,34 +124,49 @@ impl OmolaApp {
                 });
             }
         });
-        let title = self.window_title();
-        let font = FontId::proportional(12.0);
+        self.paint_window_title(ui, rect, quick_access_right, right);
+    }
+
+    /// Paint the window title between the quick-access icons and the contextual
+    /// tab area. The title is centred while it fits and otherwise left-aligned
+    /// and elided so that it can never run under the icons.
+    fn paint_window_title(
+        &self,
+        ui: &egui::Ui,
+        rect: egui::Rect,
+        quick_access_right: f32,
+        right: f32,
+    ) {
         let area = egui::Rect::from_min_max(
             egui::pos2(quick_access_right + 8.0, rect.top()),
             egui::pos2(right - 8.0, rect.bottom()),
         );
-        if area.width() > 4.0 {
-            let full = ui
-                .painter()
-                .layout_no_wrap(title.clone(), font.clone(), theme::TEXT);
-            let truncated = full.size().x > area.width();
-            let shown = if truncated {
-                truncate_title(&title, area.width(), &font, ui)
-            } else {
-                title
-            };
-            let galley = ui.painter().layout_no_wrap(shown, font, theme::TEXT);
-            let x = if truncated {
-                area.left()
-            } else {
-                area.center().x
-            };
-            ui.painter_at(area).galley(
-                egui::pos2(x, area.center().y - galley.size().y / 2.0),
-                galley,
-                theme::TEXT,
-            );
+        if area.width() <= 0.0 {
+            return;
         }
+        let title = self.window_title();
+        let font = FontId::proportional(12.0);
+        let text_width = ui.ctx().fonts_mut(|fonts| {
+            fonts
+                .layout_no_wrap(title.clone(), font.clone(), theme::TEXT)
+                .size()
+                .x
+        });
+        let layout = title_layout(area, text_width);
+        let mut job = egui::text::LayoutJob::single_section(
+            title,
+            egui::text::TextFormat::simple(font, theme::TEXT),
+        );
+        job.wrap.max_width = area.width();
+        job.wrap.max_rows = 1;
+        job.wrap.break_anywhere = true;
+        job.wrap.overflow_character = layout.truncated.then_some('\u{2026}');
+        let galley = ui.painter().layout_job(job);
+        ui.painter_at(area).galley(
+            egui::pos2(layout.x, area.center().y - galley.size().y / 2.0),
+            galley,
+            theme::TEXT,
+        );
     }
 
     pub fn ribbon_tabs(&mut self, ui: &mut egui::Ui) {
@@ -1122,30 +1138,6 @@ impl OmolaApp {
     }
 }
 
-fn truncate_title(title: &str, max_width: f32, font: &FontId, ui: &egui::Ui) -> String {
-    let suffix = "...";
-    let mut end = title.len();
-    while !title.is_char_boundary(end) {
-        end -= 1;
-    }
-    loop {
-        let candidate = format!("{}{suffix}", &title[..end]);
-        let width = ui
-            .painter()
-            .layout_no_wrap(candidate.clone(), font.clone(), theme::TEXT)
-            .size()
-            .x;
-        if width <= max_width || end == 0 {
-            return candidate;
-        }
-        end = title[..end]
-            .char_indices()
-            .last()
-            .map(|(i, _)| i)
-            .unwrap_or(0);
-    }
-}
-
 fn clear_plot_range_inputs(ctx: &egui::Context, index: usize) {
     ctx.data_mut(|data| {
         for i in 0_usize..4 {
@@ -1167,6 +1159,31 @@ fn parse_optional_range(min: &str, max: &str) -> Result<Option<(f64, f64)>, &'st
         return Err("range bounds must be finite and increasing");
     }
     Ok(Some((min, max)))
+}
+
+/// Where the window title is painted and whether it had to be elided.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct TitleLayout {
+    /// Left edge of the painted title.
+    x: f32,
+    /// True when the title is wider than the available area and must be elided.
+    truncated: bool,
+}
+
+/// Place a title of `text_width` inside `area`: centre it while it fits, else
+/// start at the left edge so the elided end stays clear of the right side.
+fn title_layout(area: egui::Rect, text_width: f32) -> TitleLayout {
+    if text_width <= area.width() {
+        TitleLayout {
+            x: area.center().x - text_width / 2.0,
+            truncated: false,
+        }
+    } else {
+        TitleLayout {
+            x: area.left(),
+            truncated: true,
+        }
+    }
 }
 
 fn clipboard_group(ui: &mut egui::Ui, delete_enabled: bool) -> bool {
@@ -1280,5 +1297,36 @@ mod range_tests {
         assert!(parse_optional_range("a", "0.8").is_err());
         assert!(parse_optional_range("1", "1").is_err());
         assert!(parse_optional_range("NaN", "2").is_err());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::title_layout;
+    use egui::{pos2, Rect, Vec2};
+
+    fn area(width: f32) -> Rect {
+        Rect::from_min_size(pos2(100.0, 0.0), Vec2::new(width, 30.0))
+    }
+
+    #[test]
+    fn title_is_centred_when_it_fits() {
+        let layout = title_layout(area(100.0), 40.0);
+        assert!(!layout.truncated);
+        assert!((layout.x - 130.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn title_uses_the_whole_area_when_it_exactly_fits() {
+        let layout = title_layout(area(100.0), 100.0);
+        assert!(!layout.truncated);
+        assert!((layout.x - 100.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn long_title_starts_at_the_left_and_is_truncated() {
+        let layout = title_layout(area(100.0), 140.0);
+        assert!(layout.truncated);
+        assert!((layout.x - 100.0).abs() < 0.01);
     }
 }

@@ -1,7 +1,9 @@
 //! Bottom window (Logs / Commands) and the bottom bar (browser toggles, model tabs,
 //! status message, model layer toolbar).
 
-use super::widgets::{flat_tab, icon_button, paint_icon};
+use super::widgets::{
+    flat_tab, icon_button, model_tab_close_rect, model_tab_label_rect, model_tab_width, paint_icon,
+};
 use crate::app::{BottomPane, Layer, OmolaApp, RibbonTab};
 use crate::backend::{LogLevel, LogTab};
 use crate::text_editor::{parse_omc_locations, SourceLocation};
@@ -190,7 +192,15 @@ impl OmolaApp {
         ui.horizontal_centered(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             if self.tab == RibbonTab::Simulation {
-                let strip = self.model_tabs.len() as f32 * 112.0 + 48.0;
+                let font = FontId::proportional(12.0);
+                let strip = self
+                    .model_tabs
+                    .iter()
+                    .map(|class| {
+                        model_tab_width(ui, crate::library::short_name(class), font.clone())
+                    })
+                    .sum::<f32>()
+                    + 48.0;
                 ui.add_space((ui.available_width() - 145.0 - strip).max(0.0));
                 self.bottom_model_tabs(ui);
             } else {
@@ -323,22 +333,14 @@ impl OmolaApp {
             let selected = self.active.as_deref() == Some(class.as_str());
             let label = crate::library::short_name(&class);
             let font = FontId::proportional(12.0);
-            let text_width = ui.ctx().fonts_mut(|fonts| {
-                fonts
-                    .layout_no_wrap(label.to_owned(), font.clone(), theme::TEXT)
-                    .size()
-                    .x
-            });
-            let tab_width = (text_width + 50.0).clamp(76.0, 180.0);
-            let (rect, resp) = ui.allocate_exact_size(Vec2::new(tab_width, 25.0), Sense::click());
+            let (rect, resp) = ui.allocate_exact_size(
+                Vec2::new(model_tab_width(ui, label, font.clone()), 25.0),
+                Sense::click(),
+            );
             if selected {
                 ui.painter().rect_filled(rect, 0.0, Color32::WHITE);
             }
-            let close_x = rect.right() - 14.0;
-            let label_rect = egui::Rect::from_min_max(
-                egui::pos2(rect.left() + 25.0, rect.top()),
-                egui::pos2(close_x - 7.0, rect.bottom()),
-            );
+            let label_rect = model_tab_label_rect(rect);
             ui.painter_at(label_rect).text(
                 egui::pos2(label_rect.left(), rect.center().y),
                 Align2::LEFT_CENTER,
@@ -346,12 +348,12 @@ impl OmolaApp {
                 font,
                 theme::TEXT,
             );
-            let x = egui::pos2(close_x, rect.center().y);
+            let x_rect = model_tab_close_rect(rect);
             paint_icon(
                 ui,
-                x,
+                x_rect.center(),
                 ICON_CLOSE,
-                14.0,
+                13.0,
                 if selected {
                     theme::TEXT
                 } else {
@@ -361,7 +363,7 @@ impl OmolaApp {
             if resp.clicked() {
                 if resp
                     .interact_pointer_pos()
-                    .is_some_and(|p| (p - x).length() < 9.0)
+                    .is_some_and(|p| x_rect.expand(2.0).contains(p))
                 {
                     close = Some(class.clone());
                 } else {
