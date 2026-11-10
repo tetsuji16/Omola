@@ -242,14 +242,24 @@ fn paint_graphics(
             } => {
                 let a = to_screen(place([ext.x1, ext.y1], g), extent, rect, zoom, pan);
                 let b = to_screen(place([ext.x2, ext.y2], g), extent, rect, zoom, pan);
+                let x_end = to_screen(place([ext.x2, ext.y1], g), extent, rect, zoom, pan);
+                let y_end = to_screen(place([ext.x1, ext.y2], g), extent, rect, zoom, pan);
                 let br = Rect::from_two_pos(a, b);
                 let label =
                     crate::graphics::text_label(text, component_name, type_name, parameters);
                 if label.trim().is_empty() {
                     continue;
                 }
-                let mut size = (br.height() * 0.9).clamp(8.0, 48.0);
-                let width = br.width().min(max_text_width.unwrap_or(br.width()));
+                // Text remains horizontal on screen even when its component is rotated.
+                // Measure the annotation axes before rotation rather than the screen AABB.
+                let mut size = (a.distance(y_end) * 0.9).clamp(8.0, 48.0);
+                let text_width = a.distance(x_end);
+                // Modelica uses a zero-width extent for text of unrestricted width.
+                let width = if text_width <= f32::EPSILON {
+                    f32::INFINITY
+                } else {
+                    text_width.min(max_text_width.unwrap_or(text_width))
+                };
                 let measured = painter
                     .layout_no_wrap(label.clone(), FontId::proportional(size), col(*tc))
                     .size()
@@ -313,10 +323,15 @@ pub fn paint_diagram(painter: &Painter, rect: Rect, diagram: &Diagram, zoom: f32
         }
     }
     for comp in &diagram.components {
-        let component_rect = bounds_screen_rect(&comp.placement, extent, rect, zoom, pan);
         if let Some(icon) = &comp.icon {
             let icon_extent = icon.coordinate_extent;
             let placement = &comp.placement;
+            let icon_left =
+                placement_transform([icon_extent.x1, icon_extent.y1], &icon_extent, placement);
+            let icon_right =
+                placement_transform([icon_extent.x2, icon_extent.y1], &icon_extent, placement);
+            let width = to_screen(icon_left, extent, rect, zoom, pan)
+                .distance(to_screen(icon_right, extent, rect, zoom, pan));
             paint_graphics(
                 painter,
                 &icon.graphics,
@@ -334,7 +349,7 @@ pub fn paint_diagram(painter: &Painter, rect: Rect, diagram: &Diagram, zoom: f32
                 &comp.name,
                 &comp.type_name,
                 &comp.parameters,
-                Some(component_rect.width()),
+                Some(width),
                 // Modelica icon text extents can intentionally lie outside the icon's
                 // placement, notably the instance name and parameter annotations.
                 None,
@@ -492,6 +507,78 @@ mod edit_tests {
     use super::*;
     use crate::diagram::{Diagram, PlacedComponent, Placement};
     use crate::graphics::Extent;
+
+    #[test]
+    fn rotated_component_parameter_label_keeps_its_font_size() {
+        let render = |rotation_deg| {
+            let icon = crate::graphics::Icon {
+                coordinate_extent: Extent::DEFAULT,
+                graphics: vec![Graphic {
+                    shape: Shape::Text {
+                        extent: Extent {
+                            x1: -100.0,
+                            y1: -120.0,
+                            x2: 100.0,
+                            y2: -80.0,
+                        },
+                        text: "R=100 Ohm".into(),
+                        color: [0, 0, 0],
+                    },
+                    origin: [0.0, 0.0],
+                    rotation_deg: 0.0,
+                }],
+                skipped: vec![],
+            };
+            let diagram = Diagram {
+                components: vec![PlacedComponent {
+                    name: "R".into(),
+                    type_name: "Resistor".into(),
+                    placement: Placement {
+                        extent: Extent {
+                            x1: -20.0,
+                            y1: -5.0,
+                            x2: 20.0,
+                            y2: 5.0,
+                        },
+                        rotation_deg,
+                        ..Placement::default()
+                    },
+                    icon: Some(icon),
+                    connectors: vec![],
+                    parameters: Default::default(),
+                }],
+                ..Diagram::default()
+            };
+            let ctx = egui::Context::default();
+            let mut output = ctx.run_ui(Default::default(), |ui| {
+                paint_diagram(
+                    ui.painter(),
+                    Rect::from_min_size(Pos2::ZERO, Vec2::splat(800.0)),
+                    &diagram,
+                    1.0,
+                    Vec2::ZERO,
+                );
+            });
+            output.textures_delta.clear();
+            output
+                .shapes
+                .into_iter()
+                .find_map(|s| {
+                    if let EguiShape::Text(t) = s.shape {
+                        Some(t.galley.size().y)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap()
+        };
+        let horizontal = render(0.0);
+        let vertical = render(90.0);
+        assert!(
+            (horizontal - vertical).abs() < 0.1,
+            "horizontal={horizontal}, vertical={vertical}"
+        );
+    }
 
     #[test]
     fn screen_diagram_conversion_round_trips_zoom_and_pan() {
