@@ -1150,10 +1150,10 @@ fn truncate_title(title: &str, max_width: f32, font: &FontId, ui: &egui::Ui) -> 
 
 fn clear_plot_range_inputs(ctx: &egui::Context, index: usize) {
     ctx.data_mut(|data| {
-        for i in 0..4 {
+        for i in 0_usize..4 {
             data.remove::<String>(egui::Id::NULL.with(("plot_range", index, i)));
         }
-        for i in 0..2 {
+        for i in 0_usize..2 {
             data.remove::<bool>(egui::Id::NULL.with(("plot_range_invalid", index, i)));
         }
     });
@@ -1257,7 +1257,23 @@ fn window_button(
 
 #[cfg(test)]
 mod range_tests {
-    use super::parse_optional_range;
+    use super::{clear_plot_range_inputs, parse_optional_range};
+
+    #[test]
+    fn rescale_clears_only_the_active_diagram_inputs() {
+        let ctx = egui::Context::default();
+        let key =
+            |diagram: usize, field: usize| egui::Id::NULL.with(("plot_range", diagram, field));
+        ctx.data_mut(|data| {
+            data.insert_temp(key(0, 0), "0.4".to_owned());
+            data.insert_temp(key(1, 0), "0.2".to_owned());
+        });
+        clear_plot_range_inputs(&ctx, 0);
+        ctx.data(|data| {
+            assert_eq!(data.get_temp::<String>(key(0, 0)), None);
+            assert_eq!(data.get_temp::<String>(key(1, 0)).as_deref(), Some("0.2"));
+        });
+    }
 
     #[test]
     fn range_input_accepts_numbers_clear_and_rejects_invalid_pairs() {
