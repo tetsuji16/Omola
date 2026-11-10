@@ -14,6 +14,14 @@ pub struct PlotDiagram {
     pub style: PlotStyle,
 }
 
+impl PlotDiagram {
+    /// Reset manual axis ranges so the plot fits its data again.
+    pub fn rescale(&mut self) {
+        self.y_view = None;
+        self.style.x_view = None;
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LegendPos {
     #[default]
@@ -56,6 +64,21 @@ mod style_tests {
                 x_view: None,
             }
         );
+    }
+
+    #[test]
+    fn rescale_clears_both_manual_axis_ranges() {
+        let mut diagram = PlotDiagram {
+            y_view: Some((-1.0, 2.0)),
+            style: PlotStyle {
+                x_view: Some((0.4, 0.8)),
+                ..PlotStyle::default()
+            },
+            ..PlotDiagram::default()
+        };
+        diagram.rescale();
+        assert_eq!(diagram.y_view, None);
+        assert_eq!(diagram.style.x_view, None);
     }
 }
 

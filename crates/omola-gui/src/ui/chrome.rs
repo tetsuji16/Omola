@@ -322,8 +322,7 @@ impl OmolaApp {
                 let i = self
                     .active_diagram
                     .min(self.diagrams.len().saturating_sub(1));
-                self.diagrams[i].y_view = None;
-                self.diagrams[i].style.x_view = None;
+                self.diagrams[i].rescale();
                 clear_plot_range_inputs(ui.ctx(), i);
             }
             if place(ui, o, (6.0, 40.0, 142.0, 24.0), |ui| {
@@ -332,8 +331,7 @@ impl OmolaApp {
             .clicked()
             {
                 for diagram in &mut self.diagrams {
-                    diagram.y_view = None;
-                    diagram.style.x_view = None;
+                    diagram.rescale();
                 }
                 for i in 0..self.diagrams.len() {
                     clear_plot_range_inputs(ui.ctx(), i);

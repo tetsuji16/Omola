@@ -1260,6 +1260,54 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    #[test]
+    #[ignore = "needs OpenModelica with MSL 4.1.0; run with --ignored and OMOLA_OMC set"]
+    fn diagram_reuses_cached_icons_with_real_omc() {
+        if std::env::var_os("OMOLA_OMC").is_none() {
+            eprintln!("OMOLA_OMC is not set; skipping");
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("omola-gui-cache-{}", std::process::id()));
+        let worker = Worker::spawn(root.join("work"), || {});
+        let class = "Modelica.Blocks.Examples.PID_Controller";
+        let context = ClassContext {
+            libraries: vec![LibrarySpec::new("Modelica", Some("4.1.0"))],
+            user_source: None,
+        };
+        let load = |cached_icons| {
+            worker.submit(Job::LoadDiagram {
+                class: class.into(),
+                context: context.clone(),
+                cached_icons,
+            });
+            wait_for(&worker, 180, |event| match event {
+                Event::Diagram(_, result) => Some(result.expect("diagram")),
+                _ => None,
+            })
+        };
+        let first = load(Default::default());
+        let component = first
+            .components
+            .iter()
+            .find(|c| c.icon.is_some())
+            .expect("component icon");
+        let mut cached = component.icon.clone().unwrap();
+        cached.skipped.push("cache verification marker".into());
+        let type_name = component.type_name.clone();
+        let second = load([(type_name.clone(), cached.clone())].into_iter().collect());
+        assert_eq!(
+            second
+                .components
+                .iter()
+                .find(|c| c.type_name == type_name)
+                .unwrap()
+                .icon
+                .as_ref(),
+            Some(&cached)
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// Exercise the component editing flow used by G29-G32 against a real OMC installation.
     /// This does not replace the GUI acceptance screenshots, but catches scripting API and
     /// Modelica source regressions in placement, connection, rename, delete, check, and simulate.
