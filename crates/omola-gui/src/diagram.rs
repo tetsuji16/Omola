@@ -258,6 +258,11 @@ pub fn parse_diagram(
             let icon = icons.get(&type_name).cloned();
             let mut connectors = Vec::new();
             collect_connector_pins(element.get("type").unwrap_or(&Value::Null), &mut connectors);
+            for pin in &mut connectors {
+                if pin.icon.is_none() {
+                    pin.icon = icons.get(&pin.type_name).cloned();
+                }
+            }
 
             diagram.components.push(PlacedComponent {
                 name,
@@ -352,7 +357,7 @@ pub fn has_placement_annotation(element: &Value) -> bool {
 /// OpenModelica 1.27.1 reports the class under `type.name`; older instance JSON may
 /// provide the same name through `typeName` instead.
 pub fn placed_component_types(instance: &Value) -> std::collections::BTreeSet<String> {
-    instance
+    let elements: Vec<_> = instance
         .get("elements")
         .and_then(Value::as_array)
         .into_iter()
@@ -361,6 +366,9 @@ pub fn placed_component_types(instance: &Value) -> std::collections::BTreeSet<St
             element.get("$kind").and_then(Value::as_str) == Some("component")
                 && has_placement_annotation(element)
         })
+        .collect();
+    let mut types: std::collections::BTreeSet<String> = elements
+        .iter()
         .filter_map(|element| {
             element
                 .get("typeName")
@@ -373,7 +381,17 @@ pub fn placed_component_types(instance: &Value) -> std::collections::BTreeSet<St
                 })
                 .map(str::to_owned)
         })
-        .collect()
+        .collect();
+    for element in elements {
+        let mut pins = Vec::new();
+        collect_connector_pins(element.get("type").unwrap_or(&Value::Null), &mut pins);
+        types.extend(
+            pins.into_iter()
+                .filter(|pin| pin.icon.is_none() && !pin.type_name.is_empty())
+                .map(|pin| pin.type_name),
+        );
+    }
+    types
 }
 
 fn collect_connector_pins(class: &Value, pins: &mut Vec<ConnectorPin>) {

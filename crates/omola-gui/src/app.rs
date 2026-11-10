@@ -965,6 +965,14 @@ impl OmolaApp {
         self.worker.submit(Job::LoadDiagram {
             class: class.to_owned(),
             context: self.context_for(class),
+            cached_icons: self
+                .icons
+                .iter()
+                .filter_map(|(name, icon)| match icon {
+                    Loadable::Ready(icon) => Some((name.clone(), icon.clone())),
+                    _ => None,
+                })
+                .collect(),
         });
     }
 
@@ -1582,6 +1590,24 @@ impl OmolaApp {
                     );
                 }
                 Event::Diagram(class, result) => {
+                    if let Ok(diagram) = &result {
+                        for component in &diagram.components {
+                            if let Some(icon) = &component.icon {
+                                self.icons.insert(
+                                    component.type_name.clone(),
+                                    Loadable::Ready(icon.clone()),
+                                );
+                            }
+                            for pin in &component.connectors {
+                                if let Some(icon) = &pin.icon {
+                                    self.icons.insert(
+                                        pin.type_name.clone(),
+                                        Loadable::Ready(icon.clone()),
+                                    );
+                                }
+                            }
+                        }
+                    }
                     self.model_diagrams.insert(
                         class,
                         match result {

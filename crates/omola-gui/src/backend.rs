@@ -215,6 +215,7 @@ pub enum Job {
     LoadDiagram {
         class: String,
         context: ClassContext,
+        cached_icons: std::collections::BTreeMap<String, crate::graphics::Icon>,
     },
     Check {
         class: String,
@@ -560,7 +561,11 @@ fn run_job(
             }
             send(Event::Icon(class, result));
         }
-        Job::LoadDiagram { class, context } => {
+        Job::LoadDiagram {
+            class,
+            context,
+            cached_icons,
+        } => {
             // First load the instance JSON to get component placements and connections
             let instance_result = with_user_file(run_dir, &class, &context, |file| {
                 let script = library::instance_script(&class, &context.libraries, file)
@@ -615,8 +620,16 @@ fn run_job(
             let component_types = crate::diagram::placed_component_types(&instance_value);
 
             // Load icons for all component types
-            let mut icons = std::collections::BTreeMap::new();
-            let types: Vec<String> = component_types.into_iter().collect();
+            let mut icons = cached_icons;
+            let types: Vec<String> = component_types
+                .into_iter()
+                .filter(|name| !icons.contains_key(name))
+                .collect();
+            if types.is_empty() {
+                let diagram = crate::diagram::parse_diagram(&instance_value, &icons);
+                send(Event::Diagram(class, diagram));
+                return;
+            }
             let loaded = library::icons_script(&types, &context.libraries)
                 .map_err(|e| e.to_string())
                 .and_then(|script| omc.run_query_script(&script).map_err(|e| e.to_string()));
