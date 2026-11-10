@@ -171,7 +171,7 @@ fn paint_graphics(
     type_name: &str,
     parameters: &std::collections::BTreeMap<String, String>,
     max_text_width: Option<f32>,
-    text_clip: Option<Rect>,
+    component_bounds: Option<Rect>,
 ) {
     let scale = scale_of(extent, rect, zoom);
     for g in graphics {
@@ -267,23 +267,22 @@ fn paint_graphics(
                 if measured > width && measured > 0.0 {
                     size = (size * width / measured).max(6.0);
                 }
-                if let Some(clip) = text_clip {
-                    painter.with_clip_rect(clip).text(
-                        br.center(),
-                        Align2::CENTER_CENTER,
-                        label,
-                        FontId::proportional(size),
-                        col(*tc),
-                    );
-                } else {
-                    painter.text(
-                        br.center(),
-                        Align2::CENTER_CENTER,
-                        label,
-                        FontId::proportional(size),
-                        col(*tc),
-                    );
+                let mut anchor = br.center();
+                let mut align = Align2::CENTER_CENTER;
+                // Labels beside a rotated part stay outside the part when the text
+                // itself is kept horizontal, instead of overlapping the symbol.
+                if let Some(bounds) =
+                    component_bounds.filter(|r| anchor.y >= r.top() && anchor.y <= r.bottom())
+                {
+                    if anchor.x < bounds.center().x - 0.5 {
+                        anchor.x = anchor.x.min(bounds.center().x - 12.0);
+                        align = Align2::RIGHT_CENTER;
+                    } else if anchor.x > bounds.center().x + 0.5 {
+                        anchor.x = anchor.x.max(bounds.center().x + 12.0);
+                        align = Align2::LEFT_CENTER;
+                    }
                 }
+                painter.text(anchor, align, label, FontId::proportional(size), col(*tc));
             }
         }
     }
@@ -350,9 +349,8 @@ pub fn paint_diagram(painter: &Painter, rect: Rect, diagram: &Diagram, zoom: f32
                 &comp.type_name,
                 &comp.parameters,
                 Some(width),
-                // Modelica icon text extents can intentionally lie outside the icon's
-                // placement, notably the instance name and parameter annotations.
-                None,
+                (placement.rotation_deg.to_radians().sin().abs() > 0.7)
+                    .then(|| bounds_screen_rect(placement, extent, rect, zoom, pan)),
             );
         } else {
             // No icon: the placement box is all there is to draw. It already includes the
@@ -565,7 +563,7 @@ mod edit_tests {
                 .into_iter()
                 .find_map(|s| {
                     if let EguiShape::Text(t) = s.shape {
-                        Some(t.galley.size().y)
+                        Some((t.galley.size().y, t.pos.x))
                     } else {
                         None
                     }
@@ -575,8 +573,12 @@ mod edit_tests {
         let horizontal = render(0.0);
         let vertical = render(90.0);
         assert!(
-            (horizontal - vertical).abs() < 0.1,
-            "horizontal={horizontal}, vertical={vertical}"
+            (horizontal.0 - vertical.0).abs() < 0.1,
+            "horizontal={horizontal:?}, vertical={vertical:?}"
+        );
+        assert!(
+            vertical.1 >= 420.0,
+            "label overlaps rotated component: {vertical:?}"
         );
     }
 
