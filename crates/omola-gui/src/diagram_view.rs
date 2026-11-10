@@ -211,13 +211,9 @@ fn paint_graphics(
                     .iter()
                     .map(|p| to_screen(place(*p, g), extent, rect, zoom, pan))
                     .collect();
-                if let Some(fill) = style.fill {
-                    painter.add(EguiShape::convex_polygon(
-                        pts.clone(),
-                        col(fill),
-                        Stroke::NONE,
-                    ));
-                }
+                crate::graphics::paint_rectangle_fill(painter, *ext, style, |p| {
+                    to_screen(place(p, g), extent, rect, zoom, pan)
+                });
                 if *radius > 0.0 {
                     let a = to_screen(place([ext.x1, ext.y1], g), extent, rect, zoom, pan);
                     let b = to_screen(place([ext.x2, ext.y2], g), extent, rect, zoom, pan);
@@ -320,6 +316,7 @@ pub fn paint_diagram(painter: &Painter, rect: Rect, diagram: &Diagram, zoom: f32
             let st = Style {
                 line: conn.color,
                 fill: None,
+                fill_pattern: crate::graphics::FillPattern::Solid,
                 thickness: 0.25,
                 pattern: crate::graphics::LinePattern::Solid,
             };
@@ -348,7 +345,9 @@ pub fn paint_diagram(painter: &Painter, rect: Rect, diagram: &Diagram, zoom: f32
                 &comp.name,
                 &comp.type_name,
                 Some(component_rect.width()),
-                Some(component_rect),
+                // Modelica icon text extents can intentionally lie outside the icon's
+                // placement, notably the instance name and parameter annotations.
+                None,
             );
         } else {
             // No icon: the placement box is all there is to draw. It already includes the
@@ -408,7 +407,7 @@ pub fn paint_diagram(painter: &Painter, rect: Rect, diagram: &Diagram, zoom: f32
                     &pin.name,
                     &pin.type_name,
                     Some(20.0),
-                    Some(component_rect),
+                    None,
                 );
             } else {
                 let p = to_screen(pin_position(comp, pin), extent, rect, zoom, pan);

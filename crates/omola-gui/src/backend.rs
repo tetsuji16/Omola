@@ -1240,7 +1240,7 @@ mod tests {
         assert_eq!(resistor.coordinate_extent.x1, -100.0);
 
         let first_order = load("Modelica.Blocks.Continuous.FirstOrder");
-        assert_eq!(first_order.len(), 7);
+        assert_eq!(first_order.len(), 9);
 
         let inertia = load("Modelica.Mechanics.Rotational.Components.Inertia");
         assert_eq!(inertia.len(), 15);

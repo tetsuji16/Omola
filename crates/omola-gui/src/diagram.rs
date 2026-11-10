@@ -399,6 +399,10 @@ fn collect_connector_pins(class: &Value, pins: &mut Vec<ConnectorPin>) {
         return;
     };
     for element in elements {
+        // Conditional ports disabled by the instance must not be painted or hit-tested.
+        if element.get("condition").and_then(Value::as_bool) == Some(false) {
+            continue;
+        }
         match element.get("$kind").and_then(Value::as_str) {
             Some("component")
                 if element
@@ -684,6 +688,14 @@ fn style(
             .and_then(rgb_from_value)
             .unwrap_or([0, 0, 0]),
         fill: filled,
+        fill_pattern: match elements
+            .get(fill_pattern_idx)
+            .and_then(enum_name_from_value)
+        {
+            Some("HorizontalCylinder") => crate::graphics::FillPattern::HorizontalCylinder,
+            Some("VerticalCylinder") => crate::graphics::FillPattern::VerticalCylinder,
+            _ => crate::graphics::FillPattern::Solid,
+        },
         thickness: elements
             .get(thickness_idx)
             .and_then(|v| v.as_f64())
@@ -1041,6 +1053,25 @@ mod tests {
             (u.extent.x1, u.extent.y1, u.extent.x2, u.extent.y2),
             (-140.0, -20.0, -100.0, 20.0)
         );
+    }
+
+    #[test]
+    fn disabled_connector_conditions_are_not_drawn() {
+        let json: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/instance_pid.json")).unwrap();
+        let integrator = json["elements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["name"] == "integrator")
+            .unwrap();
+        let mut pins = Vec::new();
+        collect_connector_pins(&integrator["type"], &mut pins);
+        assert!(pins.iter().any(|pin| pin.name == "u"));
+        assert!(pins.iter().any(|pin| pin.name == "y"));
+        assert!(!pins
+            .iter()
+            .any(|pin| pin.name == "reset" || pin.name == "set"));
     }
 
     #[test]
