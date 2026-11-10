@@ -155,7 +155,43 @@ fn tree_row(
         }
     });
     if let Some(payload) = payload {
-        response.dnd_set_drag_payload(payload.clone());
+        let press_id = egui::Id::unique("package-class-drag-press");
+        if response.contains_pointer() && ui.input(|i| i.pointer.primary_pressed()) {
+            if let Some(pos) = ui.ctx().pointer_interact_pos() {
+                ui.ctx()
+                    .data_mut(|d| d.insert_temp(press_id, (payload.clone(), pos)));
+            }
+        }
+        let released_drag = ui
+            .input(|i| i.pointer.primary_released())
+            .then(|| {
+                ui.ctx().data_mut(|d| {
+                    let saved = d.get_temp::<(ClassPayload, egui::Pos2)>(press_id);
+                    if saved.as_ref().is_some_and(|(source, _)| source == &payload) {
+                        d.remove::<(ClassPayload, egui::Pos2)>(press_id);
+                        saved
+                    } else {
+                        None
+                    }
+                })
+            })
+            .flatten()
+            .is_some_and(|(_, start)| {
+                ui.ctx()
+                    .pointer_interact_pos()
+                    .is_some_and(|end| start.distance(end) > 6.0)
+            });
+        // Native pointer integrations can deliver the press and the first motion in the
+        // same frame. In that case `drag_started()` may be missed by this row even though
+        // `dragged()` is true. Keep the payload alive for every frame the row owns the drag
+        // so a drop into another panel still has a payload to consume.
+        // Keep the payload available through the release frame. Some native input
+        // integrations deliver the final move and release together; in that case the
+        // drop-zone is evaluated in the same frame as `drag_stopped()`.
+        if response.drag_started() || response.dragged() || response.drag_stopped() || released_drag
+        {
+            egui::DragAndDrop::set_payload(ui.ctx(), payload.clone());
+        }
         if response.dragged() {
             if let Some(pos) = ui.ctx().pointer_interact_pos() {
                 let painter = ui.ctx().layer_painter(egui::LayerId::new(
@@ -1016,7 +1052,7 @@ fn variable_row(
         } else {
             FontId::proportional(12.0)
         };
-        ui.painter().text(
+        ui.painter_at(name_rect).text(
             egui::pos2(name_rect.left() + text_x, name_rect.center().y),
             Align2::LEFT_CENTER,
             label,
@@ -1039,7 +1075,8 @@ fn variable_row(
             }
         }
         let (unit, description) = var.map(|v| split_unit(&v.description)).unwrap_or(("", ""));
-        let (value_rect, _) = ui.allocate_exact_size(Vec2::new(widths[1], VROW), Sense::hover());
+        let (value_rect, value_response) =
+            ui.allocate_exact_size(Vec2::new(widths[1], VROW), Sense::hover());
         if let Some(i) = leaf {
             if editable {
                 let value = result.values[i].first().copied().unwrap_or(f64::NAN);
@@ -1106,7 +1143,10 @@ fn variable_row(
                     Some(t) => crate::series::value_at(&result.time, &result.values[i], t),
                     None => result.values[i].last().copied(),
                 };
-                ui.painter().text(
+                value_response
+                    .clone()
+                    .on_hover_text(value.map(|v| v.to_string()).unwrap_or_default());
+                ui.painter_at(value_rect).text(
                     egui::pos2(value_rect.right() - 4.0, value_rect.center().y),
                     Align2::RIGHT_CENTER,
                     value.map(format_value).unwrap_or_default(),
@@ -1116,7 +1156,7 @@ fn variable_row(
             }
         }
         let (unit_rect, _) = ui.allocate_exact_size(Vec2::new(widths[2], VROW), Sense::hover());
-        ui.painter().text(
+        ui.painter_at(unit_rect).text(
             egui::pos2(unit_rect.left() + 4.0, unit_rect.center().y),
             Align2::LEFT_CENTER,
             unit,
@@ -1124,7 +1164,7 @@ fn variable_row(
             theme::TEXT,
         );
         let (d_rect, _) = ui.allocate_exact_size(Vec2::new(widths[3], VROW), Sense::hover());
-        ui.painter().text(
+        ui.painter_at(d_rect).text(
             egui::pos2(d_rect.left() + 4.0, d_rect.center().y),
             Align2::LEFT_CENTER,
             description,
@@ -1207,13 +1247,82 @@ pub fn format_value(v: f64) -> String {
         let s = s.trim_end_matches('0').trim_end_matches('.');
         s.to_owned()
     } else {
-        format!("{v:e}")
+        let formatted = format!("{v:.5e}");
+        let (mantissa, exponent) = formatted.split_once('e').unwrap_or((&formatted, "0"));
+        let mantissa = mantissa.trim_end_matches('0').trim_end_matches('.');
+        let exponent = exponent.parse::<i32>().unwrap_or(0);
+        format!("{mantissa}e{exponent}")
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn class_drag_reaches_canvas_with_release_position() {
+        use egui::{Event, Modifiers, PointerButton, Pos2, RawInput, Rect};
+        let ctx = egui::Context::default();
+        let mut received = None;
+        let source = Pos2::new(40.0, 20.0);
+        let target = Pos2::new(300.0, 20.0);
+        let mut frame = |events| {
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_max(Pos2::ZERO, Pos2::new(500.0, 200.0))),
+                events,
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                ui.horizontal(|ui| {
+                    ui.set_width(180.0);
+                    tree_row(
+                        ui,
+                        0,
+                        false,
+                        false,
+                        false,
+                        (ICON_GRID_VIEW, Color32::WHITE),
+                        "Sine",
+                        String::new,
+                        Some(ClassPayload {
+                            qualified: "Modelica.Blocks.Sources.Sine".into(),
+                            restriction: "block".into(),
+                        }),
+                    );
+                });
+                let rect = Rect::from_min_max(Pos2::new(220.0, 0.0), Pos2::new(450.0, 100.0));
+                let response =
+                    ui.interact(rect, ui.scope_id().with("canvas"), Sense::click_and_drag());
+                if let Some(payload) = response.dnd_release_payload::<ClassPayload>() {
+                    received = Some((
+                        payload.qualified.clone(),
+                        response.hover_pos().or_else(|| ctx.pointer_interact_pos()),
+                    ));
+                }
+            });
+            output.textures_delta.clear();
+        };
+        frame(vec![Event::PointerMoved(source)]);
+        frame(vec![Event::PointerButton {
+            pos: source,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        }]);
+        frame(vec![
+            Event::PointerMoved(target),
+            Event::PointerButton {
+                pos: target,
+                button: PointerButton::Primary,
+                pressed: false,
+                modifiers: Modifiers::NONE,
+            },
+        ]);
+        assert_eq!(
+            received,
+            Some(("Modelica.Blocks.Sources.Sine".into(), Some(target)))
+        );
+    }
 
     #[test]
     fn component_name_is_unique_and_lowercases_only_the_first_character() {
@@ -1250,6 +1359,14 @@ mod tests {
         assert_eq!(format_value(0.1), "0.1");
         assert_eq!(format_value(0.0), "0");
         assert_eq!(format_value(-0.25), "-0.25");
+        assert_eq!(format_value(4.685711245446625e-6), "4.68571e-6");
+        assert_eq!(format_value(-4.122342692112852e-6), "-4.12234e-6");
+        assert_eq!(format_value(1e-6), "1e-6");
+        assert_eq!(format_value(1.5e7), "1.5e7");
+        assert_eq!(format_value(1e-4), "0.0001");
+        assert_eq!(format_value(0.999e-4), "9.99e-5");
+        assert_eq!(format_value(1e7), "1e7");
+        assert_eq!(format_value(0.999e7), "9990000");
     }
 
     #[test]

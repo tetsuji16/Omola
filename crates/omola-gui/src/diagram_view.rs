@@ -4,10 +4,16 @@ use crate::graphics::{Extent, Graphic, Shape, Style};
 use egui::{Align2, Color32, FontId, Painter, Pos2, Rect, Shape as EguiShape, Stroke, Vec2};
 
 pub fn pin_position(component: &PlacedComponent, pin: &crate::diagram::ConnectorPin) -> [f64; 2] {
-    let local = [
-        (pin.extent.x1 + pin.extent.x2) / 2.0,
-        (pin.extent.y1 + pin.extent.y2) / 2.0,
+    let connector_extent = pin
+        .icon
+        .as_ref()
+        .map(|icon| icon.coordinate_extent)
+        .unwrap_or(Extent::DEFAULT);
+    let connector_center = [
+        (connector_extent.x1 + connector_extent.x2) / 2.0,
+        (connector_extent.y1 + connector_extent.y2) / 2.0,
     ];
+    let local = placement_transform(connector_center, &connector_extent, &pin.placement);
     let icon_extent = component
         .icon
         .as_ref()
@@ -161,7 +167,10 @@ fn paint_graphics(
     zoom: f32,
     pan: Vec2,
     place: &dyn Fn([f64; 2], &Graphic) -> [f64; 2],
-    class_name: &str,
+    component_name: &str,
+    type_name: &str,
+    max_text_width: Option<f32>,
+    text_clip: Option<Rect>,
 ) {
     let scale = scale_of(extent, rect, zoom);
     for g in graphics {
@@ -202,13 +211,9 @@ fn paint_graphics(
                     .iter()
                     .map(|p| to_screen(place(*p, g), extent, rect, zoom, pan))
                     .collect();
-                if let Some(fill) = style.fill {
-                    painter.add(EguiShape::convex_polygon(
-                        pts.clone(),
-                        col(fill),
-                        Stroke::NONE,
-                    ));
-                }
+                crate::graphics::paint_rectangle_fill(painter, *ext, style, |p| {
+                    to_screen(place(p, g), extent, rect, zoom, pan)
+                });
                 if *radius > 0.0 {
                     let a = to_screen(place([ext.x1, ext.y1], g), extent, rect, zoom, pan);
                     let b = to_screen(place([ext.x2, ext.y2], g), extent, rect, zoom, pan);
@@ -249,18 +254,38 @@ fn paint_graphics(
                 let a = to_screen(place([ext.x1, ext.y1], g), extent, rect, zoom, pan);
                 let b = to_screen(place([ext.x2, ext.y2], g), extent, rect, zoom, pan);
                 let br = Rect::from_two_pos(a, b);
-                let label = text.replace("%name", class_name);
+                let label = text
+                    .replace("%name", component_name)
+                    .replace("%class", type_name);
                 if label.trim().is_empty() {
                     continue;
                 }
-                let size = (br.height() * 0.9).clamp(8.0, 48.0);
-                painter.text(
-                    br.center(),
-                    Align2::CENTER_CENTER,
-                    label,
-                    FontId::proportional(size),
-                    col(*tc),
-                );
+                let mut size = (br.height() * 0.9).clamp(8.0, 48.0);
+                let width = br.width().min(max_text_width.unwrap_or(br.width()));
+                let measured = painter
+                    .layout_no_wrap(label.clone(), FontId::proportional(size), col(*tc))
+                    .size()
+                    .x;
+                if measured > width && measured > 0.0 {
+                    size = (size * width / measured).max(6.0);
+                }
+                if let Some(clip) = text_clip {
+                    painter.with_clip_rect(clip).text(
+                        br.center(),
+                        Align2::CENTER_CENTER,
+                        label,
+                        FontId::proportional(size),
+                        col(*tc),
+                    );
+                } else {
+                    painter.text(
+                        br.center(),
+                        Align2::CENTER_CENTER,
+                        label,
+                        FontId::proportional(size),
+                        col(*tc),
+                    );
+                }
             }
         }
     }
@@ -277,6 +302,9 @@ pub fn paint_diagram(painter: &Painter, rect: Rect, diagram: &Diagram, zoom: f32
         pan,
         &|p, g| crate::graphics::transform(p, g.origin, g.rotation_deg),
         "",
+        "",
+        None,
+        None,
     );
     for conn in &diagram.connections {
         let pts: Vec<Pos2> = conn
@@ -288,6 +316,7 @@ pub fn paint_diagram(painter: &Painter, rect: Rect, diagram: &Diagram, zoom: f32
             let st = Style {
                 line: conn.color,
                 fill: None,
+                fill_pattern: crate::graphics::FillPattern::Solid,
                 thickness: 0.25,
                 pattern: crate::graphics::LinePattern::Solid,
             };
@@ -295,6 +324,7 @@ pub fn paint_diagram(painter: &Painter, rect: Rect, diagram: &Diagram, zoom: f32
         }
     }
     for comp in &diagram.components {
+        let component_rect = bounds_screen_rect(&comp.placement, extent, rect, zoom, pan);
         if let Some(icon) = &comp.icon {
             let icon_extent = icon.coordinate_extent;
             let placement = &comp.placement;
@@ -305,8 +335,19 @@ pub fn paint_diagram(painter: &Painter, rect: Rect, diagram: &Diagram, zoom: f32
                 rect,
                 zoom,
                 pan,
-                &|p, _g| placement_transform(p, &icon_extent, placement),
+                &|p, g| {
+                    placement_transform(
+                        crate::graphics::transform(p, g.origin, g.rotation_deg),
+                        &icon_extent,
+                        placement,
+                    )
+                },
+                &comp.name,
                 &comp.type_name,
+                Some(component_rect.width()),
+                // Modelica icon text extents can intentionally lie outside the icon's
+                // placement, notably the instance name and parameter annotations.
+                None,
             );
         } else {
             // No icon: the placement box is all there is to draw. It already includes the
@@ -319,21 +360,60 @@ pub fn paint_diagram(painter: &Painter, rect: Rect, diagram: &Diagram, zoom: f32
                 egui::StrokeKind::Inside,
             );
         }
-        let bounds = component_bounds(&comp.placement);
-        let bottom = to_screen(
-            [(bounds.x1 + bounds.x2) / 2.0, bounds.y1],
-            extent,
-            rect,
-            zoom,
-            pan,
-        );
-        painter.text(
-            Pos2::new(bottom.x, bottom.y + 8.0),
-            Align2::CENTER_TOP,
-            comp.name.clone(),
-            FontId::proportional(11.0),
-            Color32::BLACK,
-        );
+        if comp.icon.is_none() {
+            let r = bounds_screen_rect(&comp.placement, extent, rect, zoom, pan);
+            let font = FontId::proportional(11.0);
+            let measured = painter
+                .layout_no_wrap(comp.name.clone(), font.clone(), Color32::BLACK)
+                .size()
+                .x;
+            let size = if measured > r.width() && measured > 0.0 {
+                (11.0 * r.width() / measured).max(6.0)
+            } else {
+                11.0
+            };
+            painter.with_clip_rect(r).text(
+                r.center(),
+                Align2::CENTER_CENTER,
+                comp.name.clone(),
+                FontId::proportional(size),
+                Color32::BLACK,
+            );
+        }
+        for pin in &comp.connectors {
+            if let Some(icon) = &pin.icon {
+                let connector_icon_extent = icon.coordinate_extent;
+                let component_icon_extent = comp
+                    .icon
+                    .as_ref()
+                    .map(|icon| icon.coordinate_extent)
+                    .unwrap_or(Extent::DEFAULT);
+                let place = |p: [f64; 2], g: &Graphic| {
+                    let pin_local = placement_transform(
+                        crate::graphics::transform(p, g.origin, g.rotation_deg),
+                        &connector_icon_extent,
+                        &pin.placement,
+                    );
+                    placement_transform(pin_local, &component_icon_extent, &comp.placement)
+                };
+                paint_graphics(
+                    painter,
+                    &icon.graphics,
+                    extent,
+                    rect,
+                    zoom,
+                    pan,
+                    &place,
+                    &pin.name,
+                    &pin.type_name,
+                    Some(20.0),
+                    None,
+                );
+            } else {
+                let p = to_screen(pin_position(comp, pin), extent, rect, zoom, pan);
+                painter.circle_filled(p, 2.5, Color32::from_rgb(0x20, 0x60, 0xA0));
+            }
+        }
     }
 }
 pub fn component_screen_rect(
@@ -507,12 +587,15 @@ mod edit_tests {
         );
         let pin = crate::diagram::ConnectorPin {
             name: "p".into(),
+            type_name: "C.Pin".into(),
             extent: Extent {
                 x1: 0.0,
                 y1: 0.0,
                 x2: 0.0,
                 y2: 0.0,
             },
+            placement: Placement::default(),
+            icon: None,
         };
         let mut c = PlacedComponent {
             name: "a".into(),

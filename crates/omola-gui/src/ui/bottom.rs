@@ -322,18 +322,31 @@ impl OmolaApp {
         for class in self.model_tabs.clone() {
             let selected = self.active.as_deref() == Some(class.as_str());
             let label = crate::library::short_name(&class);
-            let (rect, resp) = ui.allocate_exact_size(Vec2::new(112.0, 25.0), Sense::click());
+            let font = FontId::proportional(12.0);
+            let text_width = ui.ctx().fonts_mut(|fonts| {
+                fonts
+                    .layout_no_wrap(label.to_owned(), font.clone(), theme::TEXT)
+                    .size()
+                    .x
+            });
+            let tab_width = (text_width + 50.0).clamp(76.0, 180.0);
+            let (rect, resp) = ui.allocate_exact_size(Vec2::new(tab_width, 25.0), Sense::click());
             if selected {
                 ui.painter().rect_filled(rect, 0.0, Color32::WHITE);
             }
-            ui.painter().text(
-                egui::pos2(rect.left() + 25.0, rect.center().y),
+            let close_x = rect.right() - 14.0;
+            let label_rect = egui::Rect::from_min_max(
+                egui::pos2(rect.left() + 25.0, rect.top()),
+                egui::pos2(close_x - 7.0, rect.bottom()),
+            );
+            ui.painter_at(label_rect).text(
+                egui::pos2(label_rect.left(), rect.center().y),
                 Align2::LEFT_CENTER,
                 label,
-                FontId::proportional(12.0),
+                font,
                 theme::TEXT,
             );
-            let x = egui::pos2(rect.left() + 92.0, rect.center().y);
+            let x = egui::pos2(close_x, rect.center().y);
             paint_icon(
                 ui,
                 x,

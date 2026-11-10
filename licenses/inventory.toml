@@ -2646,3 +2646,39 @@ version = "0.41.0"
 license = "MIT"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
+
+[[cargo_packages]]
+name = "calloop"
+version = "0.14.5"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "calloop-wayland-source"
+version = "0.4.1"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "smithay-client-toolkit"
+version = "0.20.0"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "smithay-clipboard"
+version = "0.7.3"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "wayland-protocols-experimental"
+version = "20250721.0.1"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[cargo_packages]]
+name = "wayland-protocols-misc"
+version = "0.3.12"
+license = "MIT"
+source = "registry+https://github.com/rust-lang/crates.io-index"

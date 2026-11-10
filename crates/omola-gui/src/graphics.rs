@@ -9,7 +9,7 @@
 //! Nothing here edits the model: the Icon layer only paints.
 //!
 //! Simplifications (deliberate, see issue G07):
-//! - `FillPattern` other than `None` is painted as a solid fill (no hatching).
+//! - Cylinder fills are shaded; other non-solid fill patterns are simplified to solid fills.
 //! - A shape whose `visible` is a conditional expression (`useHeatPort` etc.) is skipped:
 //!   its condition would need the parameter values, and the default of every MSL model
 //!   is `false`, so skipping matches what OMEdit shows out of the box.
@@ -49,6 +49,7 @@ pub struct Style {
     pub line: [u8; 3],
     /// Fill colour; `None` means "not filled" (`FillPattern.None` or no `fillColor`).
     pub fill: Option<[u8; 3]>,
+    pub fill_pattern: FillPattern,
     /// Modelica `lineThickness` (0.25 by default).
     pub thickness: f64,
     /// Modelica `LinePattern` (Solid, Dash, Dot, ...).
@@ -60,10 +61,18 @@ impl Default for Style {
         Self {
             line: [0, 0, 0],
             fill: None,
+            fill_pattern: FillPattern::Solid,
             thickness: 0.25,
             pattern: LinePattern::Solid,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FillPattern {
+    Solid,
+    HorizontalCylinder,
+    VerticalCylinder,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -150,6 +159,12 @@ fn point(v: &serde_json::Value) -> Option<[f64; 2]> {
 }
 
 fn points(v: &serde_json::Value) -> Option<Vec<[f64; 2]>> {
+    // DynamicSelect's first argument is the static representation used in the editor.
+    if v.get("$kind").and_then(serde_json::Value::as_str) == Some("call")
+        && v.get("name").and_then(serde_json::Value::as_str) == Some("DynamicSelect")
+    {
+        return points(v.get("arguments")?.as_array()?.first()?);
+    }
     let a = v.as_array()?;
     let out: Vec<[f64; 2]> = a.iter().filter_map(point).collect();
     // A partially readable point list would silently distort the shape.
@@ -229,6 +244,11 @@ fn style(
     Style {
         line: field(e, line).and_then(rgb).unwrap_or([0, 0, 0]),
         fill: filled,
+        fill_pattern: match field(e, fill_pattern).and_then(enum_name) {
+            Some("HorizontalCylinder") => FillPattern::HorizontalCylinder,
+            Some("VerticalCylinder") => FillPattern::VerticalCylinder,
+            _ => FillPattern::Solid,
+        },
         thickness: field(e, thickness).and_then(number).unwrap_or(0.25),
         pattern: line_pattern(field(e, pattern)),
     }
@@ -238,28 +258,48 @@ fn style(
 
 /// Parse the `annotation.Icon` of a `getModelInstanceAnnotation` answer.
 ///
-/// The Icon of the class itself wins; when the class declares none, the first `Icon`
-/// found along the `extends` chain is used (that is how Modelica inherits icons, e.g.
-/// `Modelica.Blocks.Continuous.FirstOrder` would fall back to
-/// `Modelica.Blocks.Icons.Block`).
+/// Inherited icon graphics are painted first, followed by graphics declared by the class.
 pub fn parse_icon(json: &serde_json::Value) -> Result<Icon, String> {
     let icon = find_icon(json).ok_or("the class declares no Icon annotation")?;
     Ok(icon)
 }
 
 fn find_icon(node: &serde_json::Value) -> Option<Icon> {
-    if let Some(icon) = node.get("annotation").and_then(|a| a.get("Icon")) {
-        return Some(parse_icon_node(icon));
-    }
-    for element in node.get("elements")?.as_array()? {
-        if element.get("$kind").and_then(|k| k.as_str()) != Some("extends") {
-            continue;
+    let mut combined: Option<Icon> = None;
+    for element in node
+        .get("elements")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+    {
+        if element.get("$kind").and_then(|k| k.as_str()) == Some("extends") {
+            if let Some(base) = element.get("baseClass").and_then(find_icon) {
+                if let Some(icon) = &mut combined {
+                    icon.graphics.extend(base.graphics);
+                    icon.skipped.extend(base.skipped);
+                } else {
+                    combined = Some(base);
+                }
+            }
         }
-        if let Some(found) = element.get("baseClass").and_then(find_icon) {
-            return Some(found);
+    }
+    if let Some(own_node) = node.get("annotation").and_then(|a| a.get("Icon")) {
+        let own = parse_icon_node(own_node);
+        if let Some(icon) = &mut combined {
+            if own_node
+                .get("coordinateSystem")
+                .and_then(|c| c.get("extent"))
+                .is_some()
+            {
+                icon.coordinate_extent = own.coordinate_extent;
+            }
+            icon.graphics.extend(own.graphics);
+            icon.skipped.extend(own.skipped);
+        } else {
+            combined = Some(own);
         }
     }
-    None
+    combined
 }
 
 fn parse_icon_node(icon: &serde_json::Value) -> Icon {
@@ -444,13 +484,7 @@ pub fn paint_icon(painter: &Painter, rect: Rect, icon: &Icon, name: &str) {
                     [extent.x1, extent.y2],
                 ];
                 let pts: Vec<Pos2> = corners.iter().map(|p| place(*p, graphic)).collect();
-                if let Some(fill) = style.fill {
-                    painter.add(EguiShape::convex_polygon(
-                        pts.clone(),
-                        color(fill),
-                        Stroke::NONE,
-                    ));
-                }
+                paint_rectangle_fill(painter, *extent, style, |p| place(p, graphic));
                 if *radius > 0.0 {
                     // Rounded corners: draw the outline as a rounded rectangle when the
                     // shape is not rotated, otherwise fall back to the sharp outline.
@@ -519,6 +553,61 @@ fn color(rgb: [u8; 3]) -> Color32 {
     Color32::from_rgb(rgb[0], rgb[1], rgb[2])
 }
 
+/// Fill a rectangle in its own coordinates, before applying its placement and rotation.
+/// Cylinder fills fade from the line colour at both edges to the fill colour at the centre.
+pub fn paint_rectangle_fill(
+    painter: &Painter,
+    extent: Extent,
+    style: &Style,
+    place: impl Fn([f64; 2]) -> Pos2,
+) {
+    if let Some(mesh) = rectangle_fill_mesh(extent, style, place) {
+        painter.add(EguiShape::mesh(mesh));
+    }
+}
+
+fn rectangle_fill_mesh(
+    extent: Extent,
+    style: &Style,
+    place: impl Fn([f64; 2]) -> Pos2,
+) -> Option<egui::Mesh> {
+    let fill = style.fill?;
+    let Extent { x1, y1, x2, y2 } = extent;
+    let mut mesh = egui::Mesh::default();
+    let edge = color(style.line);
+    let middle = color(fill);
+    let (positions, colors) = match style.fill_pattern {
+        FillPattern::Solid => (
+            vec![[x1, y1], [x2, y1], [x2, y2], [x1, y2]],
+            vec![middle; 4],
+        ),
+        FillPattern::HorizontalCylinder => {
+            let y = (y1 + y2) / 2.0;
+            (
+                vec![[x1, y1], [x2, y1], [x1, y], [x2, y], [x1, y2], [x2, y2]],
+                vec![edge, edge, middle, middle, edge, edge],
+            )
+        }
+        FillPattern::VerticalCylinder => {
+            let x = (x1 + x2) / 2.0;
+            (
+                vec![[x1, y1], [x1, y2], [x, y1], [x, y2], [x2, y1], [x2, y2]],
+                vec![edge, edge, middle, middle, edge, edge],
+            )
+        }
+    };
+    for (point, color) in positions.into_iter().zip(colors) {
+        mesh.colored_vertex(place(point), color);
+    }
+    if style.fill_pattern == FillPattern::Solid {
+        mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
+    } else {
+        mesh.indices
+            .extend_from_slice(&[0, 1, 2, 1, 3, 2, 2, 3, 4, 3, 5, 4]);
+    }
+    Some(mesh)
+}
+
 /// `lineThickness` is in the 200-unit icon coordinate system; keep 1..8 px on screen.
 fn stroke(style: &Style, scale: f32) -> Stroke {
     Stroke::new(
@@ -573,6 +662,14 @@ pub fn sheet(rect: Rect) -> Rect {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn dynamic_select_points_use_the_static_graphic() {
+        let value = serde_json::json!({"$kind":"call", "name":"DynamicSelect", "arguments":[[[-80,-80],[80,80]], {"$kind":"if"}]});
+        assert_eq!(
+            super::points(&value),
+            Some(vec![[-80.0, -80.0], [80.0, 80.0]])
+        );
+    }
     use super::*;
 
     fn fixture(json: &str) -> serde_json::Value {
@@ -642,12 +739,21 @@ mod tests {
         let icon = parse(include_str!("../tests/fixtures/icon_FirstOrder.json"));
         assert_eq!(
             kinds(&icon),
-            ["Line", "Polygon", "Line", "Polygon", "Line", "Text", "Text"]
+            [
+                "Rectangle",
+                "Text",
+                "Line",
+                "Polygon",
+                "Line",
+                "Polygon",
+                "Line",
+                "Text",
+                "Text"
+            ]
         );
         assert_eq!(icon.coordinate_extent, Extent::DEFAULT);
         assert!(icon.skipped.is_empty(), "{:?}", icon.skipped);
-        // The class has its own Icon, so the `%name` text of `Modelica.Blocks.Icons.Block`
-        // is *not* inherited - only these two labels are drawn.
+        // The base block frame and instance name remain visible under the class graphics.
         let texts: Vec<_> = icon
             .shapes()
             .filter_map(|s| match s {
@@ -655,9 +761,10 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(texts[0], ("PT1".into(), [192, 192, 192]));
+        assert_eq!(texts[0].0, "%name");
+        assert_eq!(texts[1], ("PT1".into(), [192, 192, 192]));
         // `textColor = {-1,-1,-1}` means "use lineColor", which is black here.
-        assert_eq!(texts[1], ("T=%T".into(), [0, 0, 0]));
+        assert_eq!(texts[2], ("T=%T".into(), [0, 0, 0]));
         // The step response curve is the only shape with a non-zero origin.
         let shifted = icon
             .graphics
@@ -705,11 +812,10 @@ mod tests {
     }
 
     #[test]
-    fn inertia_icon_paints_hatched_rectangles_as_solid() {
+    fn inertia_icon_retains_cylinder_fill_patterns() {
         let icon = parse(include_str!("../tests/fixtures/icon_Inertia.json"));
         assert_eq!(icon.len(), 15);
-        // `FillPattern.HorizontalCylinder` is simplified to a solid fill; the last
-        // rectangle only has a `FillPattern.None` outline on top of the body.
+        // The final rectangle only has a `FillPattern.None` outline on top of the body.
         let filled: Vec<_> = icon
             .graphics
             .iter()
@@ -727,6 +833,9 @@ mod tests {
                 (None, 10.0),
             ]
         );
+        assert_eq!(icon.graphics.iter().filter(|g| matches!(&g.shape,
+            Shape::Rectangle { style, .. } if style.fill.is_some() && style.fill_pattern == FillPattern::HorizontalCylinder
+        )).count(), 3);
         // Two texts: `%name` and `J=%J`.
         let texts: Vec<_> = icon
             .shapes()
@@ -736,6 +845,25 @@ mod tests {
             })
             .collect();
         assert_eq!(texts, ["%name", "J=%J"]);
+    }
+
+    #[test]
+    fn cylinder_fill_uses_line_color_at_edges_and_fill_color_at_center() {
+        let style = Style {
+            line: [64, 64, 64],
+            fill: Some([255, 255, 255]),
+            fill_pattern: FillPattern::HorizontalCylinder,
+            ..Style::default()
+        };
+        let mesh = rectangle_fill_mesh(Extent::DEFAULT, &style, |p| {
+            Pos2::new(p[0] as f32, p[1] as f32)
+        })
+        .unwrap();
+        assert_eq!(mesh.vertices.len(), 6);
+        assert_eq!(mesh.vertices[0].color, Color32::from_rgb(64, 64, 64));
+        assert_eq!(mesh.vertices[2].color, Color32::WHITE);
+        assert_eq!(mesh.vertices[4].color, Color32::from_rgb(64, 64, 64));
+        assert_eq!(mesh.indices.len(), 12);
     }
 
     #[test]

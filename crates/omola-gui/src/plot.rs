@@ -11,6 +11,75 @@ pub struct PlotDiagram {
     pub signals: Vec<PlotSignal>,
     /// y range picked by a drag zoom; `None` = fit the curves of this diagram.
     pub y_view: Option<(f64, f64)>,
+    pub style: PlotStyle,
+}
+
+impl PlotDiagram {
+    /// Reset manual axis ranges so the plot fits its data again.
+    pub fn rescale(&mut self) {
+        self.y_view = None;
+        self.style.x_view = None;
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LegendPos {
+    #[default]
+    Top,
+    Bottom,
+    Hidden,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlotStyle {
+    pub grid: bool,
+    pub legend: LegendPos,
+    pub line_width: f32,
+    pub x_view: Option<(f64, f64)>,
+}
+
+impl Default for PlotStyle {
+    fn default() -> Self {
+        Self {
+            grid: true,
+            legend: LegendPos::Top,
+            line_width: 1.0,
+            x_view: None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod style_tests {
+    use super::*;
+
+    #[test]
+    fn plot_style_has_expected_defaults() {
+        assert_eq!(
+            PlotStyle::default(),
+            PlotStyle {
+                grid: true,
+                legend: LegendPos::Top,
+                line_width: 1.0,
+                x_view: None,
+            }
+        );
+    }
+
+    #[test]
+    fn rescale_clears_both_manual_axis_ranges() {
+        let mut diagram = PlotDiagram {
+            y_view: Some((-1.0, 2.0)),
+            style: PlotStyle {
+                x_view: Some((0.4, 0.8)),
+                ..PlotStyle::default()
+            },
+            ..PlotDiagram::default()
+        };
+        diagram.rescale();
+        assert_eq!(diagram.y_view, None);
+        assert_eq!(diagram.style.x_view, None);
+    }
 }
 
 /// CSV of the plotted curves, shaped like `omola results export` writes it: a `time`

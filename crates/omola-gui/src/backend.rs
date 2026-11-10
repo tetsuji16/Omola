@@ -215,6 +215,7 @@ pub enum Job {
     LoadDiagram {
         class: String,
         context: ClassContext,
+        cached_icons: std::collections::BTreeMap<String, crate::graphics::Icon>,
     },
     Check {
         class: String,
@@ -560,7 +561,11 @@ fn run_job(
             }
             send(Event::Icon(class, result));
         }
-        Job::LoadDiagram { class, context } => {
+        Job::LoadDiagram {
+            class,
+            context,
+            cached_icons,
+        } => {
             // First load the instance JSON to get component placements and connections
             let instance_result = with_user_file(run_dir, &class, &context, |file| {
                 let script = library::instance_script(&class, &context.libraries, file)
@@ -612,33 +617,59 @@ fn run_job(
             };
 
             // Collect all component types that need icons
-            let mut component_types = std::collections::BTreeSet::new();
-            if let Some(elements) = instance_value.get("elements").and_then(|e| e.as_array()) {
-                for element in elements {
-                    if element.get("$kind").and_then(|k| k.as_str()) == Some("component") {
-                        if let Some(type_name) = element.get("typeName").and_then(|n| n.as_str()) {
-                            component_types.insert(type_name.to_owned());
+            let component_types = crate::diagram::placed_component_types(&instance_value);
+
+            // Load icons for all component types
+            let mut icons = cached_icons;
+            let types: Vec<String> = component_types
+                .into_iter()
+                .filter(|name| !icons.contains_key(name))
+                .collect();
+            if types.is_empty() {
+                let diagram = crate::diagram::parse_diagram(&instance_value, &icons);
+                send(Event::Diagram(class, diagram));
+                return;
+            }
+            let loaded = with_user_file(run_dir, &class, &context, |file| {
+                let script = library::icons_script(&types, &context.libraries, file)
+                    .map_err(|e| e.to_string())?;
+                omc.run_query_script(&script).map_err(|e| e.to_string())
+            });
+            match loaded {
+                Ok(out) => {
+                    let sections = library::parse_sections(&out.output);
+                    for type_name in types {
+                        let key = format!("icon:{type_name}");
+                        let parsed = sections
+                            .get(&key)
+                            .and_then(|body| crate::instance::extract_json(body))
+                            .ok_or_else(|| "OMC returned no icon JSON section".to_owned())
+                            .and_then(|json| {
+                                serde_json::from_str::<serde_json::Value>(json)
+                                    .map_err(|e| e.to_string())
+                            })
+                            .and_then(|value| {
+                                crate::graphics::parse_icon(&value).map_err(|e| e.to_string())
+                            });
+                        match parsed {
+                            Ok(icon) => {
+                                icons.insert(type_name, icon);
+                            }
+                            Err(reason) => send(Event::Log(
+                                LogTab::Simulation,
+                                LogLevel::Warning,
+                                format!("icon of {type_name}: {reason}"),
+                            )),
                         }
                     }
                 }
-            }
-
-            // Load icons for all component types
-            let mut icons = std::collections::BTreeMap::new();
-            for type_name in component_types {
-                let icon_script = library::icon_script(&type_name, &context.libraries, None)
-                    .map_err(|e| e.to_string());
-                if let Ok(script) = icon_script {
-                    if let Ok(out) = omc.run_query_script(&script) {
-                        let sections = library::parse_sections(&out.output);
-                        let body = sections.get("icon").map(|s| s.trim()).unwrap_or("");
-                        if let Some(json_str) = crate::instance::extract_json(body) {
-                            if let Ok(value) = serde_json::from_str::<serde_json::Value>(json_str) {
-                                if let Ok(icon) = crate::graphics::parse_icon(&value) {
-                                    icons.insert(type_name, icon);
-                                }
-                            }
-                        }
+                Err(reason) => {
+                    for type_name in types {
+                        send(Event::Log(
+                            LogTab::Simulation,
+                            LogLevel::Warning,
+                            format!("icon of {type_name}: {reason}"),
+                        ));
                     }
                 }
             }
@@ -984,15 +1015,18 @@ pub fn default_work_root() -> PathBuf {
         .join("omola-gui")
         .join(format!("session-{}", std::process::id()))
 }
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::library::LibrarySpec;
-    use std::{os::unix::fs::PermissionsExt, time::Duration};
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::Duration;
 
     /// End-to-end through the real `omola-core` adapter with a fake `omc` executable that
     /// copies a pre-built OpenModelica-style MAT file. Real OMC is covered by CI integration.
     #[test]
+    #[cfg(unix)]
     fn simulate_job_reads_result_through_fake_omc() {
         let root = std::env::temp_dir().join(format!("omola-gui-test-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
@@ -1206,7 +1240,7 @@ mod tests {
         assert_eq!(resistor.coordinate_extent.x1, -100.0);
 
         let first_order = load("Modelica.Blocks.Continuous.FirstOrder");
-        assert_eq!(first_order.len(), 7);
+        assert_eq!(first_order.len(), 9);
 
         let inertia = load("Modelica.Mechanics.Rotational.Components.Inertia");
         assert_eq!(inertia.len(), 15);
@@ -1226,6 +1260,266 @@ mod tests {
         });
         assert!(!inherited.is_empty());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    #[ignore = "needs OpenModelica with MSL 4.1.0; run with --ignored and OMOLA_OMC set"]
+    fn diagram_reuses_cached_icons_with_real_omc() {
+        if std::env::var_os("OMOLA_OMC").is_none() {
+            eprintln!("OMOLA_OMC is not set; skipping");
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("omola-gui-cache-{}", std::process::id()));
+        let worker = Worker::spawn(root.join("work"), || {});
+        let class = "Modelica.Blocks.Examples.PID_Controller";
+        let context = ClassContext {
+            libraries: vec![LibrarySpec::new("Modelica", Some("4.1.0"))],
+            user_source: None,
+        };
+        let load = |cached_icons| {
+            worker.submit(Job::LoadDiagram {
+                class: class.into(),
+                context: context.clone(),
+                cached_icons,
+            });
+            wait_for(&worker, 180, |event| match event {
+                Event::Diagram(_, result) => Some(result.expect("diagram")),
+                _ => None,
+            })
+        };
+        let first = load(Default::default());
+        let component = first
+            .components
+            .iter()
+            .find(|c| c.icon.is_some())
+            .expect("component icon");
+        let mut cached = component.icon.clone().unwrap();
+        cached.skipped.push("cache verification marker".into());
+        let type_name = component.type_name.clone();
+        let second = load([(type_name.clone(), cached.clone())].into_iter().collect());
+        assert_eq!(
+            second
+                .components
+                .iter()
+                .find(|c| c.type_name == type_name)
+                .unwrap()
+                .icon
+                .as_ref(),
+            Some(&cached)
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    #[ignore = "needs OpenModelica; run with --ignored and OMOLA_OMC set"]
+    fn diagram_loads_user_component_icon_with_real_omc() {
+        if std::env::var_os("OMOLA_OMC").is_none() {
+            eprintln!("OMOLA_OMC is not set; skipping");
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("omola-gui-user-icon-{}", std::process::id()));
+        let worker = Worker::spawn(root.join("work"), || {});
+        worker.submit(Job::LoadDiagram {
+            class: "A".into(),
+            context: ClassContext {
+                libraries: vec![],
+                user_source: Some(
+                    r#"model A
+  model Custom
+    annotation(Icon(graphics={Rectangle(extent={{-100,-100},{100,100}})}));
+  end Custom;
+  Custom part annotation(Placement(transformation(extent={{-10,-10},{10,10}})));
+end A;"#
+                        .into(),
+                ),
+            },
+            cached_icons: Default::default(),
+        });
+        let diagram = wait_for(&worker, 120, |event| match event {
+            Event::Diagram(_, result) => Some(result.expect("diagram")),
+            _ => None,
+        });
+        let part = diagram
+            .components
+            .iter()
+            .find(|c| c.name == "part")
+            .expect("placed part");
+        assert!(
+            part.icon.as_ref().is_some_and(|icon| !icon.is_empty()),
+            "user component icon: {:?}",
+            part.icon
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Exercise the component editing flow used by G29-G32 against a real OMC installation.
+    /// This does not replace the GUI acceptance screenshots, but catches scripting API and
+    /// Modelica source regressions in placement, connection, rename, delete, check, and simulate.
+    #[test]
+    #[ignore = "needs OpenModelica with MSL 4.1.0; run with --ignored and OMOLA_OMC set"]
+    fn diagram_edit_flow_with_real_omc() {
+        if std::env::var_os("OMOLA_OMC").is_none() {
+            eprintln!("OMOLA_OMC is not set; skipping real-OMC diagram edit flow");
+            return;
+        }
+        let root =
+            std::env::temp_dir().join(format!("omola-gui-diagram-flow-{}", std::process::id()));
+        let worker = Worker::spawn(root.join("work"), || {});
+        let libraries = vec![LibrarySpec::new("Modelica", Some("4.1.0"))];
+        let context_for = |source: &str| ClassContext {
+            libraries: libraries.clone(),
+            user_source: Some(source.to_owned()),
+        };
+        let mut source = "model A end A;".to_owned();
+
+        worker.submit(Job::EditModel {
+            doc_text: source.clone(),
+            file_name: "A.mo".into(),
+            class: "A".into(),
+            ops: vec![
+                EditOp::AddComponent {
+                    name: "sine".into(),
+                    type_name: "Modelica.Blocks.Sources.Sine".into(),
+                    extent: [[-10.0, -10.0], [10.0, 10.0]],
+                    origin: [-40.0, 0.0],
+                },
+                EditOp::AddComponent {
+                    name: "firstOrder".into(),
+                    type_name: "Modelica.Blocks.Continuous.FirstOrder".into(),
+                    extent: [[-10.0, -10.0], [10.0, 10.0]],
+                    origin: [40.0, 0.0],
+                },
+            ],
+            libraries: libraries.clone(),
+        });
+        source = wait_for(&worker, 60, |event| match event {
+            Event::ModelEdited { result, .. } => Some(result.expect("add Sine and FirstOrder")),
+            _ => None,
+        });
+        assert!(source.contains("Sine sine"), "{source}");
+        assert!(source.contains("FirstOrder firstOrder"), "{source}");
+        assert!(
+            source.contains("Placement"),
+            "component Placement missing: {source}"
+        );
+
+        worker.submit(Job::EditModel {
+            doc_text: source.clone(),
+            file_name: "A.mo".into(),
+            class: "A".into(),
+            ops: vec![EditOp::SetPlacement {
+                component: "firstOrder".into(),
+                type_name: "Modelica.Blocks.Continuous.FirstOrder".into(),
+                extent: [[-10.0, -10.0], [10.0, 10.0]],
+                origin: [60.0, 20.0],
+                rotation: 90.0,
+            }],
+            libraries: libraries.clone(),
+        });
+        source = wait_for(&worker, 60, |event| match event {
+            Event::ModelEdited { result, .. } => Some(result.expect("move FirstOrder")),
+            _ => None,
+        });
+        assert!(source.contains("origin = {60, 20}"), "{source}");
+        assert!(source.contains("rotation = 90"), "{source}");
+
+        worker.submit(Job::EditModel {
+            doc_text: source.clone(),
+            file_name: "A.mo".into(),
+            class: "A".into(),
+            ops: vec![EditOp::AddConnection {
+                from: "sine.y".into(),
+                to: "firstOrder.u".into(),
+                points: vec![[-30.0, 0.0], [0.0, 0.0], [30.0, 0.0]],
+            }],
+            libraries: libraries.clone(),
+        });
+        source = wait_for(&worker, 60, |event| match event {
+            Event::ModelEdited { result, .. } => Some(result.expect("connect Sine to FirstOrder")),
+            _ => None,
+        });
+        assert!(source.contains("connect(sine.y, firstOrder.u)"), "{source}");
+
+        worker.submit(Job::Check {
+            class: "A".into(),
+            context: context_for(&source),
+        });
+        let check = wait_for(&worker, 60, |event| match event {
+            Event::Log(LogTab::Syntax, LogLevel::Info, message)
+                if message.contains("completed successfully") =>
+            {
+                Some(message)
+            }
+            _ => None,
+        });
+        assert!(check.contains("completed successfully"), "{check}");
+
+        worker.submit(Job::Simulate {
+            class: "A".into(),
+            context: context_for(&source),
+            setup: SimulationSetup {
+                stop_time: 1.0,
+                ..SimulationSetup::default()
+            },
+        });
+        let outcome = wait_for(&worker, 180, |event| match event {
+            Event::SimulationFinished(outcome) => Some(outcome),
+            _ => None,
+        });
+        assert!(outcome.result.series("firstOrder.y").is_some());
+
+        worker.submit(Job::EditModel {
+            doc_text: source.clone(),
+            file_name: "A.mo".into(),
+            class: "A".into(),
+            ops: vec![EditOp::RenameComponent {
+                old: "firstOrder".into(),
+                new: "filter".into(),
+            }],
+            libraries: libraries.clone(),
+        });
+        source = wait_for(&worker, 60, |event| match event {
+            Event::ModelEdited { result, .. } => Some(result.expect("rename FirstOrder")),
+            _ => None,
+        });
+        assert!(source.contains("connect(sine.y, filter.u)"), "{source}");
+
+        worker.submit(Job::EditModel {
+            doc_text: source.clone(),
+            file_name: "A.mo".into(),
+            class: "A".into(),
+            ops: vec![
+                EditOp::DeleteConnection {
+                    from: "sine.y".into(),
+                    to: "filter.u".into(),
+                },
+                EditOp::DeleteComponent {
+                    name: "filter".into(),
+                },
+            ],
+            libraries: libraries.clone(),
+        });
+        source = wait_for(&worker, 60, |event| match event {
+            Event::ModelEdited { result, .. } => Some(result.expect("delete connected FirstOrder")),
+            _ => None,
+        });
+        assert!(!source.contains("FirstOrder filter"), "{source}");
+        assert!(!source.contains("connect(sine.y, filter.u)"), "{source}");
+
+        worker.submit(Job::Check {
+            class: "A".into(),
+            context: context_for(&source),
+        });
+        let check = wait_for(&worker, 60, |event| match event {
+            Event::Log(LogTab::Syntax, LogLevel::Info, message)
+                if message.contains("completed successfully") =>
+            {
+                Some(message)
+            }
+            _ => None,
+        });
+        assert!(check.contains("completed successfully"), "{check}");
+        let _ = std::fs::remove_dir_all(root);
     }
 
     /// Wait for the first event accepted by `pick`, failing on worker errors.

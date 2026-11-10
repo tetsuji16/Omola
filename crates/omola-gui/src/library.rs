@@ -359,7 +359,7 @@ pub fn instance_script(
         ));
     }
     script.push_str(&format!(
-        "print(\"OMOLA_BEGIN instance\\n\" + getModelInstance({class}, prettyPrint=true) + \"\\nOMOLA_END instance\\n\");\n"
+        "print(\"OMOLA_BEGIN instance\\n\" + OpenModelica.Scripting.getModelInstance({class}, prettyPrint=true) + \"\\nOMOLA_END instance\\n\");\n"
     ));
     Ok(script)
 }
@@ -386,8 +386,34 @@ pub fn icon_script(
         ));
     }
     script.push_str(&format!(
-        "print(\"OMOLA_BEGIN icon\\n\" + getModelInstanceAnnotation({class}, {{\"Icon\"}}) + \"\\nOMOLA_END icon\\n\");\n"
+        "print(\"OMOLA_BEGIN icon\\n\" + OpenModelica.Scripting.getModelInstanceAnnotation({class}, {{\"Icon\"}}) + \"\\nOMOLA_END icon\\n\");\n"
     ));
+    Ok(script)
+}
+
+/// Fetch several component icons from one OMC process after loading libraries once.
+pub fn icons_script(
+    types: &[String],
+    libraries: &[LibrarySpec],
+    user_file: Option<&Path>,
+) -> Result<String, BackendError> {
+    let mut script = String::new();
+    for (i, spec) in libraries.iter().enumerate() {
+        script.push_str(&load_statement(spec, &format!("omolaLib{i}"))?);
+    }
+    if let Some(file) = user_file {
+        script.push_str(&format!(
+            "omolaUser := loadFile(\"{}\");\n",
+            escape_modelica_string(&file.to_string_lossy())
+        ));
+    }
+    for class in types {
+        validate_class_name(class)?;
+        let key = format!("icon:{class}");
+        script.push_str(&format!(
+            "print(\"OMOLA_BEGIN {key}\\n\" + OpenModelica.Scripting.getModelInstanceAnnotation({class}, {{\"Icon\"}}) + \"\\nOMOLA_END {key}\\n\");\n"
+        ));
+    }
     Ok(script)
 }
 
@@ -622,6 +648,13 @@ mod tests {
     }
 
     #[test]
+    fn instance_query_uses_the_openmodelica_scripting_namespace() {
+        let script = instance_script("Modelica.Blocks.Examples.BouncingBall", &[], None).unwrap();
+        assert!(script.contains("OpenModelica.Scripting.getModelInstance("));
+        assert!(script.contains("prettyPrint=true"));
+    }
+
+    #[test]
     fn sections_keep_inner_text_verbatim() {
         let s = parse_sections("x\nOMOLA_BEGIN info\n<p>Error: a\n\"b\"</p>\nOMOLA_END info\nOMOLA_BEGIN comment\n\nOMOLA_END comment\n");
         assert_eq!(s["info"], "<p>Error: a\n\"b\"</p>");
@@ -633,13 +666,31 @@ mod tests {
         let script = icon_script("Modelica.Blocks.Continuous.FirstOrder", &[msl()], None).unwrap();
         assert!(script.contains("loadModel(Modelica, {\"4.1.0\"})"));
         assert!(script.contains(
-            "getModelInstanceAnnotation(Modelica.Blocks.Continuous.FirstOrder, {\"Icon\"})"
+            "OpenModelica.Scripting.getModelInstanceAnnotation(Modelica.Blocks.Continuous.FirstOrder, {\"Icon\"})"
         ));
         assert!(script.contains("OMOLA_BEGIN icon"));
         // The user file is loaded after the libraries, like the other scripts.
         let with_file = icon_script("M", &[], Some(Path::new("/tmp/M.mo"))).unwrap();
         assert!(with_file.contains("loadFile(\"/tmp/M.mo\")"));
         assert!(icon_script("A\"); system(\"x", &[], None).is_err());
+    }
+
+    #[test]
+    fn icons_script_loads_libraries_once_and_marks_each_type() {
+        let script = icons_script(
+            &[
+                "Modelica.Blocks.Sources.Constant".into(),
+                "Modelica.Blocks.Math.Gain".into(),
+            ],
+            &[msl()],
+            Some(Path::new("/tmp/My Model.mo")),
+        )
+        .unwrap();
+        assert_eq!(script.matches("loadModel(").count(), 1);
+        assert!(script.contains("loadFile(\"/tmp/My Model.mo\")"));
+        assert!(script.contains("OMOLA_BEGIN icon:Modelica.Blocks.Sources.Constant"));
+        assert!(script.contains("OMOLA_END icon:Modelica.Blocks.Math.Gain"));
+        assert!(icons_script(&["A); system(\"x\"".into()], &[], None).is_err());
     }
 
     #[test]

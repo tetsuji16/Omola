@@ -7,7 +7,7 @@ use crate::library::{resolve_link, LinkTarget};
 use crate::theme;
 use egui::{Color32, FontFamily, RichText, Sense, Stroke, Vec2};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const BODY: f32 = 12.5;
 
@@ -371,8 +371,8 @@ pub fn split_find<'t>(text: &'t str, query: &str) -> Vec<(&'t str, bool)> {
 fn image(ui: &mut egui::Ui, img: &ImageRef, ctx: &mut Ctx<'_>) {
     match resolve_link(&img.src, ctx.class, ctx.roots) {
         LinkTarget::File(path) if path.is_file() => {
-            let uri = format!("file://{}", path.display());
-            let mut image = egui::Image::new(uri).fit_to_original_size(1.0);
+            let uri = file_uri(&path);
+            let mut image = egui::Image::new(&uri).fit_to_original_size(1.0);
             let max_w = ui.available_width().max(40.0);
             image = match (img.width, img.height) {
                 (Some(w), Some(h)) => image.fit_to_exact_size(Vec2::new(w.min(max_w), h)),
@@ -380,7 +380,27 @@ fn image(ui: &mut egui::Ui, img: &ImageRef, ctx: &mut Ctx<'_>) {
                 (None, Some(h)) => image.max_height(h).max_width(max_w),
                 (None, None) => image.max_width(max_w),
             };
-            ui.add(image);
+            match ui
+                .ctx()
+                .try_load_image(&uri, egui::load::SizeHint::Width(1024))
+            {
+                Ok(_) => {
+                    ui.add(image);
+                }
+                Err(error) => {
+                    let label = if img.alt.is_empty() {
+                        img.src.as_str()
+                    } else {
+                        img.alt.as_str()
+                    };
+                    ui.label(
+                        RichText::new(format!("[image: {label}]"))
+                            .color(theme::TEXT_WEAK)
+                            .size(11.0),
+                    )
+                    .on_hover_text(error.to_string());
+                }
+            }
         }
         _ => {
             let label = if img.alt.is_empty() {
@@ -395,6 +415,22 @@ fn image(ui: &mut egui::Ui, img: &ImageRef, ctx: &mut Ctx<'_>) {
             );
         }
     }
+}
+
+/// egui_extras 0.37 strips `file://` and on Windows strips one leading slash, so
+/// absolute drive paths must use the standard `file:///C:/...` form.
+fn file_uri(path: &Path) -> String {
+    let path = path.to_string_lossy().replace('\\', "/");
+    let absolute = if path.starts_with('/') {
+        path
+    } else {
+        format!("/{path}")
+    };
+    let escaped = absolute
+        .replace('%', "%25")
+        .replace(' ', "%20")
+        .replace('#', "%23");
+    format!("file://{escaped}")
 }
 
 fn package_content(ui: &mut egui::Ui, children: &[(String, String, String)], ctx: &mut Ctx<'_>) {
@@ -446,7 +482,20 @@ fn package_content(ui: &mut egui::Ui, children: &[(String, String, String)], ctx
 
 #[cfg(test)]
 mod tests {
-    use super::split_find;
+    use super::{file_uri, split_find};
+    use std::path::Path;
+
+    #[test]
+    fn file_uri_formats_unix_and_windows_paths() {
+        assert_eq!(
+            file_uri(Path::new("/tmp/a b/x.png")),
+            "file:///tmp/a%20b/x.png"
+        );
+        assert_eq!(
+            file_uri(Path::new(r"C:\Users\a b\x.png")),
+            "file:///C:/Users/a%20b/x.png"
+        );
+    }
 
     #[test]
     fn find_splits_case_insensitively() {

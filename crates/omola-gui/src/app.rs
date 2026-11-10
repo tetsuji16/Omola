@@ -333,7 +333,7 @@ pub struct OmolaApp {
     pub docs: BTreeMap<String, Loadable<DocPage>>,
     pub texts: BTreeMap<String, Loadable<String>>,
     /// Tokenized layout jobs for read-only library source text, keyed by class.
-    pub library_text_layouts: BTreeMap<String, egui::text::LayoutJob>,
+    pub library_text_layouts: BTreeMap<String, crate::text_editor::EditorState>,
     /// Component tree of the active class (`getModelInstance`, G06).
     pub components: Option<(String, Vec<crate::instance::ComponentNode>)>,
     /// Component nodes the user expanded, as dotted paths from the active class.
@@ -389,8 +389,8 @@ pub struct OmolaApp {
     pub cursor_enabled: bool,
     /// Values edited in the variable browser, applied as overrides on the next simulation.
     pub pending_overrides: BTreeMap<String, String>,
-    /// Shared x range of every diagram (x0, x1); `None` = fit to the data.
-    pub plot_x: Option<(f64, f64)>,
+    /// Whether the contextual Plot Options ribbon is selected (Simulation remains active).
+    pub plot_options: bool,
     pub logs: Vec<LogEntry>,
     /// Source positions parsed from the log entries of the current Check / Simulate (G25).
     pub error_locations: Vec<SourceLocation>,
@@ -529,7 +529,7 @@ impl OmolaApp {
             active_diagram: 0,
             cursor_enabled: false,
             pending_overrides: BTreeMap::new(),
-            plot_x: None,
+            plot_options: false,
             logs: Vec::new(),
             error_locations: Vec::new(),
             error_locations_log_len: None,
@@ -965,6 +965,14 @@ impl OmolaApp {
         self.worker.submit(Job::LoadDiagram {
             class: class.to_owned(),
             context: self.context_for(class),
+            cached_icons: self
+                .icons
+                .iter()
+                .filter_map(|(name, icon)| match icon {
+                    Loadable::Ready(icon) => Some((name.clone(), icon.clone())),
+                    _ => None,
+                })
+                .collect(),
         });
     }
 
@@ -1101,9 +1109,14 @@ impl OmolaApp {
             .map(|c| c.qualified_name.clone())
             .collect();
         self.refresh_outline();
-        // Drop cached documentation of user classes; it is re-queried when shown.
+        // User-defined icons can change with the source, including nested component types.
+        // Invalidate both old and current names so Diagram and Icon reload fresh graphics.
         for name in before {
             self.docs.remove(&name);
+            self.icons.remove(&name);
+        }
+        for class in &self.user_classes {
+            self.icons.remove(&class.qualified_name);
         }
         if let Some(active) = self.active.clone() {
             if !self.is_user_class(&active) && self.restriction_of(&active).is_none() {
@@ -1582,6 +1595,24 @@ impl OmolaApp {
                     );
                 }
                 Event::Diagram(class, result) => {
+                    if let Ok(diagram) = &result {
+                        for component in &diagram.components {
+                            if let Some(icon) = &component.icon {
+                                self.icons.insert(
+                                    component.type_name.clone(),
+                                    Loadable::Ready(icon.clone()),
+                                );
+                            }
+                            for pin in &component.connectors {
+                                if let Some(icon) = &pin.icon {
+                                    self.icons.insert(
+                                        pin.type_name.clone(),
+                                        Loadable::Ready(icon.clone()),
+                                    );
+                                }
+                            }
+                        }
+                    }
                     self.model_diagrams.insert(
                         class,
                         match result {
@@ -2244,6 +2275,19 @@ mod tests {
         let before = app.documents[doc].text.clone();
         app.record_undo_snapshot(doc, before);
         app.documents[doc].text = text.into();
+    }
+
+    #[test]
+    fn editing_user_source_invalidates_user_icons_but_keeps_library_icons() {
+        let mut app = history_app();
+        app.documents[0].text = "model A\n model Custom\n end Custom;\nend A;".into();
+        app.refresh_outline();
+        app.icons.insert("A.Custom".into(), Loadable::Loading);
+        app.icons
+            .insert("Modelica.Blocks.Math.Gain".into(), Loadable::Loading);
+        app.user_text_changed(0);
+        assert!(!app.icons.contains_key("A.Custom"));
+        assert!(app.icons.contains_key("Modelica.Blocks.Math.Gain"));
     }
 
     #[test]
