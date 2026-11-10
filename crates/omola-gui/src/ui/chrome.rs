@@ -324,6 +324,7 @@ impl OmolaApp {
                     .min(self.diagrams.len().saturating_sub(1));
                 self.diagrams[i].y_view = None;
                 self.diagrams[i].style.x_view = None;
+                clear_plot_range_inputs(ui.ctx(), i);
             }
             if place(ui, o, (6.0, 40.0, 142.0, 24.0), |ui| {
                 small_button(ui, ICON_ZOOM_OUT_MAP, DARK, "Rescale All", true, false)
@@ -333,6 +334,9 @@ impl OmolaApp {
                 for diagram in &mut self.diagrams {
                     diagram.y_view = None;
                     diagram.style.x_view = None;
+                }
+                for i in 0..self.diagrams.len() {
+                    clear_plot_range_inputs(ui.ctx(), i);
                 }
             }
         });
@@ -423,6 +427,9 @@ impl OmolaApp {
             });
         });
         fixed_group(ui, "Range", 256.0, |ui, o| {
+            let index = self
+                .active_diagram
+                .min(self.diagrams.len().saturating_sub(1));
             for (i, label) in ["Time from", "Time to", "Y min", "Y max"]
                 .into_iter()
                 .enumerate()
@@ -431,12 +438,12 @@ impl OmolaApp {
                 place(ui, o, (6.0, 5.0 + row * 23.0, 68.0, 21.0), |ui| {
                     ui.label(label)
                 });
-                let id = egui::Id::NULL.with(("plot_range", i));
+                let id = egui::Id::NULL.with(("plot_range", index, i));
                 let mut value = ui
                     .ctx()
                     .data(|d| d.get_temp::<String>(id))
                     .unwrap_or_default();
-                let invalid_id = egui::Id::NULL.with(("plot_range_invalid", i / 2));
+                let invalid_id = egui::Id::NULL.with(("plot_range_invalid", index, i / 2));
                 let invalid = ui
                     .ctx()
                     .data(|d| d.get_temp::<bool>(invalid_id))
@@ -463,15 +470,21 @@ impl OmolaApp {
                     let a = ui
                         .ctx()
                         .data(|d| {
-                            d.get_temp::<String>(egui::Id::NULL.with(("plot_range", (i / 2) * 2)))
+                            d.get_temp::<String>(egui::Id::NULL.with((
+                                "plot_range",
+                                index,
+                                (i / 2) * 2,
+                            )))
                         })
                         .unwrap_or_default();
                     let b = ui
                         .ctx()
                         .data(|d| {
-                            d.get_temp::<String>(
-                                egui::Id::NULL.with(("plot_range", (i / 2) * 2 + 1)),
-                            )
+                            d.get_temp::<String>(egui::Id::NULL.with((
+                                "plot_range",
+                                index,
+                                (i / 2) * 2 + 1,
+                            )))
                         })
                         .unwrap_or_default();
                     let range = parse_optional_range(&a, &b);
@@ -1133,6 +1146,17 @@ fn truncate_title(title: &str, max_width: f32, font: &FontId, ui: &egui::Ui) -> 
             .map(|(i, _)| i)
             .unwrap_or(0);
     }
+}
+
+fn clear_plot_range_inputs(ctx: &egui::Context, index: usize) {
+    ctx.data_mut(|data| {
+        for i in 0..4 {
+            data.remove::<String>(egui::Id::NULL.with(("plot_range", index, i)));
+        }
+        for i in 0..2 {
+            data.remove::<bool>(egui::Id::NULL.with(("plot_range_invalid", index, i)));
+        }
+    });
 }
 
 fn parse_optional_range(min: &str, max: &str) -> Result<Option<(f64, f64)>, &'static str> {

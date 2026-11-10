@@ -41,7 +41,10 @@ pub struct PlacedComponent {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConnectorPin {
     pub name: String,
+    pub type_name: String,
     pub extent: Extent,
+    pub placement: Placement,
+    pub icon: Option<Icon>,
 }
 
 /// A connection between two components' connectors.
@@ -391,9 +394,21 @@ fn collect_connector_pins(class: &Value, pins: &mut Vec<ConnectorPin>) {
                     element.get("annotation"),
                 ) {
                     if annotation.get("Placement").is_some() {
+                        let placement = parse_placement(annotation);
+                        let icon = element
+                            .get("type")
+                            .and_then(|ty| crate::graphics::parse_icon(ty).ok());
                         pins.push(ConnectorPin {
                             name: name.to_owned(),
-                            extent: parse_placement(annotation).extent,
+                            type_name: element
+                                .get("type")
+                                .and_then(|ty| ty.get("name"))
+                                .and_then(Value::as_str)
+                                .unwrap_or_default()
+                                .to_owned(),
+                            extent: placement.extent,
+                            placement,
+                            icon,
                         });
                     }
                 }
@@ -1000,6 +1015,10 @@ mod tests {
         assert!(connectors.iter().any(|p| p.name == "u"));
         assert!(connectors.iter().any(|p| p.name == "y"));
         let u = connectors.iter().find(|p| p.name == "u").unwrap();
+        assert!(u
+            .icon
+            .as_ref()
+            .is_some_and(|icon| !icon.graphics.is_empty()));
         assert_eq!(
             (u.extent.x1, u.extent.y1, u.extent.x2, u.extent.y2),
             (-140.0, -20.0, -100.0, 20.0)
@@ -1010,12 +1029,15 @@ mod tests {
     fn moving_component_edits_placement_and_attached_connection_together() {
         let pin = || ConnectorPin {
             name: "p".into(),
+            type_name: "C.Pin".into(),
             extent: Extent {
                 x1: 0.0,
                 y1: 0.0,
                 x2: 0.0,
                 y2: 0.0,
             },
+            placement: Placement::default(),
+            icon: None,
         };
         let component = |name: &str, origin| PlacedComponent {
             name: name.into(),
@@ -1053,12 +1075,15 @@ mod tests {
     fn duplicate_or_same_component_connections_are_rejected() {
         let pin = |name: &str| ConnectorPin {
             name: name.into(),
+            type_name: "C.Pin".into(),
             extent: Extent {
                 x1: 0.0,
                 y1: 0.0,
                 x2: 0.0,
                 y2: 0.0,
             },
+            placement: Placement::default(),
+            icon: None,
         };
         let component = |name: &str| PlacedComponent {
             name: name.into(),

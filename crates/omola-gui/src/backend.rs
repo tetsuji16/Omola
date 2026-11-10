@@ -1000,15 +1000,18 @@ pub fn default_work_root() -> PathBuf {
         .join("omola-gui")
         .join(format!("session-{}", std::process::id()))
 }
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::library::LibrarySpec;
-    use std::{os::unix::fs::PermissionsExt, time::Duration};
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::Duration;
 
     /// End-to-end through the real `omola-core` adapter with a fake `omc` executable that
     /// copies a pre-built OpenModelica-style MAT file. Real OMC is covered by CI integration.
     #[test]
+    #[cfg(unix)]
     fn simulate_job_reads_result_through_fake_omc() {
         let root = std::env::temp_dir().join(format!("omola-gui-test-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
@@ -1242,6 +1245,176 @@ mod tests {
         });
         assert!(!inherited.is_empty());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Exercise the component editing flow used by G29-G32 against a real OMC installation.
+    /// This does not replace the GUI acceptance screenshots, but catches scripting API and
+    /// Modelica source regressions in placement, connection, rename, delete, check, and simulate.
+    #[test]
+    #[ignore = "needs OpenModelica with MSL 4.1.0; run with --ignored and OMOLA_OMC set"]
+    fn diagram_edit_flow_with_real_omc() {
+        if std::env::var_os("OMOLA_OMC").is_none() {
+            eprintln!("OMOLA_OMC is not set; skipping real-OMC diagram edit flow");
+            return;
+        }
+        let root =
+            std::env::temp_dir().join(format!("omola-gui-diagram-flow-{}", std::process::id()));
+        let worker = Worker::spawn(root.join("work"), || {});
+        let libraries = vec![LibrarySpec::new("Modelica", Some("4.1.0"))];
+        let context_for = |source: &str| ClassContext {
+            libraries: libraries.clone(),
+            user_source: Some(source.to_owned()),
+        };
+        let mut source = "model A end A;".to_owned();
+
+        worker.submit(Job::EditModel {
+            doc_text: source.clone(),
+            file_name: "A.mo".into(),
+            class: "A".into(),
+            ops: vec![
+                EditOp::AddComponent {
+                    name: "sine".into(),
+                    type_name: "Modelica.Blocks.Sources.Sine".into(),
+                    extent: [[-10.0, -10.0], [10.0, 10.0]],
+                    origin: [-40.0, 0.0],
+                },
+                EditOp::AddComponent {
+                    name: "firstOrder".into(),
+                    type_name: "Modelica.Blocks.Continuous.FirstOrder".into(),
+                    extent: [[-10.0, -10.0], [10.0, 10.0]],
+                    origin: [40.0, 0.0],
+                },
+            ],
+            libraries: libraries.clone(),
+        });
+        source = wait_for(&worker, 60, |event| match event {
+            Event::ModelEdited { result, .. } => Some(result.expect("add Sine and FirstOrder")),
+            _ => None,
+        });
+        assert!(source.contains("Sine sine"), "{source}");
+        assert!(source.contains("FirstOrder firstOrder"), "{source}");
+        assert!(
+            source.contains("Placement"),
+            "component Placement missing: {source}"
+        );
+
+        worker.submit(Job::EditModel {
+            doc_text: source.clone(),
+            file_name: "A.mo".into(),
+            class: "A".into(),
+            ops: vec![EditOp::SetPlacement {
+                component: "firstOrder".into(),
+                type_name: "Modelica.Blocks.Continuous.FirstOrder".into(),
+                extent: [[-10.0, -10.0], [10.0, 10.0]],
+                origin: [60.0, 20.0],
+                rotation: 90.0,
+            }],
+            libraries: libraries.clone(),
+        });
+        source = wait_for(&worker, 60, |event| match event {
+            Event::ModelEdited { result, .. } => Some(result.expect("move FirstOrder")),
+            _ => None,
+        });
+        assert!(source.contains("origin = {60, 20}"), "{source}");
+        assert!(source.contains("rotation = 90"), "{source}");
+
+        worker.submit(Job::EditModel {
+            doc_text: source.clone(),
+            file_name: "A.mo".into(),
+            class: "A".into(),
+            ops: vec![EditOp::AddConnection {
+                from: "sine.y".into(),
+                to: "firstOrder.u".into(),
+                points: vec![[-30.0, 0.0], [0.0, 0.0], [30.0, 0.0]],
+            }],
+            libraries: libraries.clone(),
+        });
+        source = wait_for(&worker, 60, |event| match event {
+            Event::ModelEdited { result, .. } => Some(result.expect("connect Sine to FirstOrder")),
+            _ => None,
+        });
+        assert!(source.contains("connect(sine.y, firstOrder.u)"), "{source}");
+
+        worker.submit(Job::Check {
+            class: "A".into(),
+            context: context_for(&source),
+        });
+        let check = wait_for(&worker, 60, |event| match event {
+            Event::Log(LogTab::Syntax, LogLevel::Info, message)
+                if message.contains("completed successfully") =>
+            {
+                Some(message)
+            }
+            _ => None,
+        });
+        assert!(check.contains("completed successfully"), "{check}");
+
+        worker.submit(Job::Simulate {
+            class: "A".into(),
+            context: context_for(&source),
+            setup: SimulationSetup {
+                stop_time: 1.0,
+                ..SimulationSetup::default()
+            },
+        });
+        let outcome = wait_for(&worker, 180, |event| match event {
+            Event::SimulationFinished(outcome) => Some(outcome),
+            _ => None,
+        });
+        assert!(outcome.result.series("firstOrder.y").is_some());
+
+        worker.submit(Job::EditModel {
+            doc_text: source.clone(),
+            file_name: "A.mo".into(),
+            class: "A".into(),
+            ops: vec![EditOp::RenameComponent {
+                old: "firstOrder".into(),
+                new: "filter".into(),
+            }],
+            libraries: libraries.clone(),
+        });
+        source = wait_for(&worker, 60, |event| match event {
+            Event::ModelEdited { result, .. } => Some(result.expect("rename FirstOrder")),
+            _ => None,
+        });
+        assert!(source.contains("connect(sine.y, filter.u)"), "{source}");
+
+        worker.submit(Job::EditModel {
+            doc_text: source.clone(),
+            file_name: "A.mo".into(),
+            class: "A".into(),
+            ops: vec![
+                EditOp::DeleteConnection {
+                    from: "sine.y".into(),
+                    to: "filter.u".into(),
+                },
+                EditOp::DeleteComponent {
+                    name: "filter".into(),
+                },
+            ],
+            libraries: libraries.clone(),
+        });
+        source = wait_for(&worker, 60, |event| match event {
+            Event::ModelEdited { result, .. } => Some(result.expect("delete connected FirstOrder")),
+            _ => None,
+        });
+        assert!(!source.contains("FirstOrder filter"), "{source}");
+        assert!(!source.contains("connect(sine.y, filter.u)"), "{source}");
+
+        worker.submit(Job::Check {
+            class: "A".into(),
+            context: context_for(&source),
+        });
+        let check = wait_for(&worker, 60, |event| match event {
+            Event::Log(LogTab::Syntax, LogLevel::Info, message)
+                if message.contains("completed successfully") =>
+            {
+                Some(message)
+            }
+            _ => None,
+        });
+        assert!(check.contains("completed successfully"), "{check}");
+        let _ = std::fs::remove_dir_all(root);
     }
 
     /// Wait for the first event accepted by `pick`, failing on worker errors.

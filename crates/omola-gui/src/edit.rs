@@ -152,7 +152,11 @@ pub fn edit_script(class: &str, ops: &[EditOp]) -> Result<String, String> {
                 validate(old)?;
                 validate(new)?;
                 (
-                    format!("renameComponentInClass({class}, {old}, {new})"),
+                    // Unlike add/delete/update APIs, OpenModelica returns the affected class
+                    // paths (TypeName[:]) from renameComponentInClass. Reduce that result to
+                    // a Boolean so the common edit-result check below accepts the call and
+                    // still reports an empty result as a failed edit.
+                    format!("size(renameComponentInClass({class}, {old}, {new}), 1) > 0"),
                     format!("omolaEdit{i}"),
                 )
             }

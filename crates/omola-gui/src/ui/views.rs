@@ -205,6 +205,7 @@ impl OmolaApp {
                     .library_text_layouts
                     .entry(class.to_owned())
                     .or_default();
+                editor.show_line_numbers = true;
                 draw_readonly_text_editor(ui, editor, text, None, &[]);
             }
         }
@@ -264,9 +265,13 @@ impl OmolaApp {
                     crate::backend::LogTab::Syntax,
                     "Library classes are read-only".into(),
                 );
-            } else if let (Some(pos), Some(Loadable::Ready(diagram))) =
-                (response.hover_pos(), self.model_diagrams.get(class))
-            {
+            } else if let (Some(pos), Some(Loadable::Ready(diagram))) = (
+                response
+                    .hover_pos()
+                    .or_else(|| ui.ctx().pointer_interact_pos())
+                    .filter(|pos| rect.contains(*pos)),
+                self.model_diagrams.get(class),
+            ) {
                 let point = crate::diagram_view::to_diagram(
                     pos,
                     &diagram.coordinate_extent,
@@ -373,15 +378,11 @@ impl OmolaApp {
                 comp.placement.origin[1] += drag.offset[1];
             }
         }
-        let primary_drag_started = (response.drag_started() || response.dragged())
-            && ui.input(|i| {
-                i.pointer.button_down(egui::PointerButton::Primary)
-                    || i.pointer.button_pressed(egui::PointerButton::Primary)
-                    || i.pointer.button_released(egui::PointerButton::Primary)
-            });
+        let primary_drag_started =
+            response.contains_pointer() && ui.input(|i| i.pointer.primary_pressed());
         if primary_drag_started {
             let press_origin = ui.input(|i| i.pointer.press_origin());
-            if let Some(pos) = press_origin.or_else(|| response.interact_pointer_pos()) {
+            if let Some(pos) = press_origin.or_else(|| ui.ctx().pointer_interact_pos()) {
                 let point = crate::diagram_view::to_diagram(
                     pos,
                     &diagram.coordinate_extent,
@@ -444,12 +445,15 @@ impl OmolaApp {
                 drag.offset = [current[0] - drag.start[0], current[1] - drag.start[1]];
             }
         }
-        if response.drag_stopped_by(egui::PointerButton::Primary) {
+        if response.drag_stopped_by(egui::PointerButton::Primary)
+            || (ui.input(|i| i.pointer.primary_released())
+                && (self.connection_drag.is_some() || self.diagram_drag.is_some()))
+        {
             if let Some(drag) = self.connection_drag.take() {
                 if user_class && self.pending_edit.is_none() {
                     if let Some(pos) = response
                         .hover_pos()
-                        .or_else(|| response.interact_pointer_pos())
+                        .or_else(|| ui.ctx().pointer_interact_pos())
                     {
                         let p = crate::diagram_view::to_diagram(
                             pos,
@@ -481,6 +485,7 @@ impl OmolaApp {
             if let Some(drag) = self.diagram_drag.take() {
                 let final_offset = response
                     .hover_pos()
+                    .or_else(|| ui.ctx().pointer_interact_pos())
                     .map(|pos| {
                         let current = crate::diagram_view::to_diagram(
                             pos,
@@ -848,12 +853,23 @@ impl OmolaApp {
             } else {
                 legend_rows(&widths, (slot.width() - 80.0).max(1.0))
             };
+            let legend_extra = rows.len().saturating_sub(1) as f32 * 16.0;
+            let bottom_legend = style.legend == crate::plot::LegendPos::Bottom && !rows.is_empty();
             let frame = egui::Rect::from_min_max(
                 egui::pos2(
                     slot.left() + 53.0,
-                    slot.top() + 31.0 + rows.len().saturating_sub(1) as f32 * 16.0,
+                    slot.top() + 31.0 + if bottom_legend { 0.0 } else { legend_extra },
                 ),
-                egui::pos2(slot.right() - 24.0, slot.bottom() - 29.0),
+                egui::pos2(
+                    slot.right() - 24.0,
+                    slot.bottom()
+                        - 29.0
+                        - if bottom_legend {
+                            16.0 + legend_extra
+                        } else {
+                            0.0
+                        },
+                ),
             );
             if frame.width() < 40.0 || frame.height() < 40.0 {
                 continue;
@@ -862,7 +878,7 @@ impl OmolaApp {
             for (row_index, row) in rows.iter().enumerate() {
                 let mut lx = frame.left() - 2.0;
                 let y = if style.legend == crate::plot::LegendPos::Bottom {
-                    frame.bottom() + 16.0 + row_index as f32 * 16.0
+                    frame.bottom() + 32.0 + row_index as f32 * 16.0
                 } else {
                     slot.top() + 16.5 + row_index as f32 * 16.0
                 };

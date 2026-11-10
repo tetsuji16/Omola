@@ -155,7 +155,43 @@ fn tree_row(
         }
     });
     if let Some(payload) = payload {
-        response.dnd_set_drag_payload(payload.clone());
+        let press_id = egui::Id::unique("package-class-drag-press");
+        if response.contains_pointer() && ui.input(|i| i.pointer.primary_pressed()) {
+            if let Some(pos) = ui.ctx().pointer_interact_pos() {
+                ui.ctx()
+                    .data_mut(|d| d.insert_temp(press_id, (payload.clone(), pos)));
+            }
+        }
+        let released_drag = ui
+            .input(|i| i.pointer.primary_released())
+            .then(|| {
+                ui.ctx().data_mut(|d| {
+                    let saved = d.get_temp::<(ClassPayload, egui::Pos2)>(press_id);
+                    if saved.as_ref().is_some_and(|(source, _)| source == &payload) {
+                        d.remove::<(ClassPayload, egui::Pos2)>(press_id);
+                        saved
+                    } else {
+                        None
+                    }
+                })
+            })
+            .flatten()
+            .is_some_and(|(_, start)| {
+                ui.ctx()
+                    .pointer_interact_pos()
+                    .is_some_and(|end| start.distance(end) > 6.0)
+            });
+        // Native pointer integrations can deliver the press and the first motion in the
+        // same frame. In that case `drag_started()` may be missed by this row even though
+        // `dragged()` is true. Keep the payload alive for every frame the row owns the drag
+        // so a drop into another panel still has a payload to consume.
+        // Keep the payload available through the release frame. Some native input
+        // integrations deliver the final move and release together; in that case the
+        // drop-zone is evaluated in the same frame as `drag_stopped()`.
+        if response.drag_started() || response.dragged() || response.drag_stopped() || released_drag
+        {
+            egui::DragAndDrop::set_payload(ui.ctx(), payload.clone());
+        }
         if response.dragged() {
             if let Some(pos) = ui.ctx().pointer_interact_pos() {
                 let painter = ui.ctx().layer_painter(egui::LayerId::new(
@@ -1222,6 +1258,71 @@ pub fn format_value(v: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn class_drag_reaches_canvas_with_release_position() {
+        use egui::{Event, Modifiers, PointerButton, Pos2, RawInput, Rect};
+        let ctx = egui::Context::default();
+        let mut received = None;
+        let source = Pos2::new(40.0, 20.0);
+        let target = Pos2::new(300.0, 20.0);
+        let mut frame = |events| {
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_max(Pos2::ZERO, Pos2::new(500.0, 200.0))),
+                events,
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                ui.horizontal(|ui| {
+                    ui.set_width(180.0);
+                    tree_row(
+                        ui,
+                        0,
+                        false,
+                        false,
+                        false,
+                        (ICON_GRID_VIEW, Color32::WHITE),
+                        "Sine",
+                        String::new,
+                        Some(ClassPayload {
+                            qualified: "Modelica.Blocks.Sources.Sine".into(),
+                            restriction: "block".into(),
+                        }),
+                    );
+                });
+                let rect = Rect::from_min_max(Pos2::new(220.0, 0.0), Pos2::new(450.0, 100.0));
+                let response =
+                    ui.interact(rect, ui.scope_id().with("canvas"), Sense::click_and_drag());
+                if let Some(payload) = response.dnd_release_payload::<ClassPayload>() {
+                    received = Some((
+                        payload.qualified.clone(),
+                        response.hover_pos().or_else(|| ctx.pointer_interact_pos()),
+                    ));
+                }
+            });
+            output.textures_delta.clear();
+        };
+        frame(vec![Event::PointerMoved(source)]);
+        frame(vec![Event::PointerButton {
+            pos: source,
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        }]);
+        frame(vec![
+            Event::PointerMoved(target),
+            Event::PointerButton {
+                pos: target,
+                button: PointerButton::Primary,
+                pressed: false,
+                modifiers: Modifiers::NONE,
+            },
+        ]);
+        assert_eq!(
+            received,
+            Some(("Modelica.Blocks.Sources.Sine".into(), Some(target)))
+        );
+    }
 
     #[test]
     fn component_name_is_unique_and_lowercases_only_the_first_character() {
