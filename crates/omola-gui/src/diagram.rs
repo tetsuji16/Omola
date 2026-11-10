@@ -36,6 +36,8 @@ pub struct PlacedComponent {
     pub placement: Placement,
     pub icon: Option<Icon>,
     pub connectors: Vec<ConnectorPin>,
+    /// Resolved parameter values for text macros in this particular instance.
+    pub parameters: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -270,6 +272,7 @@ pub fn parse_diagram(
                 placement,
                 icon,
                 connectors,
+                parameters: parameter_values(element.get("type").unwrap_or(&Value::Null)),
             });
         }
     }
@@ -344,6 +347,101 @@ pub fn parse_diagram(
     }
 
     Ok(diagram)
+}
+
+/// Use OMC's evaluated values when available; never mistake an expression for its value.
+fn parameter_values(class: &Value) -> BTreeMap<String, String> {
+    fn units(node: &Value, unit: &mut Option<String>, display: &mut Option<String>) {
+        for base in node
+            .get("elements")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|e| e.get("$kind").and_then(Value::as_str) == Some("extends"))
+        {
+            units(&base["baseClass"], unit, display);
+            units(base, unit, display);
+        }
+        for (key, target) in [("unit", unit), ("displayUnit", display)] {
+            let modifier = &node["modifiers"][key];
+            let raw = modifier
+                .as_str()
+                .or_else(|| modifier.get("$value").and_then(Value::as_str));
+            if let Some(raw) = raw {
+                *target = Some(raw.trim_matches('"').to_owned());
+            }
+        }
+    }
+    fn format_value(v: &Value) -> Option<String> {
+        match v {
+            Value::Bool(_) | Value::Number(_) => Some(v.to_string()),
+            Value::String(s) => Some(s.clone()),
+            Value::Array(items) => Some(format!(
+                "{{{}}}",
+                items
+                    .iter()
+                    .map(format_value)
+                    .collect::<Option<Vec<_>>>()?
+                    .join(", ")
+            )),
+            Value::Object(_) if v.get("$kind").and_then(Value::as_str) == Some("enum") => {
+                Some(v.get("name")?.as_str()?.rsplit('.').next()?.to_owned())
+            }
+            _ => None,
+        }
+    }
+    fn collect(class: &Value, out: &mut BTreeMap<String, String>) {
+        for element in class
+            .get("elements")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if element.get("$kind").and_then(Value::as_str) == Some("extends") {
+                collect(&element["baseClass"], out);
+                continue;
+            }
+            if !matches!(
+                element
+                    .pointer("/prefixes/variability")
+                    .and_then(Value::as_str),
+                Some("parameter" | "constant")
+            ) {
+                continue;
+            }
+            let Some(name) = element.get("name").and_then(Value::as_str) else {
+                continue;
+            };
+            let value = &element["value"];
+            if let Some(mut text) = value
+                .get("value")
+                .and_then(format_value)
+                .or_else(|| value.get("binding").and_then(format_value))
+            {
+                let (mut unit, mut display) = (None, None);
+                units(&element["type"], &mut unit, &mut display);
+                units(element, &mut unit, &mut display);
+                if display
+                    .as_ref()
+                    .is_some_and(|d| !d.is_empty() && Some(d) != unit.as_ref())
+                {
+                    out.remove(name);
+                    continue;
+                }
+                if let Some(unit) = unit.filter(|u| !u.is_empty() && u != "1") {
+                    text.push(' ');
+                    text.push_str(&unit);
+                }
+                out.insert(name.to_owned(), text);
+            } else {
+                // A derived parameter can override an inherited one with an unresolved binding.
+                out.remove(name);
+            }
+        }
+    }
+    let mut values = BTreeMap::new();
+    collect(class, &mut values);
+    values
 }
 
 pub fn has_placement_annotation(element: &Value) -> bool {
@@ -688,14 +786,11 @@ fn style(
             .and_then(rgb_from_value)
             .unwrap_or([0, 0, 0]),
         fill: filled,
-        fill_pattern: match elements
-            .get(fill_pattern_idx)
-            .and_then(enum_name_from_value)
-        {
-            Some("HorizontalCylinder") => crate::graphics::FillPattern::HorizontalCylinder,
-            Some("VerticalCylinder") => crate::graphics::FillPattern::VerticalCylinder,
-            _ => crate::graphics::FillPattern::Solid,
-        },
+        fill_pattern: crate::graphics::FillPattern::from_name(
+            elements
+                .get(fill_pattern_idx)
+                .and_then(enum_name_from_value),
+        ),
         thickness: elements
             .get(thickness_idx)
             .and_then(|v| v.as_f64())
@@ -765,6 +860,58 @@ use std::collections::BTreeMap;
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn parameter_values_do_not_guess_expressions_or_display_unit_conversion() {
+        let class = serde_json::json!({"elements":[
+            {"$kind":"component", "name":"t", "prefixes":{"variability":"parameter"}, "modifiers":{"unit":"\"s\"", "displayUnit":"\"ms\""}, "value":{"binding":0.1}},
+            {"$kind":"component", "name":"x", "prefixes":{"variability":"parameter"}, "value":{"binding":{"$kind":"cref", "parts":[{"name":"other"}]}}},
+            {"$kind":"component", "name":"y", "prefixes":{"variability":"parameter"}, "value":{"binding":{"$kind":"cref"},"value":42}}
+        ]});
+        let values = parameter_values(&class);
+        assert!(!values.contains_key("t"));
+        assert!(!values.contains_key("x"));
+        assert_eq!(values.get("y").map(String::as_str), Some("42"));
+    }
+    #[test]
+    fn instance_parameter_values_come_from_actual_omc_fixture() {
+        let json: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/instance_pid.json")).unwrap();
+        let diagram = parse_diagram(&json, &Default::default()).unwrap();
+        let values = |name: &str| {
+            &diagram
+                .components
+                .iter()
+                .find(|c| c.name == name)
+                .unwrap()
+                .parameters
+        };
+        assert_eq!(
+            values("inertia1").get("J").map(String::as_str),
+            Some("1 kg.m2")
+        );
+        assert_eq!(
+            values("spring").get("c").map(String::as_str),
+            Some("10000 N.m/rad")
+        );
+        assert_eq!(
+            values("kinematicPTP").get("deltaq").map(String::as_str),
+            Some("{1.5708}")
+        );
+        let cauer: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/instance_cauer.json")).unwrap();
+        let diagram = parse_diagram(&cauer, &Default::default()).unwrap();
+        assert_eq!(
+            diagram
+                .components
+                .iter()
+                .find(|c| c.name == "R1")
+                .unwrap()
+                .parameters
+                .get("R")
+                .map(String::as_str),
+            Some("1 Ohm")
+        );
+    }
     use super::*;
 
     #[test]
@@ -1097,6 +1244,7 @@ mod tests {
             },
             icon: None,
             connectors: vec![pin()],
+            parameters: Default::default(),
         };
         let d = Diagram {
             components: vec![component("a", [0.0, 0.0]), component("b", [10.0, 0.0])],
@@ -1140,6 +1288,7 @@ mod tests {
             placement: Placement::default(),
             icon: None,
             connectors: vec![pin("p"), pin("q")],
+            parameters: Default::default(),
         };
         let d = Diagram {
             components: vec![component("a"), component("b")],
