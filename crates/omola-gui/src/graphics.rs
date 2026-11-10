@@ -159,6 +159,12 @@ fn point(v: &serde_json::Value) -> Option<[f64; 2]> {
 }
 
 fn points(v: &serde_json::Value) -> Option<Vec<[f64; 2]>> {
+    // DynamicSelect's first argument is the static representation used in the editor.
+    if v.get("$kind").and_then(serde_json::Value::as_str) == Some("call")
+        && v.get("name").and_then(serde_json::Value::as_str) == Some("DynamicSelect")
+    {
+        return points(v.get("arguments")?.as_array()?.first()?);
+    }
     let a = v.as_array()?;
     let out: Vec<[f64; 2]> = a.iter().filter_map(point).collect();
     // A partially readable point list would silently distort the shape.
@@ -656,6 +662,14 @@ pub fn sheet(rect: Rect) -> Rect {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn dynamic_select_points_use_the_static_graphic() {
+        let value = serde_json::json!({"$kind":"call", "name":"DynamicSelect", "arguments":[[[-80,-80],[80,80]], {"$kind":"if"}]});
+        assert_eq!(
+            super::points(&value),
+            Some(vec![[-80.0, -80.0], [80.0, 80.0]])
+        );
+    }
     use super::*;
 
     fn fixture(json: &str) -> serde_json::Value {
