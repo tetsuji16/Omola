@@ -1109,9 +1109,14 @@ impl OmolaApp {
             .map(|c| c.qualified_name.clone())
             .collect();
         self.refresh_outline();
-        // Drop cached documentation of user classes; it is re-queried when shown.
+        // User-defined icons can change with the source, including nested component types.
+        // Invalidate both old and current names so Diagram and Icon reload fresh graphics.
         for name in before {
             self.docs.remove(&name);
+            self.icons.remove(&name);
+        }
+        for class in &self.user_classes {
+            self.icons.remove(&class.qualified_name);
         }
         if let Some(active) = self.active.clone() {
             if !self.is_user_class(&active) && self.restriction_of(&active).is_none() {
@@ -2270,6 +2275,19 @@ mod tests {
         let before = app.documents[doc].text.clone();
         app.record_undo_snapshot(doc, before);
         app.documents[doc].text = text.into();
+    }
+
+    #[test]
+    fn editing_user_source_invalidates_user_icons_but_keeps_library_icons() {
+        let mut app = history_app();
+        app.documents[0].text = "model A\n model Custom\n end Custom;\nend A;".into();
+        app.refresh_outline();
+        app.icons.insert("A.Custom".into(), Loadable::Loading);
+        app.icons
+            .insert("Modelica.Blocks.Math.Gain".into(), Loadable::Loading);
+        app.user_text_changed(0);
+        assert!(!app.icons.contains_key("A.Custom"));
+        assert!(app.icons.contains_key("Modelica.Blocks.Math.Gain"));
     }
 
     #[test]

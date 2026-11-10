@@ -630,9 +630,11 @@ fn run_job(
                 send(Event::Diagram(class, diagram));
                 return;
             }
-            let loaded = library::icons_script(&types, &context.libraries)
-                .map_err(|e| e.to_string())
-                .and_then(|script| omc.run_query_script(&script).map_err(|e| e.to_string()));
+            let loaded = with_user_file(run_dir, &class, &context, |file| {
+                let script = library::icons_script(&types, &context.libraries, file)
+                    .map_err(|e| e.to_string())?;
+                omc.run_query_script(&script).map_err(|e| e.to_string())
+            });
             match loaded {
                 Ok(out) => {
                     let sections = library::parse_sections(&out.output);
@@ -1304,6 +1306,48 @@ mod tests {
                 .icon
                 .as_ref(),
             Some(&cached)
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    #[ignore = "needs OpenModelica; run with --ignored and OMOLA_OMC set"]
+    fn diagram_loads_user_component_icon_with_real_omc() {
+        if std::env::var_os("OMOLA_OMC").is_none() {
+            eprintln!("OMOLA_OMC is not set; skipping");
+            return;
+        }
+        let root = std::env::temp_dir().join(format!("omola-gui-user-icon-{}", std::process::id()));
+        let worker = Worker::spawn(root.join("work"), || {});
+        worker.submit(Job::LoadDiagram {
+            class: "A".into(),
+            context: ClassContext {
+                libraries: vec![],
+                user_source: Some(
+                    r#"model A
+  model Custom
+    annotation(Icon(graphics={Rectangle(extent={{-100,-100},{100,100}})}));
+  end Custom;
+  Custom part annotation(Placement(transformation(extent={{-10,-10},{10,10}})));
+end A;"#
+                        .into(),
+                ),
+            },
+            cached_icons: Default::default(),
+        });
+        let diagram = wait_for(&worker, 120, |event| match event {
+            Event::Diagram(_, result) => Some(result.expect("diagram")),
+            _ => None,
+        });
+        let part = diagram
+            .components
+            .iter()
+            .find(|c| c.name == "part")
+            .expect("placed part");
+        assert!(
+            part.icon.as_ref().is_some_and(|icon| !icon.is_empty()),
+            "user component icon: {:?}",
+            part.icon
         );
         let _ = std::fs::remove_dir_all(&root);
     }
