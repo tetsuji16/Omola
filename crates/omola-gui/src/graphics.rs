@@ -9,16 +9,77 @@
 //! Nothing here edits the model: the Icon layer only paints.
 //!
 //! Simplifications (deliberate, see issue G07):
-//! - Cylinder fills are shaded; other non-solid fill patterns are simplified to solid fills.
+//! - Hatch fills and sphere shading are approximated using screen-space geometry.
 //! - A shape whose `visible` is a conditional expression (`useHeatPort` etc.) is skipped:
 //!   its condition would need the parameter values, and the default of every MSL model
 //!   is `false`, so skipping matches what OMEdit shows out of the box.
 //! - `Line` arrow heads are not drawn.
 //! - `Bitmap` is not drawn.
-//! - `%name` is replaced by the class name; other `%parameter` placeholders are left as
-//!   they are.
+//! - Parameter macros are resolved only when the instance supplies a readable value.
 
 use egui::{Align2, Color32, FontId, Painter, Pos2, Rect, Shape as EguiShape, Stroke, Vec2};
+
+/// Expand Modelica Text macros without replacing prefixes of longer identifiers.
+pub fn text_label(
+    text: &str,
+    name: &str,
+    class: &str,
+    values: &std::collections::BTreeMap<String, String>,
+) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '%' {
+            out.push(ch);
+            continue;
+        }
+        if chars.peek() == Some(&'%') {
+            chars.next();
+            out.push('%');
+            continue;
+        }
+        let braced = chars.peek() == Some(&'{');
+        if braced {
+            chars.next();
+        }
+        let mut key = String::new();
+        while let Some(&c) = chars.peek() {
+            if if braced {
+                c != '}'
+            } else {
+                c.is_ascii_alphanumeric() || c == '_'
+            } {
+                key.push(c);
+                chars.next();
+            } else {
+                break;
+            }
+        }
+        let closed = !braced || chars.next_if_eq(&'}').is_some();
+        let replacement = if !braced && key == "name" {
+            Some(name)
+        } else if !braced && key == "class" {
+            Some(class.rsplit('.').next().unwrap_or(class))
+        } else {
+            values.get(&key).map(String::as_str)
+        };
+        if closed && !key.is_empty() {
+            if let Some(value) = replacement {
+                out.push_str(value);
+                continue;
+            }
+        }
+        out.push('%');
+        if braced {
+            out.push('{');
+        }
+        out.push_str(&key);
+        if braced && closed {
+            out.push('}');
+        }
+    }
+    out
+}
 
 /// A Modelica rectangle in the icon coordinate system (y points up).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -71,8 +132,32 @@ impl Default for Style {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FillPattern {
     Solid,
+    Horizontal,
+    Vertical,
+    Cross,
+    Forward,
+    Backward,
+    CrossDiag,
     HorizontalCylinder,
     VerticalCylinder,
+    Sphere,
+}
+
+impl FillPattern {
+    pub fn from_name(name: Option<&str>) -> Self {
+        match name {
+            Some("Horizontal") => Self::Horizontal,
+            Some("Vertical") => Self::Vertical,
+            Some("Cross") => Self::Cross,
+            Some("Forward") => Self::Forward,
+            Some("Backward") => Self::Backward,
+            Some("CrossDiag") => Self::CrossDiag,
+            Some("HorizontalCylinder") => Self::HorizontalCylinder,
+            Some("VerticalCylinder") => Self::VerticalCylinder,
+            Some("Sphere") => Self::Sphere,
+            _ => Self::Solid,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -237,18 +322,13 @@ fn style(
     thickness: usize,
 ) -> Style {
     let filled = match field(e, fill_pattern).and_then(enum_name) {
-        // Hatching is simplified to a solid fill (issue G07).
         Some("None") | None => None,
         Some(_) => field(e, fill).and_then(rgb),
     };
     Style {
         line: field(e, line).and_then(rgb).unwrap_or([0, 0, 0]),
         fill: filled,
-        fill_pattern: match field(e, fill_pattern).and_then(enum_name) {
-            Some("HorizontalCylinder") => FillPattern::HorizontalCylinder,
-            Some("VerticalCylinder") => FillPattern::VerticalCylinder,
-            _ => FillPattern::Solid,
-        },
+        fill_pattern: FillPattern::from_name(field(e, fill_pattern).and_then(enum_name)),
         thickness: field(e, thickness).and_then(number).unwrap_or(0.25),
         pattern: line_pattern(field(e, pattern)),
     }
@@ -460,13 +540,7 @@ pub fn paint_icon(painter: &Painter, rect: Rect, icon: &Icon, name: &str) {
             }
             Shape::Polygon { points, style } => {
                 let pts: Vec<Pos2> = points.iter().map(|p| place(*p, graphic)).collect();
-                if let Some(fill) = style.fill {
-                    painter.add(EguiShape::convex_polygon(
-                        pts.clone(),
-                        color(fill),
-                        Stroke::NONE,
-                    ));
-                }
+                paint_polygon_fill(painter, &pts, style);
                 // Concave polygons are not filled correctly by `convex_polygon`; the outline
                 // is always drawn as a closed path so they still read as a polygon.
                 paint_polyline(painter, &pts, style, scale, true);
@@ -514,13 +588,7 @@ pub fn paint_icon(painter: &Painter, rect: Rect, icon: &Icon, name: &str) {
                     .collect::<Vec<_>>();
                 let full = (end_angle - start_angle).abs() >= 359.999;
                 if full {
-                    if let Some(fill) = style.fill {
-                        painter.add(EguiShape::convex_polygon(
-                            pts.clone(),
-                            color(fill),
-                            Stroke::NONE,
-                        ));
-                    }
+                    paint_polygon_fill(painter, &pts, style);
                 }
                 paint_polyline(painter, &pts, style, scale, full);
             }
@@ -532,7 +600,7 @@ pub fn paint_icon(painter: &Painter, rect: Rect, icon: &Icon, name: &str) {
                 let a = place([extent.x1, extent.y1], graphic);
                 let b = place([extent.x2, extent.y2], graphic);
                 let box_rect = Rect::from_two_pos(a, b);
-                let label = text.replace("%name", name);
+                let label = text_label(text, name, name, &Default::default());
                 if label.trim().is_empty() {
                     continue;
                 }
@@ -561,6 +629,15 @@ pub fn paint_rectangle_fill(
     style: &Style,
     place: impl Fn([f64; 2]) -> Pos2,
 ) {
+    if !matches!(
+        style.fill_pattern,
+        FillPattern::Solid | FillPattern::HorizontalCylinder | FillPattern::VerticalCylinder
+    ) {
+        let e = extent;
+        let pts = [[e.x1, e.y1], [e.x2, e.y1], [e.x2, e.y2], [e.x1, e.y2]].map(place);
+        paint_polygon_fill(painter, &pts, style);
+        return;
+    }
     if let Some(mesh) = rectangle_fill_mesh(extent, style, place) {
         painter.add(EguiShape::mesh(mesh));
     }
@@ -595,6 +672,7 @@ fn rectangle_fill_mesh(
                 vec![edge, edge, middle, middle, edge, edge],
             )
         }
+        _ => return None,
     };
     for (point, color) in positions.into_iter().zip(colors) {
         mesh.colored_vertex(place(point), color);
@@ -606,6 +684,85 @@ fn rectangle_fill_mesh(
             .extend_from_slice(&[0, 1, 2, 1, 3, 2, 2, 3, 4, 3, 5, 4]);
     }
     Some(mesh)
+}
+
+/// Fill convex polygons with Modelica hatch patterns or a radial sphere gradient.
+pub fn paint_polygon_fill(painter: &Painter, points: &[Pos2], style: &Style) {
+    let Some(fill) = style.fill else { return };
+    if points.len() < 3 {
+        return;
+    }
+    if style.fill_pattern == FillPattern::Sphere {
+        let center =
+            points.iter().fold(Vec2::ZERO, |sum, p| sum + p.to_vec2()) / points.len() as f32;
+        let center = center.to_pos2();
+        let bounds = Rect::from_points(points);
+        let radius = bounds.width().max(f32::EPSILON);
+        let mut mesh = egui::Mesh::default();
+        mesh.colored_vertex(center, color(fill));
+        for p in points {
+            let t = (p.distance(center) / radius).clamp(0.0, 1.0);
+            let mix = |i: usize| {
+                (fill[i] as f32 + (style.line[i] as f32 - fill[i] as f32) * t).round() as u8
+            };
+            mesh.colored_vertex(*p, Color32::from_rgb(mix(0), mix(1), mix(2)));
+        }
+        for i in 0..points.len() {
+            mesh.indices
+                .extend_from_slice(&[0, i as u32 + 1, ((i + 1) % points.len()) as u32 + 1]);
+        }
+        painter.add(EguiShape::mesh(mesh));
+        return;
+    }
+    painter.add(EguiShape::convex_polygon(
+        points.to_vec(),
+        color(fill),
+        Stroke::NONE,
+    ));
+    let directions: &[[f32; 2]] = match style.fill_pattern {
+        FillPattern::Horizontal => &[[0.0, 1.0]],
+        FillPattern::Vertical => &[[1.0, 0.0]],
+        FillPattern::Cross => &[[0.0, 1.0], [1.0, 0.0]],
+        FillPattern::Forward => &[[1.0, 1.0]],
+        FillPattern::Backward => &[[1.0, -1.0]],
+        FillPattern::CrossDiag => &[[1.0, 1.0], [1.0, -1.0]],
+        _ => return,
+    };
+    for &[nx, ny] in directions {
+        let n = Vec2::new(nx, ny).normalized();
+        let lo = points
+            .iter()
+            .map(|p| p.to_vec2().dot(n))
+            .fold(f32::INFINITY, f32::min);
+        let hi = points
+            .iter()
+            .map(|p| p.to_vec2().dot(n))
+            .fold(f32::NEG_INFINITY, f32::max);
+        if !lo.is_finite() || !hi.is_finite() {
+            continue;
+        }
+        let spacing = 7.0_f32.max((hi - lo) / 256.0);
+        let mut d = (lo / spacing).ceil() * spacing;
+        for _ in 0..=256 {
+            if d > hi {
+                break;
+            }
+            let mut hits = Vec::new();
+            for i in 0..points.len() {
+                let a = points[i];
+                let b = points[(i + 1) % points.len()];
+                let da = a.to_vec2().dot(n) - d;
+                let db = b.to_vec2().dot(n) - d;
+                if (da <= 0.0 && db > 0.0) || (db <= 0.0 && da > 0.0) {
+                    hits.push(a + (b - a) * (da / (da - db)));
+                }
+            }
+            if hits.len() >= 2 {
+                painter.line_segment([hits[0], hits[1]], Stroke::new(1.0, color(style.line)));
+            }
+            d += spacing;
+        }
+    }
 }
 
 /// `lineThickness` is in the 200-unit icon coordinate system; keep 1..8 px on screen.
@@ -662,6 +819,58 @@ pub fn sheet(rect: Rect) -> Rect {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hatch_and_sphere_fills_produce_distinct_geometry() {
+        use super::*;
+        let points = [
+            Pos2::new(0.0, 0.0),
+            Pos2::new(40.0, 0.0),
+            Pos2::new(40.0, 40.0),
+            Pos2::new(0.0, 40.0),
+        ];
+        let render = |pattern| {
+            let ctx = egui::Context::default();
+            let mut output = ctx.run_ui(Default::default(), |ui| {
+                let p = ui.painter();
+                paint_polygon_fill(
+                    p,
+                    &points,
+                    &Style {
+                        fill: Some([230; 3]),
+                        fill_pattern: pattern,
+                        ..Default::default()
+                    },
+                );
+            });
+            output.textures_delta.clear();
+            output.shapes
+        };
+        assert_eq!(render(FillPattern::Solid).len(), 1);
+        assert!(render(FillPattern::Cross).len() > render(FillPattern::Horizontal).len());
+        let sphere = render(FillPattern::Sphere);
+        let EguiShape::Mesh(mesh) = &sphere[0].shape else {
+            panic!("sphere must use a gradient mesh")
+        };
+        assert_ne!(mesh.vertices[0].color, mesh.vertices[1].color);
+    }
+    #[test]
+    fn text_macros_respect_escaping_and_identifier_boundaries() {
+        let values = [
+            ("J".to_owned(), "1".to_owned()),
+            ("long.value".to_owned(), "2".to_owned()),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            super::text_label(
+                "%%name %name %class J=%J %{long.value}x %Junk",
+                "inertia1",
+                "A.Inertia",
+                &values
+            ),
+            "%name inertia1 Inertia J=1 2x %Junk"
+        );
+    }
     #[test]
     fn dynamic_select_points_use_the_static_graphic() {
         let value = serde_json::json!({"$kind":"call", "name":"DynamicSelect", "arguments":[[[-80,-80],[80,80]], {"$kind":"if"}]});

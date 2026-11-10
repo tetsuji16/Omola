@@ -169,6 +169,7 @@ fn paint_graphics(
     place: &dyn Fn([f64; 2], &Graphic) -> [f64; 2],
     component_name: &str,
     type_name: &str,
+    parameters: &std::collections::BTreeMap<String, String>,
     max_text_width: Option<f32>,
     text_clip: Option<Rect>,
 ) {
@@ -187,13 +188,7 @@ fn paint_graphics(
                     .iter()
                     .map(|p| to_screen(place(*p, g), extent, rect, zoom, pan))
                     .collect();
-                if let Some(fill) = style.fill {
-                    painter.add(EguiShape::convex_polygon(
-                        pts.clone(),
-                        col(fill),
-                        Stroke::NONE,
-                    ));
-                }
+                crate::graphics::paint_polygon_fill(painter, &pts, style);
                 poly(painter, &pts, style, scale, true);
             }
             Shape::Rectangle {
@@ -236,13 +231,7 @@ fn paint_graphics(
                     .collect();
                 let full = (end_angle - start_angle).abs() >= 359.999;
                 if full {
-                    if let Some(fill) = style.fill {
-                        painter.add(EguiShape::convex_polygon(
-                            pts.clone(),
-                            col(fill),
-                            Stroke::NONE,
-                        ));
-                    }
+                    crate::graphics::paint_polygon_fill(painter, &pts, style);
                 }
                 poly(painter, &pts, style, scale, full);
             }
@@ -254,9 +243,8 @@ fn paint_graphics(
                 let a = to_screen(place([ext.x1, ext.y1], g), extent, rect, zoom, pan);
                 let b = to_screen(place([ext.x2, ext.y2], g), extent, rect, zoom, pan);
                 let br = Rect::from_two_pos(a, b);
-                let label = text
-                    .replace("%name", component_name)
-                    .replace("%class", type_name);
+                let label =
+                    crate::graphics::text_label(text, component_name, type_name, parameters);
                 if label.trim().is_empty() {
                     continue;
                 }
@@ -303,6 +291,7 @@ pub fn paint_diagram(painter: &Painter, rect: Rect, diagram: &Diagram, zoom: f32
         &|p, g| crate::graphics::transform(p, g.origin, g.rotation_deg),
         "",
         "",
+        &Default::default(),
         None,
         None,
     );
@@ -344,6 +333,7 @@ pub fn paint_diagram(painter: &Painter, rect: Rect, diagram: &Diagram, zoom: f32
                 },
                 &comp.name,
                 &comp.type_name,
+                &comp.parameters,
                 Some(component_rect.width()),
                 // Modelica icon text extents can intentionally lie outside the icon's
                 // placement, notably the instance name and parameter annotations.
@@ -406,6 +396,7 @@ pub fn paint_diagram(painter: &Painter, rect: Rect, diagram: &Diagram, zoom: f32
                     &place,
                     &pin.name,
                     &pin.type_name,
+                    &Default::default(),
                     Some(20.0),
                     None,
                 );
@@ -535,6 +526,7 @@ mod edit_tests {
             placement: p.clone(),
             icon: None,
             connectors: vec![],
+            parameters: Default::default(),
         });
         d.components.push(PlacedComponent {
             name: "last".into(),
@@ -542,6 +534,7 @@ mod edit_tests {
             placement: p,
             icon: None,
             connectors: vec![],
+            parameters: Default::default(),
         });
         assert_eq!(hit_component(&d, [0.0, 9.0]), Some(1));
         assert_eq!(hit_component(&d, [20.0, 20.0]), None);
@@ -560,6 +553,7 @@ mod edit_tests {
             placement: Placement::default(),
             icon: None,
             connectors: vec![],
+            parameters: Default::default(),
         };
         let (p, op) = placement_edit(&comp, [2.0, -4.0], 90.0);
         assert_eq!(p.origin, [2.0, -4.0]);
@@ -606,6 +600,7 @@ mod edit_tests {
             },
             icon: None,
             connectors: vec![pin],
+            parameters: Default::default(),
         };
         let expected = pin_position(&c, &c.connectors[0]);
         assert_eq!(expected, [20.0, 10.0]);
