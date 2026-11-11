@@ -295,7 +295,7 @@ impl OmolaApp {
             .resizable(false)
             .open(&mut keep_open)
             .show(ctx, |ui| {
-                ui.label(format!("{prompt} (native file dialog: issue G03):"));
+                ui.label(format!("{prompt} (text input fallback):"));
                 let response = ui.add(egui::TextEdit::singleline(&mut text).desired_width(420.0));
                 let enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 if ui.button("OK").clicked() || enter {
@@ -313,15 +313,7 @@ impl OmolaApp {
                     }
                     self.save();
                 }
-                PathDialog::RunScript(_) => {
-                    self.command_input = format!(
-                        "runScript(\"{}\")",
-                        omola_core::escape_modelica_string(&path.to_string_lossy())
-                    );
-                    self.bottom_pane = crate::app::BottomPane::Commands;
-                    self.docks.bottom = true;
-                    self.run_command();
-                }
+                PathDialog::RunScript(_) => self.run_script(&path),
                 PathDialog::ExportCsv(_) => self.export_csv(&path),
             }
         } else if !keep_open {

@@ -4,7 +4,7 @@ use super::widgets::{
     big_button, column, combo_frame, field_frame, fixed_group, group, icon_button, paint_icon,
     place, small_button,
 };
-use crate::app::{DocView, Layer, OmolaApp, PathDialog, RibbonTab};
+use crate::app::{DocView, Layer, OmolaApp, RibbonTab};
 use crate::theme;
 use egui::{Align2, Color32, FontId, RichText, Sense, Stroke, Vec2};
 use egui_material_icons::icons::*;
@@ -853,7 +853,7 @@ impl OmolaApp {
                 .on_hover_text("Run an OpenModelica script (.mos)")
             });
             if run_script.clicked() {
-                self.path_dialog = Some(PathDialog::RunScript(String::new()));
+                self.request_run_script_dialog();
             }
             place(ui, o, (8.0, 31.0, 100.0, 22.0), |ui| {
                 small_button(
