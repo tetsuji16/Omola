@@ -29,6 +29,94 @@ pub struct SimulationSetup {
     pub parameters: Vec<(String, String)>,
 }
 
+impl SimulationSetup {
+    /// Reject settings OMC would only fail on after a long translation (issue G44).
+    ///
+    /// The message is shown as-is in the Translation log and in the Simulation Setup
+    /// dialog, so it names the offending field.
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.start_time.is_finite() || !self.stop_time.is_finite() {
+            return Err("Start time and stop time must be finite numbers.".into());
+        }
+        if self.stop_time <= self.start_time {
+            return Err(format!(
+                "Stop time ({} s) must be greater than start time ({} s).",
+                self.stop_time, self.start_time
+            ));
+        }
+        if self.number_of_intervals == 0 {
+            return Err("Number of intervals must be at least 1.".into());
+        }
+        if !self.tolerance.is_finite() || self.tolerance <= 0.0 {
+            return Err("Tolerance must be a positive number.".into());
+        }
+        if !omola_core::SIMULATION_METHODS.contains(&self.method.as_str()) {
+            return Err(format!(
+                "Unknown integration method \"{}\". Supported: {}.",
+                self.method,
+                omola_core::SIMULATION_METHODS.join(", ")
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Class name shown for a result file loaded from disk (issue G14).
+///
+/// OpenModelica writes `<Class>_res.mat`; other tools write `<name>.mat`. The suffix is
+/// stripped so `BouncingBall_res.mat` is listed as `BouncingBall`. Never empty.
+pub fn result_class_from_path(path: &Path) -> String {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let lower = name.to_ascii_lowercase();
+    let stem = if lower.ends_with("_res.mat") {
+        &name[..name.len() - "_res.mat".len()]
+    } else if lower.ends_with(".mat") {
+        &name[..name.len() - ".mat".len()]
+    } else {
+        name.as_str()
+    };
+    if stem.is_empty() {
+        "result".to_owned()
+    } else {
+        stem.to_owned()
+    }
+}
+
+/// Read a result file from disk and publish it like a finished simulation (issue G14).
+///
+/// Needs no OMC: the MAT v4 reader lives in `omola-core`.
+fn load_result(path: &Path, send: &dyn Fn(Event)) {
+    let started = Instant::now();
+    match mat::read_trajectory_file(path) {
+        Ok(trajectory) => {
+            send(Event::Log(
+                LogTab::Simulation,
+                LogLevel::Info,
+                format!(
+                    "Loaded result \"{}\"\n... {} variables, {} result points",
+                    path.display(),
+                    trajectory.variables.len(),
+                    trajectory.time.len()
+                ),
+            ));
+            send(Event::SimulationFinished(Box::new(SimulationOutcome {
+                class: result_class_from_path(path),
+                result_file: path.to_path_buf(),
+                result: trajectory,
+                elapsed_seconds: started.elapsed().as_secs_f64(),
+            })));
+        }
+        Err(error) => send(Event::Log(
+            LogTab::Simulation,
+            LogLevel::Error,
+            format!("Could not load result {}: {error}", path.display()),
+        )),
+    }
+}
+
 #[cfg(test)]
 mod edit_integration_test {
     use super::*;
@@ -221,6 +309,10 @@ pub enum Job {
         class: String,
         context: ClassContext,
     },
+    /// Read an existing result file (`*_res.mat`) into the Variable Browser (G14).
+    LoadResult {
+        path: PathBuf,
+    },
     Simulate {
         class: String,
         context: ClassContext,
@@ -390,6 +482,11 @@ fn run_job(
     cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     send: &dyn Fn(Event),
 ) {
+    // Reading a result file needs no OMC, so it also works before OpenModelica is set up.
+    let job = match job {
+        Job::LoadResult { path } => return load_result(&path, send),
+        other => other,
+    };
     let omc = match Omc::discover().map(|omc| omc.with_cancel_flag(cancel.clone())) {
         Ok(omc) => omc,
         Err(error) => {
@@ -720,6 +817,8 @@ fn run_job(
             context,
             setup,
         } => simulate(&omc, run_dir, class, context, setup, send),
+        // Handled before OMC discovery above.
+        Job::LoadResult { path } => load_result(&path, send),
         Job::InstallLibraries => {
             send(Event::Log(
                 LogTab::Version,
@@ -870,7 +969,7 @@ fn fail_job(job: Job, message: String, send: &dyn Fn(Event)) {
             result: Err(message),
         }),
         Job::InstallLibraries => send(Event::LibrariesInstalled(false)),
-        Job::Doctor | Job::Check { .. } | Job::Simulate { .. } => {}
+        Job::Doctor | Job::Check { .. } | Job::Simulate { .. } | Job::LoadResult { .. } => {}
     }
 }
 
@@ -1639,5 +1738,50 @@ end A;"#
             "drive never spun up"
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod audit_tests {
+    use super::*;
+
+    #[test]
+    fn result_class_strips_the_result_suffix() {
+        let class = |p: &str| result_class_from_path(Path::new(p));
+        assert_eq!(class("work/BouncingBall_res.mat"), "BouncingBall");
+        assert_eq!(class("A_B_res.MAT"), "A_B");
+        assert_eq!(class("other.mat"), "other");
+        assert_eq!(class("noextension"), "noextension");
+        assert_eq!(class("_res.mat"), "result");
+    }
+
+    #[test]
+    fn setup_validation_names_the_offending_field() {
+        let ok = SimulationSetup::default();
+        assert_eq!(ok.validate(), Ok(()));
+        let bad = |edit: fn(&mut SimulationSetup)| {
+            let mut setup = SimulationSetup::default();
+            edit(&mut setup);
+            setup.validate().unwrap_err()
+        };
+        assert!(bad(|s| s.stop_time = s.start_time).contains("Stop time"));
+        assert!(bad(|s| s.stop_time = f64::NAN).contains("finite"));
+        assert!(bad(|s| s.number_of_intervals = 0).contains("intervals"));
+        assert!(bad(|s| s.tolerance = 0.0).contains("Tolerance"));
+        assert!(bad(|s| s.method = "magic".into()).contains("magic"));
+    }
+
+    #[test]
+    fn load_result_job_reports_a_missing_file_without_omc() {
+        let events = std::cell::RefCell::new(Vec::new());
+        load_result(Path::new("definitely-missing_res.mat"), &|e| {
+            events.borrow_mut().push(e)
+        });
+        let events = events.into_inner();
+        assert!(matches!(
+            events.as_slice(),
+            [Event::Log(LogTab::Simulation, LogLevel::Error, text)]
+                if text.contains("definitely-missing_res.mat")
+        ));
     }
 }

@@ -10,6 +10,40 @@ impl OmolaApp {
         self.path_dialog_window(&ctx);
         self.rename_dialog_window(&ctx);
         self.parameter_dialog_window(&ctx);
+        self.exit_dialog_window(&ctx);
+    }
+
+    /// "Unsaved changes" confirmation shown when the window is asked to close (G42).
+    fn exit_dialog_window(&mut self, ctx: &egui::Context) {
+        if !self.confirm_exit {
+            return;
+        }
+        let unsaved = self.unsaved_documents();
+        if unsaved.is_empty() {
+            self.confirm_exit = false;
+            return;
+        }
+        egui::Window::new("Unsaved changes")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label("These documents have unsaved changes:");
+                for title in &unsaved {
+                    ui.label(format!("    {title}"));
+                }
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button("Discard and exit").clicked() {
+                        self.exit_confirmed = true;
+                        self.confirm_exit = false;
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.confirm_exit = false;
+                    }
+                });
+            });
     }
 
     fn parameter_dialog_window(&mut self, ctx: &egui::Context) {
@@ -287,6 +321,9 @@ impl OmolaApp {
                 t.clone(),
             ),
             PathDialog::ExportCsv(t) => ("Export plot as CSV", "Path to a .csv file", t.clone()),
+            PathDialog::LoadResult(t) => {
+                ("Load Result", "Path to a result file (_res.mat)", t.clone())
+            }
         };
         let mut keep_open = true;
         let mut submitted = false;
@@ -315,6 +352,7 @@ impl OmolaApp {
                 }
                 PathDialog::RunScript(_) => self.run_script(&path),
                 PathDialog::ExportCsv(_) => self.export_csv(&path),
+                PathDialog::LoadResult(_) => self.load_result(path),
             }
         } else if !keep_open {
             self.path_dialog = None;
@@ -324,6 +362,7 @@ impl OmolaApp {
                 PathDialog::SaveAs(_) => PathDialog::SaveAs(text),
                 PathDialog::RunScript(_) => PathDialog::RunScript(text),
                 PathDialog::ExportCsv(_) => PathDialog::ExportCsv(text),
+                PathDialog::LoadResult(_) => PathDialog::LoadResult(text),
             });
         }
     }

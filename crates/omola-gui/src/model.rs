@@ -59,7 +59,7 @@ impl Document {
 
     pub fn save(&mut self) -> std::io::Result<()> {
         if let Some(path) = &self.path {
-            std::fs::write(path, &self.text)?;
+            write_atomic(path, &self.text)?;
             self.dirty = false;
         }
         Ok(())
@@ -79,6 +79,33 @@ impl Document {
             name
         }
     }
+}
+
+/// Write `text` to `path` through a temporary sibling file followed by a rename.
+///
+/// A crash, a full disk or a failed write therefore never leaves a half-written model
+/// behind: the original file is only replaced once the new content is completely on disk.
+/// A symbolic link is followed (the link target is replaced, not the link) and the
+/// permissions of an existing file are kept.
+pub fn write_atomic(path: &std::path::Path, text: &str) -> std::io::Result<()> {
+    let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let file_name = target.file_name().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "path has no file name")
+    })?;
+    let mut tmp_name = std::ffi::OsString::from(".");
+    tmp_name.push(file_name);
+    tmp_name.push(format!(".omola-tmp-{}", std::process::id()));
+    let tmp = target.with_file_name(tmp_name);
+    let result = std::fs::write(&tmp, text).and_then(|()| {
+        if let Ok(meta) = std::fs::metadata(&target) {
+            let _ = std::fs::set_permissions(&tmp, meta.permissions());
+        }
+        std::fs::rename(&tmp, &target)
+    });
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
 }
 
 /// A class found by [`scan_classes`].
@@ -347,6 +374,30 @@ fn tokenize(text: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn write_atomic_replaces_the_file_and_leaves_no_temporary_file() {
+        let dir = std::env::temp_dir().join(format!("omola-atomic-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("M.mo");
+        std::fs::write(&path, "model M end M;").unwrap();
+        write_atomic(&path, "model M Real x; end M;").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "model M Real x; end M;"
+        );
+        let names: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names.len(), 1, "temporary file left behind: {names:?}");
+        // A new file in an existing directory works too.
+        write_atomic(&dir.join("New.mo"), "model New end New;").unwrap();
+        assert!(dir.join("New.mo").is_file());
+        // A missing directory is an error and creates nothing.
+        assert!(write_atomic(&dir.join("missing").join("X.mo"), "x").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn finds_nested_classes_and_skips_comments_and_strings() {

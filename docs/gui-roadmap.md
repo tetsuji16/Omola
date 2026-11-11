@@ -1,6 +1,6 @@
 # Omola GUI roadmap
 
-> **Direction changed again: 2026-11-02.** Omola's desktop GUI is now a native Rust application built with egui (`crates/omola-gui`), with computation still delegated to OMC. New GUI work is tracked in [`docs/issues/gui/`](issues/gui/README.md) (G01–G14) and the layout reference is [`docs/reference/dymola-gui.md`](reference/dymola-gui.md). The OMEdit plan below is kept as history; the existing `omola project open` / `omola gui status` OMEdit commands remain available but receive no new GUI features.
+> **Direction changed again: 2026-11-02.** Omola's desktop GUI is now a native Rust application built with egui (`crates/omola-gui`), with computation still delegated to OMC. New GUI work is tracked in [`docs/issues/gui/`](issues/gui/README.md) (G01–G52; see its section 6 for what is still open) and the layout reference is [`docs/reference/dymola-gui.md`](reference/dymola-gui.md). The OMEdit plan below is kept as history; the existing `omola project open` / `omola gui status` OMEdit commands remain available but receive no new GUI features.
 
 ## Previous plan (2026-10-28): extend upstream OMEdit
 

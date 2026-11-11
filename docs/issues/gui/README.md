@@ -96,7 +96,22 @@ UI の見た目を変える issue では、**変更後のスクリーンショ�
 3. GPL/AGPL/LGPL **のみ**のライセンスのクレートは追加禁止(`MIT OR ...` のように選択肢があれば可)。迷ったら追加せず PR で質問。
 4. `docs/provenance-licenses.md` の「Native GUI」節に 1 行追記。
 
-## 5.5 進捗メモ(2026-11-06)
+## 5.5 進捗メモ(2026-11-12 更新)
+
+**現状(2026-11-12 のコード全体見直し):** G01〜G13、G15〜G41 は main に入っており、GitHub の issue も閉じています。**残っているのは G14(#42、残りは `Save result as…` のみ)と、見直しで追加した G42〜G52 です。** 下の 2026-11-06 の箇条書きは経緯として残していますが、いずれも解決済みです。
+
+見直しの PR(`gui-audit-skeleton`)で次の骨格を入れました。G42 以降の issue は、これらを作り直さずに使ってください。
+
+| 骨格 | 場所 | 使う issue |
+|---|---|---|
+| `write_atomic`(一時ファイル → rename の保存) | `model.rs` | G43 |
+| `SimulationSetup::validate()` と `simulate()` での検査 | `backend.rs`, `app.rs` | G44, G48 |
+| `Job::LoadResult`・`result_class_from_path`・`load_result` | `backend.rs` | G14 |
+| `ResultRun.kept`・`evict_results`・`close_result`・`set_result_kept`・結果の右クリックメニュー | `app.rs`, `ui/browsers.rs` | G14, G44, G49 |
+| `unsaved_documents`・`must_confirm_exit`・`exit_dialog_window`(Discard / Cancel) | `app.rs`, `ui/dialogs.rs` | G42 |
+| Text リボンの Undo / Redo、Tools の Load Result / Messages の接続 | `ui/chrome.rs` | G45, G52 |
+
+### 2026-11-06 時点のメモ(経緯)
 
 Dymola 風レイアウト(タイトル行・リボン・ブラウザ・モデルタブ・ログ・下段バー)と、MSL の閲覧 → Documentation → ライブラリ例題のシミュレーション → 変数ブラウザ → プロットは実装済みです(`docs/reference/dymola-gui.md` 3.2)。そのため、以下の issue は前提が変わっています。着手前に現在のコードを確認してください。
 
@@ -127,7 +142,7 @@ Dymola 風レイアウト(タイトル行・リボン・ブラウザ・モデル
 | [G11](G11-text-editor.md) | テキストエディタ(シンタックスハイライト・行番号・エラー行ジャンプ) | 中 | — |
 | [G12](G12-diagram-layer-readonly.md) | Diagram 層の読み取り専用表示(部品配置と結線) | 難 | G06, G07 |
 | [G13](G13-cancel-simulation.md) | 実行中のシミュレーションの中断 | 中 | — |
-| [G14](G14-result-management.md) | 結果の読み込み・保持/破棄・エクスポート | 易 | — (#42 を再オープン。未実装) |
+| [G14](G14-result-management.md) | 結果の読み込み・保持/破棄・エクスポート | 易 | — (#42。骨格は実装済み、残りは `Save result as…`) |
 | [G15](G15-repo-housekeeping.md) | リポジトリ整理(不要ファイル削除・改行コード固定・ドキュメントの現状反映) | 易 | — |
 | [G16](G16-frame-time-stats.md) | フレーム時間の計測機能(性能改善 #60 の物差し) | 易 | — |
 | [G17](G17-build-profile.md) | 開発ビルドでも依存クレートを最適化する + release 実行の明記 | 易 | (G16) |
@@ -155,6 +170,17 @@ Dymola 風レイアウト(タイトル行・リボン・ブラウザ・モデル
 | [G39](G39-plot-legend.md) | プロットの凡例: 折り返し・見分けられる色と線種 | 易〜中 | — |
 | [G40](G40-library-text-readonly-editor.md) | ライブラリのクラスの Text 層を行番号・色分け付きの読み取り専用エディタで | 易〜中 | G24 |
 | [G41](G41-title-and-tab-overlap.md) | 【不具合】タイトル行・下段モデルタブの文字の重なり | 易 | — |
+| [G42](G42-unsaved-changes-guard.md) | 【データ保護】未保存の変更の確認を完成させる(保存して終了・ドキュメントを閉じる) | 中 | — |
+| [G43](G43-safe-save.md) | 【データ保護】保存の安全性(上書き確認・ディスク上で変更されたファイルの検出) | 易〜中 | — |
+| [G44](G44-simulation-setup-completion.md) | Simulation Setup の仕上げ(保持する結果数・入力エラーの表示・Interval length) | 易 | — |
+| [G45](G45-text-ribbon-editing.md) | Text リボンの編集ボタン(Cut / Copy / Paste・Go To Line・Replace)を動かす | 中 | — |
+| [G46](G46-translate-job.md) | Translate を Check から分離する(翻訳だけ行うジョブ) | 中 | — |
+| [G47](G47-diagram-zoom-controls.md) | Diagram の表示操作(100% / Fit ボタン)とリボンの折りたたみ | 易 | — |
+| [G48](G48-save-setup-in-model.md) | Save in Model(Simulation Setup を experiment アノテーションに書き戻す) | 中 | G44 |
+| [G49](G49-parameter-sweep.md) | Sweep Parameters(1 つのパラメータを変えて連続シミュレーション) | 難 | G14, G44 |
+| [G50](G50-work-directory-cleanup.md) | 一時作業フォルダの掃除(古い session フォルダが残り続ける) | 易 | — |
+| [G51](G51-stale-docs-and-status-text.md) | 古くなった文書と状態表示の更新 | 易 | — |
+| [G52](G52-unimplemented-ribbon-buttons.md) | 動かないリボンボタンの整理(押しても何も起きないボタンを無くす) | 易 | (G45〜G49) |
 
 並行して進めてよいもの: G02, G03, G09, G10, G11, G13, G14 は互いに独立。
 
@@ -173,6 +199,15 @@ PID_Controller を MSL から開いて Graphics / Documentation / Text / Simulat
 6. **不具合を先に**: G36(Diagram のアイコン)・G37(ドキュメント画像)・G38(値の重なり)・G41(タイトルの重なり)は互いに独立。
 7. **プロット**: G35(Plot Options)→ G39(凡例)。どちらも `views.rs` の `plot_window()` を触るので同時に進めない。
 8. **Text 層**: G40 は G24 のマージ後。
+
+### 2026-11-12 追加(コード全体の見直しから、G42〜G52)
+
+9. **データを失う不具合を先に**: G42(未保存の確認)→ G43(保存の安全性)。どちらも `app.rs` / `dialogs.rs` を触るので順番に。G14 の残り(`Save result as…`)と G50(作業フォルダの掃除)は独立。
+10. **シミュレーション**: G44 → G48、G46 は独立。G49 は G14・G44 の後。
+11. **編集と表示**: G45(Text リボン)、G47(倍率・折りたたみ)は互いに独立。
+12. **最後に**: G52(動かないボタンの整理)と G51(文書)。G52 は G45〜G49 が入った後のほうが作業が少ない。
+
+G42 以降で衝突しやすい組み合わせ: G42/G43(`app.rs` の保存まわり、`dialogs.rs`)、G44/G48(`setup_dialog`)、G45/G46/G47/G48/G49/G52(`chrome.rs` のリボン。**1 つずつマージ**)、G51/G52(`docs/reference/dymola-gui.md`)。
 
 同じファイルを触るため、同時に進めると衝突しやすい組み合わせ: G19/G20(`browsers.rs`)、G20/G22/G14(`app.rs`)、G23/G24/G25(`text_editor.rs`)、G29〜G32・G36(`views.rs` の `diagram_layer` / `diagram_view.rs`)、G35/G39(`plot_window`)、G23/G24/G40(`text_editor.rs`)。
 **同じファイルを触る issue を同時に進めると衝突します。** PR は小さく、1 issue = 1 PR にしてください。

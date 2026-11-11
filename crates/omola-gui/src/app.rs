@@ -138,6 +138,8 @@ pub struct ResultRun {
     pub id: u64,
     pub label: String,
     pub outcome: SimulationOutcome,
+    /// Pinned by "Keep result": never evicted by the `keep_results` limit (G14).
+    pub kept: bool,
 }
 
 /// Cached Variable Browser model for a result and its current filters.
@@ -174,6 +176,7 @@ pub enum PathDialog {
     SaveAs(String),
     RunScript(String),
     ExportCsv(String),
+    LoadResult(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -266,6 +269,7 @@ pub enum DialogResult {
     SaveAs(Option<PathBuf>),
     ExportCsv(Option<PathBuf>),
     RunScript(Option<PathBuf>),
+    LoadResult(Option<PathBuf>),
 }
 
 /// Maximum number of entries in the "Recent files" menu.
@@ -416,6 +420,10 @@ pub struct OmolaApp {
     /// A link to open in the system browser at the end of the frame.
     pub pending_url: Option<String>,
     pub omc_hint_shown: bool,
+    /// The "Unsaved changes" dialog is open because the window was asked to close (G42).
+    pub confirm_exit: bool,
+    /// The user chose to discard unsaved changes: the next close request goes through.
+    pub exit_confirmed: bool,
     pub frame_stats: crate::perf::FrameStats,
     pub pending_edit: Option<String>,
     pub rename_dialog: Option<RenameDialog>,
@@ -548,6 +556,8 @@ impl OmolaApp {
             title_sent: String::new(),
             pending_url: None,
             omc_hint_shown: false,
+            confirm_exit: false,
+            exit_confirmed: false,
             frame_stats: crate::perf::FrameStats::disabled(),
             pending_edit: None,
             rename_dialog: None,
@@ -1307,6 +1317,9 @@ impl OmolaApp {
         if let Err(e) = omola_core::validate_parameter_overrides(&setup.parameters) {
             return self.error(LogTab::Translation, e.to_string());
         }
+        if let Err(message) = setup.validate() {
+            return self.error(LogTab::Translation, message);
+        }
         self.log_tab = LogTab::Translation;
         self.bottom_pane = BottomPane::Logs;
         self.start_error_scan();
@@ -1738,18 +1751,95 @@ impl OmolaApp {
                 .retain(|s| !(moving && Some(s.run_id) == latest_previous));
             diagram.signals.extend(replot);
         }
-        self.runs.push(ResultRun { id, label, outcome });
-        while self.runs.len() > self.keep_results.max(1) {
-            let removed = self.runs.remove(0);
-            self.var_tree_cache.remove(&removed.id);
-            for diagram in &mut self.diagrams {
-                diagram.signals.retain(|s| s.run_id != removed.id);
-            }
-        }
+        self.runs.push(ResultRun {
+            id,
+            label,
+            outcome,
+            kept: false,
+        });
+        self.evict_results();
         // A new result has its own time axis: show its last sample again.
         self.variable_time = None;
         self.tab = RibbonTab::Simulation;
         self.log_tab = LogTab::Simulation;
+    }
+
+    /// Drop the oldest results beyond `keep_results`. Results pinned with "Keep result"
+    /// do not count towards the limit and are never dropped (G14).
+    pub fn evict_results(&mut self) {
+        let limit = self.keep_results.max(1);
+        loop {
+            let unpinned = self.runs.iter().filter(|r| !r.kept).count();
+            if unpinned <= limit {
+                return;
+            }
+            let Some(oldest) = self.runs.iter().find(|r| !r.kept).map(|r| r.id) else {
+                return;
+            };
+            self.close_result(oldest);
+        }
+    }
+
+    /// Remove one result together with its curves and cached variable tree (G14).
+    pub fn close_result(&mut self, run_id: u64) {
+        self.runs.retain(|r| r.id != run_id);
+        self.var_tree_cache.remove(&run_id);
+        for diagram in &mut self.diagrams {
+            diagram.signals.retain(|s| s.run_id != run_id);
+        }
+        self.variable_time = None;
+    }
+
+    /// Pin or unpin a result. Unpinning re-applies the `keep_results` limit (G14).
+    pub fn set_result_kept(&mut self, run_id: u64, kept: bool) {
+        if let Some(run) = self.runs.iter_mut().find(|r| r.id == run_id) {
+            run.kept = kept;
+        }
+        if !kept {
+            self.evict_results();
+        }
+    }
+
+    /// Read a result file from disk into the Variable Browser (G14).
+    pub fn load_result(&mut self, path: PathBuf) {
+        self.log_tab = LogTab::Simulation;
+        self.bottom_pane = BottomPane::Logs;
+        self.worker.submit(Job::LoadResult { path });
+    }
+
+    /// Ask for a result file (`*.mat`) and load it (G14).
+    pub fn request_load_result_dialog(&mut self) {
+        if self.dialog_in_flight() {
+            return;
+        }
+        if Self::use_text_dialogs() {
+            self.path_dialog = Some(PathDialog::LoadResult(String::new()));
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel::<DialogResult>();
+        self.dialog_rx = Some(rx);
+        std::thread::spawn(move || {
+            let result = rfd::FileDialog::new()
+                .add_filter("Simulation result", &["mat"])
+                .pick_file();
+            let _ = tx.send(DialogResult::LoadResult(result));
+        });
+    }
+
+    /// Whether a request to close the window must be held back for confirmation (G42).
+    pub fn must_confirm_exit(&self) -> bool {
+        !self.exit_confirmed && !self.unsaved_documents().is_empty()
+    }
+
+    /// Titles of the documents with unsaved changes, in tab order (G42).
+    ///
+    /// Empty means closing the window or the application loses nothing.
+    pub fn unsaved_documents(&self) -> Vec<String> {
+        self.documents
+            .iter()
+            .filter(|d| d.dirty)
+            .map(|d| d.title())
+            .collect()
     }
 
     /// Return the cached variable tree, rebuilding it only when its inputs change.
@@ -2119,6 +2209,8 @@ impl OmolaApp {
                 DialogResult::ExportCsv(None) => {}
                 DialogResult::RunScript(Some(path)) => self.run_script(&path),
                 DialogResult::RunScript(None) => {}
+                DialogResult::LoadResult(Some(path)) => self.load_result(path),
+                DialogResult::LoadResult(None) => {}
             }
         }
     }
@@ -2189,6 +2281,12 @@ impl eframe::App for OmolaApp {
         self.refresh_error_locations();
         self.poll_dialog();
         self.handle_shortcuts(ui);
+        // Closing the window (title bar, Alt+F4, File > Exit) must not drop edits silently.
+        if ui.ctx().input(|i| i.viewport().close_requested()) && self.must_confirm_exit() {
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.confirm_exit = true;
+        }
         let title = self.window_title();
         if title != self.title_sent {
             ui.ctx()
@@ -2455,6 +2553,65 @@ mod tests {
         assert_eq!(no_parameters, first + 2);
         app.variable_show_time_varying = false;
         assert_eq!(app.var_tree_for(id).generation, first + 3);
+    }
+
+    #[test]
+    fn kept_results_survive_the_keep_results_limit() {
+        let mut app = app();
+        app.keep_results = 1;
+        app.add_run(outcome("First"));
+        let first = app.runs[0].id;
+        app.set_result_kept(first, true);
+        app.add_run(outcome("Second"));
+        app.add_run(outcome("Third"));
+        let classes: Vec<&str> = app.runs.iter().map(|r| r.outcome.class.as_str()).collect();
+        assert_eq!(classes, ["First", "Third"]);
+        // Unpinning applies the limit again: the oldest unpinned result goes.
+        app.set_result_kept(first, false);
+        let classes: Vec<&str> = app.runs.iter().map(|r| r.outcome.class.as_str()).collect();
+        assert_eq!(classes, ["Third"]);
+    }
+
+    #[test]
+    fn closing_a_result_removes_its_curves_and_cache() {
+        let mut app = app();
+        app.keep_results = 3;
+        app.add_run(outcome("First"));
+        app.add_run(outcome("Second"));
+        let first = app.runs[0].id;
+        app.var_tree_for(first);
+        app.diagrams[0].signals.push(PlotSignal {
+            run_id: first,
+            variable: "height".into(),
+        });
+        app.close_result(first);
+        assert_eq!(app.runs.len(), 1);
+        assert!(!app.var_tree_cache.contains_key(&first));
+        assert!(app.diagrams[0].signals.iter().all(|s| s.run_id != first));
+    }
+
+    #[test]
+    fn simulate_rejects_a_stop_time_before_the_start_time() {
+        let mut app = history_app();
+        app.setup.start_time = 2.0;
+        app.setup.stop_time = 1.0;
+        app.simulate();
+        assert!(app
+            .logs
+            .iter()
+            .any(|l| l.level == LogLevel::Error && l.text.contains("Stop time")));
+    }
+
+    #[test]
+    fn unsaved_documents_lists_only_dirty_documents() {
+        let mut app = history_app();
+        assert!(app.unsaved_documents().is_empty());
+        assert!(!app.must_confirm_exit());
+        app.documents[0].dirty = true;
+        assert_eq!(app.unsaved_documents(), ["Unnamed.mo*"]);
+        assert!(app.must_confirm_exit());
+        app.exit_confirmed = true;
+        assert!(!app.must_confirm_exit());
     }
 
     #[test]

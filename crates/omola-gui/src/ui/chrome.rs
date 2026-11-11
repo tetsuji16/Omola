@@ -813,8 +813,12 @@ impl OmolaApp {
         self.model_group(ui, false);
         group(ui, "History", |ui| {
             column(ui, |ui| {
-                small_button(ui, ICON_UNDO, DARK, "Undo", false, false);
-                small_button(ui, ICON_REDO, DARK, "Redo", false, false);
+                if small_button(ui, ICON_UNDO, DARK, "Undo", self.can_undo(), false).clicked() {
+                    self.undo();
+                }
+                if small_button(ui, ICON_REDO, DARK, "Redo", self.can_redo(), false).clicked() {
+                    self.redo();
+                }
             });
         });
         clipboard_group(ui, false);
@@ -931,8 +935,11 @@ impl OmolaApp {
             });
             if edit.has_focus() {
                 if let Ok(v) = text.trim().parse::<f64>() {
-                    if v.is_finite() && v >= 0.0 {
+                    if v.is_finite() && v >= 0.0 && v != self.setup.stop_time {
                         self.setup.stop_time = v;
+                        // A typed stop time is a manual edit: the `experiment` annotation
+                        // of the next opened class must not overwrite it.
+                        self.setup_edited_by_user = true;
                     }
                 }
                 ui.ctx().data_mut(|d| d.insert_temp(buffer_id, text));
@@ -950,12 +957,17 @@ impl OmolaApp {
                     .width(52.0)
                     .selected_text(display_method(&self.setup.method))
                     .show_ui(ui, |ui| {
-                        for m in ["dassl", "ida", "cvode", "euler", "rungekutta"] {
-                            ui.selectable_value(
-                                &mut self.setup.method,
-                                m.to_owned(),
-                                display_method(m),
-                            );
+                        for m in omola_core::SIMULATION_METHODS {
+                            if ui
+                                .selectable_value(
+                                    &mut self.setup.method,
+                                    (*m).to_owned(),
+                                    display_method(m),
+                                )
+                                .changed()
+                            {
+                                self.setup_edited_by_user = true;
+                            }
                         }
                     })
             });
@@ -1022,7 +1034,7 @@ impl OmolaApp {
         });
         fixed_group(ui, "Tools", 95.0, |ui, o| {
             let icons = [
-                (7.0, 6.0, ICON_UPLOAD_FILE, BLUE, "Load Result: issue G14"),
+                (7.0, 6.0, ICON_UPLOAD_FILE, BLUE, "Load Result"),
                 (47.0, 6.0, ICON_VIEW_IN_AR, GREEN, "Animation"),
                 (72.0, 6.0, ICON_WARNING, ORANGE, "Messages"),
                 (47.0, 31.0, ICON_MONITORING, DARK, "Visualize 3D"),
@@ -1034,7 +1046,14 @@ impl OmolaApp {
                     icon_button(ui, icon, color, 17.0, true, false).on_hover_text(tip)
                 });
                 if r.clicked() {
-                    self.not_implemented(tip);
+                    match tip {
+                        "Load Result" => self.request_load_result_dialog(),
+                        "Messages" => {
+                            self.bottom_pane = crate::app::BottomPane::Logs;
+                            self.docks.bottom = true;
+                        }
+                        _ => self.not_implemented(tip),
+                    }
                 }
             }
             let new_plot = place(ui, o, (7.0, 31.0, 22.0, 22.0), |ui| {
