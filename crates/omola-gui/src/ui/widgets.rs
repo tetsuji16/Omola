@@ -26,6 +26,50 @@ pub fn paint_icon(ui: &Ui, center: egui::Pos2, icon: MaterialIcon, size: f32, co
     );
 }
 
+/// Left inset from a model tab's edge to its label.
+pub const MODEL_TAB_LABEL_LEFT: f32 = 26.0;
+/// Distance from a model tab's right edge to the close icon's centre.
+pub const MODEL_TAB_CLOSE_CENTER_INSET: f32 = 14.0;
+/// Width of the close icon drawn in a model tab.
+pub const MODEL_TAB_CLOSE_ICON: f32 = 13.0;
+/// Fixed width of a model tab other than the label text.
+pub const MODEL_TAB_CHROME_WIDTH: f32 = 56.0;
+
+/// Width of a model tab whose label is `text_width` wide. The extra space holds
+/// the left inset, the close icon and both side margins, so the label and the
+/// close icon never overlap.
+pub fn model_tab_width_for_text(text_width: f32) -> f32 {
+    text_width + MODEL_TAB_CHROME_WIDTH
+}
+
+/// Width of a model tab for `label`, measured with the same font used to paint it.
+pub fn model_tab_width(ui: &Ui, label: &str, font: FontId) -> f32 {
+    let text_width = ui.ctx().fonts_mut(|fonts| {
+        fonts
+            .layout_no_wrap(label.to_owned(), font, theme::TEXT)
+            .size()
+            .x
+    });
+    model_tab_width_for_text(text_width)
+}
+
+/// Rectangle in which a model tab's label is painted.
+pub fn model_tab_label_rect(rect: Rect) -> Rect {
+    let right = rect.right() - MODEL_TAB_CLOSE_CENTER_INSET - MODEL_TAB_CLOSE_ICON / 2.0 - 4.0;
+    Rect::from_min_max(
+        egui::pos2(rect.left() + MODEL_TAB_LABEL_LEFT, rect.top()),
+        egui::pos2(right.max(rect.left() + MODEL_TAB_LABEL_LEFT), rect.bottom()),
+    )
+}
+
+/// Hit-test rectangle of a model tab's close icon.
+pub fn model_tab_close_rect(rect: Rect) -> Rect {
+    Rect::from_center_size(
+        egui::pos2(rect.right() - MODEL_TAB_CLOSE_CENTER_INSET, rect.center().y),
+        Vec2::splat(MODEL_TAB_CLOSE_ICON + 1.0),
+    )
+}
+
 fn button_frame(ui: &Ui, rect: Rect, response: &Response, selected: bool, enabled: bool) {
     let painter = ui.painter();
     if selected {
@@ -373,4 +417,26 @@ pub fn flat_tab(ui: &mut Ui, label: &str, selected: bool) -> Response {
         theme::TEXT,
     );
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{model_tab_close_rect, model_tab_label_rect, model_tab_width_for_text};
+    use egui::{pos2, Rect, Vec2};
+
+    #[test]
+    fn tab_width_includes_the_close_icon_and_margins() {
+        assert_eq!(model_tab_width_for_text(40.0), 96.0);
+        assert_eq!(model_tab_width_for_text(120.0), 176.0);
+    }
+
+    #[test]
+    fn label_and_close_icon_do_not_overlap() {
+        let rect = Rect::from_min_size(pos2(10.0, 0.0), Vec2::new(160.0, 22.0));
+        let label = model_tab_label_rect(rect);
+        let close = model_tab_close_rect(rect);
+        assert!(label.left() >= rect.left());
+        assert!(label.right() < close.left());
+        assert!(close.right() <= rect.right());
+    }
 }

@@ -1,6 +1,8 @@
 //! Central views: model tabs + edit window (per layer) and the plot window.
 
-use super::widgets::{flat_tab, paint_icon};
+use super::widgets::{
+    flat_tab, model_tab_close_rect, model_tab_label_rect, model_tab_width, paint_icon,
+};
 use crate::app::{Layer, Loadable, OmolaApp, PlotSignal};
 use crate::text_editor::{draw_readonly_text_editor, draw_text_editor, lines_for_file};
 use crate::theme;
@@ -70,13 +72,10 @@ impl OmolaApp {
                 let dirty = self.doc_of(&class).is_some_and(|i| self.documents[i].dirty);
                 let label = tab_label(&class, dirty);
                 let font = FontId::proportional(12.5);
-                let tw = ui.ctx().fonts_mut(|f| {
-                    f.layout_no_wrap(label.clone(), font.clone(), theme::TEXT)
-                        .size()
-                        .x
-                });
-                let (rect, resp) =
-                    ui.allocate_exact_size(Vec2::new(tw + 56.0, 22.0), Sense::click());
+                let (rect, resp) = ui.allocate_exact_size(
+                    Vec2::new(model_tab_width(ui, &label, font.clone()), 22.0),
+                    Sense::click(),
+                );
                 let painter = ui.painter();
                 painter.rect(
                     rect,
@@ -92,17 +91,15 @@ impl OmolaApp {
                     ),
                     egui::StrokeKind::Inside,
                 );
-                painter.text(
-                    egui::pos2(rect.left() + 26.0, rect.center().y),
+                let label_rect = model_tab_label_rect(rect);
+                ui.painter_at(label_rect).text(
+                    egui::pos2(label_rect.left(), rect.center().y),
                     Align2::LEFT_CENTER,
                     label,
                     font,
                     theme::TEXT,
                 );
-                let x_rect = egui::Rect::from_center_size(
-                    egui::pos2(rect.right() - 14.0, rect.center().y),
-                    Vec2::splat(14.0),
-                );
+                let x_rect = model_tab_close_rect(rect);
                 paint_icon(
                     ui,
                     x_rect.center(),
