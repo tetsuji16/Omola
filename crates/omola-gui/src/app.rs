@@ -265,6 +265,7 @@ pub enum DialogResult {
     Open(Option<PathBuf>),
     SaveAs(Option<PathBuf>),
     ExportCsv(Option<PathBuf>),
+    RunScript(Option<PathBuf>),
 }
 
 /// Maximum number of entries in the "Recent files" menu.
@@ -1928,8 +1929,16 @@ impl OmolaApp {
         std::env::var("OMOLA_GUI_TEXT_DIALOGS").as_deref() == Ok("1")
     }
 
+    /// True while a file dialog (native or text fallback) is already open.
+    fn dialog_in_flight(&self) -> bool {
+        self.dialog_rx.is_some() || self.path_dialog.is_some()
+    }
+
     /// Open a native "Open file" dialog on a background thread.
     pub fn request_open_dialog(&mut self) {
+        if self.dialog_in_flight() {
+            return;
+        }
         if Self::use_text_dialogs() {
             self.path_dialog = Some(PathDialog::Open(String::new()));
             return;
@@ -1946,6 +1955,9 @@ impl OmolaApp {
 
     /// Open a native "Save as" dialog on a background thread.
     pub fn request_save_as_dialog(&mut self) {
+        if self.dialog_in_flight() {
+            return;
+        }
         if Self::use_text_dialogs() {
             self.path_dialog = Some(PathDialog::SaveAs(String::new()));
             return;
@@ -1972,6 +1984,9 @@ impl OmolaApp {
 
     /// Open a native "Save as" dialog for the plot CSV on a background thread.
     pub fn request_export_csv(&mut self) {
+        if self.dialog_in_flight() {
+            return;
+        }
         if self.active_signals().is_empty() {
             self.info(
                 LogTab::Simulation,
@@ -1992,6 +2007,36 @@ impl OmolaApp {
                 .save_file();
             let _ = tx.send(DialogResult::ExportCsv(result));
         });
+    }
+
+    /// Open a native "Run script" dialog on a background thread.
+    pub fn request_run_script_dialog(&mut self) {
+        if self.dialog_in_flight() {
+            return;
+        }
+        if Self::use_text_dialogs() {
+            self.path_dialog = Some(PathDialog::RunScript(String::new()));
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel::<DialogResult>();
+        self.dialog_rx = Some(rx);
+        std::thread::spawn(move || {
+            let result = rfd::FileDialog::new()
+                .add_filter("OpenModelica script", &["mos"])
+                .pick_file();
+            let _ = tx.send(DialogResult::RunScript(result));
+        });
+    }
+
+    /// Run an OpenModelica script through the Commands pane.
+    pub fn run_script(&mut self, path: &std::path::Path) {
+        self.command_input = format!(
+            "runScript(\"{}\")",
+            omola_core::escape_modelica_string(&path.to_string_lossy())
+        );
+        self.bottom_pane = BottomPane::Commands;
+        self.docks.bottom = true;
+        self.run_command();
     }
 
     /// Write the curves of the active diagram to `path` as Omola CSV.
@@ -2072,6 +2117,8 @@ impl OmolaApp {
                 DialogResult::SaveAs(None) => {}
                 DialogResult::ExportCsv(Some(path)) => self.export_csv(&path),
                 DialogResult::ExportCsv(None) => {}
+                DialogResult::RunScript(Some(path)) => self.run_script(&path),
+                DialogResult::RunScript(None) => {}
             }
         }
     }
@@ -2825,6 +2872,21 @@ mod tests {
             list[0],
             PathBuf::from(format!("/tmp/{}.mo", MAX_RECENT_FILES + 2))
         );
+    }
+
+    #[test]
+    fn requests_are_ignored_while_a_dialog_is_open() {
+        let mut app = app();
+        app.path_dialog = Some(PathDialog::Open(String::new()));
+        app.request_open_dialog();
+        app.request_save_as_dialog();
+        assert!(matches!(app.path_dialog, Some(PathDialog::Open(_))));
+        assert!(app.dialog_rx.is_none());
+
+        app.path_dialog = None;
+        app.dialog_rx = Some(std::sync::mpsc::channel().1);
+        app.request_open_dialog();
+        assert!(app.path_dialog.is_none());
     }
 
     #[test]
