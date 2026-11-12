@@ -264,10 +264,28 @@ impl OmolaApp {
             self.save();
         }
         if ui
-            .add_enabled(self.active_doc().is_some(), egui::Button::new("Save As..."))
+            .add_enabled(
+                self.active_doc().is_some(),
+                egui::Button::new("Save As...   Ctrl+Shift+S"),
+            )
             .clicked()
         {
             self.request_save_as_dialog();
+        }
+        if ui
+            .add_enabled(self.can_save_all(), egui::Button::new("Save All"))
+            .clicked()
+        {
+            self.save_all();
+        }
+        if ui
+            .add_enabled(self.active.is_some(), egui::Button::new("Close   Ctrl+W"))
+            .clicked()
+        {
+            self.close_active();
+        }
+        if ui.button("Load Result...").clicked() {
+            self.request_load_result_dialog();
         }
         // Recent files submenu.
         if !self.recent_files.is_empty() {
@@ -827,8 +845,20 @@ impl OmolaApp {
                 if small_button(ui, ICON_SEARCH, DARK, "Find", true, false).clicked() {
                     self.find_open = true;
                 }
-                small_button(ui, ICON_FIND_REPLACE, DARK, "Replace", false, false);
-                small_button(ui, ICON_ARROW_RIGHT_ALT, DARK, "Go To", false, false);
+                if small_button(ui, ICON_FIND_REPLACE, DARK, "Replace", editable, false)
+                    .on_hover_text("Replace (Ctrl+H)")
+                    .on_disabled_hover_text("Replace works in a user model")
+                    .clicked()
+                {
+                    self.open_replace_dialog();
+                }
+                if small_button(ui, ICON_ARROW_RIGHT_ALT, DARK, "Go To", editable, false)
+                    .on_hover_text("Go to line (Ctrl+G)")
+                    .on_disabled_hover_text("Go To works in a user model")
+                    .clicked()
+                {
+                    self.open_goto_line_dialog();
+                }
             });
         });
         group(ui, "Tools", |ui| {
@@ -879,11 +909,11 @@ impl OmolaApp {
         });
         fixed_group(ui, "Simulation", 382.0, |ui, o| {
             let translate = place(ui, o, (6.0, 6.0, 90.0, 22.0), |ui| {
-                small_button(ui, ICON_BUILD, BLUE, "Translate  \u{25BE}", true, false)
-                    .on_hover_text("Check the model (a separate translation step is issue G05)")
+                small_button(ui, ICON_BUILD, BLUE, "Translate", !self.busy, false)
+                    .on_hover_text("Translate (build the model without simulating)")
             });
             if translate.clicked() {
-                self.check();
+                self.translate();
             }
             let simulate = place(ui, o, (6.0, 31.0, 90.0, 22.0), |ui| {
                 small_button(ui, ICON_PLAY_CIRCLE, BLUE, "Simulate", !self.busy, false)
@@ -904,12 +934,13 @@ impl OmolaApp {
                     ICON_STACKED_LINE_CHART,
                     DARK,
                     "Sweep Parameters",
-                    true,
+                    !self.busy,
                     false,
                 )
+                .on_hover_text("Simulate once per value of one parameter")
             });
             if sweep.clicked() {
-                self.not_implemented("Sweep Parameters");
+                self.open_sweep_dialog();
             }
             let setup = place(ui, o, (222.0, 6.0, 60.0, 22.0), |ui| {
                 small_button(ui, ICON_TIMER, DARK, "Setup", true, false)
@@ -971,14 +1002,22 @@ impl OmolaApp {
                         }
                     })
             });
-            for (y, label) in [
-                (6.0, "Continue  \u{25BE}"),
-                (31.0, "Linearize"),
-                (56.0, "Save in Model"),
-            ] {
+            for (y, label) in [(6.0, "Continue  \u{25BE}"), (31.0, "Linearize")] {
                 place(ui, o, (292.0, y, 88.0, 22.0), |ui| {
                     ui.add_enabled(false, egui::Button::new(label).frame(false))
+                        .on_disabled_hover_text("Not implemented yet in Omola")
                 });
+            }
+            let store = place(ui, o, (292.0, 56.0, 88.0, 22.0), |ui| {
+                ui.add_enabled(
+                    self.can_store_setup(),
+                    egui::Button::new("Save in Model").frame(false),
+                )
+                .on_hover_text("Store the setup in the experiment annotation of the model")
+                .on_disabled_hover_text("Open a user model to store the setup")
+            });
+            if store.clicked() {
+                self.save_setup_in_model();
             }
         });
         fixed_group(ui, "Plot", 268.0, |ui, o| {

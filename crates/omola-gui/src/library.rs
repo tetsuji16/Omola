@@ -440,6 +440,36 @@ pub fn check_script(
     Ok(script)
 }
 
+/// Script for `Translate` (G46): build `class` in `work_dir` without running it.
+///
+/// `buildModel` returns `{"<executable>", "<init file>"}`; both are empty when the
+/// translation or the C compilation failed, so the `build` section is empty on failure.
+pub fn translate_script(
+    class: &str,
+    libraries: &[LibrarySpec],
+    user_file: Option<&Path>,
+    work_dir: &Path,
+) -> Result<String, BackendError> {
+    validate_class_name(class)?;
+    let mut script = format!(
+        "cd(\"{}\");\n",
+        escape_modelica_string(&work_dir.to_string_lossy())
+    );
+    for (i, spec) in libraries.iter().enumerate() {
+        script.push_str(&load_statement(spec, &format!("omolaLib{i}"))?);
+    }
+    if let Some(file) = user_file {
+        script.push_str(&format!(
+            "omolaUser := loadFile(\"{}\");\n",
+            escape_modelica_string(&file.to_string_lossy())
+        ));
+    }
+    script.push_str(&format!(
+        "omolaBuild := buildModel({class});\nprint(\"OMOLA_BEGIN build\\n\" + omolaBuild[1] + \"\\nOMOLA_END build\\n\");\nprint(\"OMOLA_BEGIN errors\\n\" + getErrorString() + \"\\nOMOLA_END errors\\n\");\n"
+    ));
+    Ok(script)
+}
+
 /// Collect `OMOLA_BEGIN key` ... `OMOLA_END key` blocks (first occurrence of each key).
 pub fn parse_sections(output: &str) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
@@ -757,5 +787,30 @@ mod tests {
             resolve_link("modelica://Other/x.png", "Modelica", &roots),
             LinkTarget::Unsupported(_)
         ));
+    }
+
+    #[test]
+    fn translate_script_builds_in_the_work_directory() {
+        let script = translate_script(
+            "Demo.M",
+            &[],
+            Some(Path::new("/tmp/run/Demo_M.mo")),
+            Path::new("/tmp/run/build"),
+        )
+        .unwrap();
+        let cd = script.find("cd(\"/tmp/run/build\");").expect("cd first");
+        let load = script
+            .find("loadFile(\"/tmp/run/Demo_M.mo\")")
+            .expect("load");
+        let build = script
+            .find("omolaBuild := buildModel(Demo.M);")
+            .expect("build");
+        assert!(cd < load && load < build, "{script}");
+        assert!(script.contains("OMOLA_BEGIN build") && script.contains("OMOLA_BEGIN errors"));
+        assert!(
+            !script.contains("simulate("),
+            "Translate must not run the model"
+        );
+        assert!(translate_script("bad name;", &[], None, Path::new("/tmp")).is_err());
     }
 }

@@ -1,6 +1,8 @@
 //! Modal-ish windows: Simulation Setup and the temporary path dialogs.
 
-use crate::app::{component_name_error, OmolaApp, PathDialog, RenameDialog};
+use crate::app::{
+    component_name_error, ConflictAnswer, DialogResult, OmolaApp, PathDialog, RenameDialog,
+};
 use std::path::PathBuf;
 
 impl OmolaApp {
@@ -11,6 +13,261 @@ impl OmolaApp {
         self.rename_dialog_window(&ctx);
         self.parameter_dialog_window(&ctx);
         self.exit_dialog_window(&ctx);
+        self.close_dialog_window(&ctx);
+        self.overwrite_dialog_window(&ctx);
+        self.save_conflict_window(&ctx);
+        self.sweep_dialog_window(&ctx);
+        self.goto_line_window(&ctx);
+        self.replace_window(&ctx);
+    }
+
+    /// "Save changes?" before a single document is closed (G42).
+    fn close_dialog_window(&mut self, ctx: &egui::Context) {
+        let Some(doc) = self.pending_close else {
+            return;
+        };
+        let Some(title) = self.documents.get(doc).map(|d| d.title()) else {
+            self.pending_close = None;
+            return;
+        };
+        let title = title.trim_end_matches('*').to_owned();
+        egui::Window::new("Save changes?")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(format!("{title} has unsaved changes."));
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button("Save").clicked() {
+                        self.confirm_close_save();
+                    }
+                    if ui.button("Discard").clicked() {
+                        self.confirm_close_discard();
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.pending_close = None;
+                    }
+                });
+            });
+    }
+
+    /// "Replace file?" for the text-input path dialogs, which cannot ask themselves (G43).
+    fn overwrite_dialog_window(&mut self, ctx: &egui::Context) {
+        let Some(path) = self
+            .overwrite_confirm
+            .as_ref()
+            .map(|w| w.path().display().to_string())
+        else {
+            return;
+        };
+        egui::Window::new("Replace file?")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(format!("{path} already exists."));
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button("Replace").clicked() {
+                        self.resolve_overwrite(true);
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.resolve_overwrite(false);
+                    }
+                });
+            });
+    }
+
+    /// "File changed on disk": another program wrote the file since Omola read it (G43).
+    fn save_conflict_window(&mut self, ctx: &egui::Context) {
+        let Some(doc) = self.save_conflict else {
+            return;
+        };
+        let Some(path) = self.documents.get(doc).and_then(|d| d.path.clone()) else {
+            self.save_conflict = None;
+            return;
+        };
+        egui::Window::new("File changed on disk")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(format!(
+                    "{} was changed by another program since Omola read it.",
+                    path.display()
+                ));
+                ui.label("Overwrite keeps your text. Reload from disk drops your changes.");
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button("Overwrite").clicked() {
+                        self.resolve_save_conflict(ConflictAnswer::Overwrite);
+                    }
+                    if ui.button("Reload from disk").clicked() {
+                        self.resolve_save_conflict(ConflictAnswer::Reload);
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.resolve_save_conflict(ConflictAnswer::Cancel);
+                    }
+                });
+            });
+    }
+
+    /// "Sweep Parameters": one parameter, evenly spaced values, one kept run each (G49).
+    fn sweep_dialog_window(&mut self, ctx: &egui::Context) {
+        let Some(mut dialog) = self.sweep_dialog.clone() else {
+            return;
+        };
+        let mut open = true;
+        let mut start = false;
+        let mut cancel = false;
+        egui::Window::new("Sweep Parameters")
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.label(format!(
+                    "Model: {}",
+                    self.active.clone().unwrap_or_else(|| "-".into())
+                ));
+                egui::Grid::new("sweep_fields")
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        ui.label("Parameter");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut dialog.parameter)
+                                .desired_width(180.0)
+                                .hint_text("for example e"),
+                        );
+                        ui.end_row();
+                        ui.label("From");
+                        ui.add(egui::TextEdit::singleline(&mut dialog.from).desired_width(90.0));
+                        ui.end_row();
+                        ui.label("To");
+                        ui.add(egui::TextEdit::singleline(&mut dialog.to).desired_width(90.0));
+                        ui.end_row();
+                        ui.label("Points");
+                        ui.add(egui::TextEdit::singleline(&mut dialog.points).desired_width(90.0));
+                        ui.end_row();
+                    });
+                ui.label(format!(
+                    "2 to {} runs. Each run is kept until you close it.",
+                    crate::backend::MAX_SWEEP_POINTS
+                ));
+                if let Some(message) = &dialog.error {
+                    ui.colored_label(egui::Color32::RED, message);
+                }
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(!self.busy, egui::Button::new("Start"))
+                        .clicked()
+                    {
+                        start = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+        if cancel || !open {
+            self.sweep_dialog = None;
+        } else if start {
+            match self.start_sweep(&dialog.parameter, &dialog.from, &dialog.to, &dialog.points) {
+                Ok(()) => self.sweep_dialog = None,
+                Err(message) => {
+                    dialog.error = Some(message);
+                    self.sweep_dialog = Some(dialog);
+                }
+            }
+        } else {
+            self.sweep_dialog = Some(dialog);
+        }
+    }
+
+    /// "Go To Line" of the Text layer (G45).
+    fn goto_line_window(&mut self, ctx: &egui::Context) {
+        let Some(mut text) = self.goto_line_dialog.clone() else {
+            return;
+        };
+        let mut open = true;
+        let mut go = false;
+        let mut error = None;
+        egui::Window::new("Go To Line")
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Line");
+                    let edit = ui.add(egui::TextEdit::singleline(&mut text).desired_width(80.0));
+                    if edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        go = true;
+                    }
+                    if ui.button("Go").clicked() {
+                        go = true;
+                    }
+                });
+                if go {
+                    error = self.goto_line(&text).err();
+                }
+                if let Some(message) = &error {
+                    ui.colored_label(egui::Color32::RED, message);
+                }
+            });
+        if !open || (go && error.is_none()) {
+            self.goto_line_dialog = None;
+        } else {
+            self.goto_line_dialog = Some(text);
+        }
+    }
+
+    /// "Replace" of the Text layer: replaces every occurrence in one undo step (G45).
+    fn replace_window(&mut self, ctx: &egui::Context) {
+        let Some(mut dialog) = self.replace_dialog.clone() else {
+            return;
+        };
+        let mut open = true;
+        let mut replace = false;
+        egui::Window::new("Replace")
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut open)
+            .show(ctx, |ui| {
+                egui::Grid::new("replace_fields")
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        ui.label("Find");
+                        ui.add(egui::TextEdit::singleline(&mut dialog.find).desired_width(220.0));
+                        ui.end_row();
+                        ui.label("Replace with");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut dialog.replace).desired_width(220.0),
+                        );
+                        ui.end_row();
+                    });
+                ui.label("Case-sensitive. Undo restores the text.");
+                if let Some(message) = &dialog.error {
+                    ui.label(message);
+                }
+                if ui.button("Replace All").clicked() {
+                    replace = true;
+                }
+            });
+        if !open {
+            self.replace_dialog = None;
+            return;
+        }
+        if replace {
+            dialog.error = Some(
+                match self.replace_in_active(&dialog.find, &dialog.replace) {
+                    Ok(count) => format!("Replaced {count} occurrence(s)."),
+                    Err(message) => message,
+                },
+            );
+        }
+        // `replace_in_active` never closes a document, so the dialog stays valid.
+        self.replace_dialog = Some(dialog);
     }
 
     /// "Unsaved changes" confirmation shown when the window is asked to close (G42).
@@ -34,6 +291,9 @@ impl OmolaApp {
                 }
                 ui.separator();
                 ui.horizontal(|ui| {
+                    if ui.button("Save all and exit").clicked() && self.save_all_and_exit() {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
                     if ui.button("Discard and exit").clicked() {
                         self.exit_confirmed = true;
                         self.confirm_exit = false;
@@ -192,6 +452,7 @@ impl OmolaApp {
             self.setup.tolerance,
             self.setup.method.clone(),
         );
+        let keep_before = self.keep_results;
         egui::Window::new("Simulation Setup")
             .open(&mut open)
             .resizable(false)
@@ -227,6 +488,25 @@ impl OmolaApp {
                                 .range(1..=10_000_000),
                         );
                         ui.end_row();
+                        // Another view of the same value: nothing extra is stored.
+                        ui.label("Interval length");
+                        let (start, stop) = (self.setup.start_time, self.setup.stop_time);
+                        let mut length =
+                            (stop - start) / f64::from(self.setup.number_of_intervals.max(1));
+                        if ui
+                            .add_enabled(
+                                stop > start,
+                                egui::DragValue::new(&mut length)
+                                    .speed(0.001)
+                                    .range(0.0..=f64::MAX)
+                                    .suffix(" s"),
+                            )
+                            .changed()
+                        {
+                            self.setup.number_of_intervals =
+                                crate::backend::intervals_for_length(start, stop, length);
+                        }
+                        ui.end_row();
                         ui.label("Tolerance");
                         ui.add(
                             egui::DragValue::new(&mut self.setup.tolerance)
@@ -248,6 +528,13 @@ impl OmolaApp {
                             });
                         ui.end_row();
                     });
+                ui.separator();
+                ui.strong("Output");
+                ui.horizontal(|ui| {
+                    ui.label("Number of results to keep");
+                    ui.add(egui::DragValue::new(&mut self.keep_results).range(1..=20))
+                        .on_hover_text("Older results are closed; kept results stay");
+                });
                 ui.separator();
                 ui.strong("Parameter overrides");
                 let mut remove = None;
@@ -276,9 +563,16 @@ impl OmolaApp {
                     self.setup.parameters.push((String::new(), String::new()));
                 }
                 ui.separator();
+                let problem = self.setup.validate().err();
+                if let Some(message) = &problem {
+                    ui.colored_label(egui::Color32::RED, message);
+                }
                 ui.horizontal(|ui| {
                     if ui
-                        .add_enabled(!self.busy, egui::Button::new("Simulate"))
+                        .add_enabled(
+                            !self.busy && problem.is_none(),
+                            egui::Button::new("Simulate"),
+                        )
                         .clicked()
                     {
                         self.setup
@@ -286,6 +580,14 @@ impl OmolaApp {
                             .retain(|(n, v)| !n.trim().is_empty() && !v.trim().is_empty());
                         self.simulate();
                         self.show_setup = false;
+                    }
+                    if ui
+                        .add_enabled(self.can_store_setup(), egui::Button::new("Store in model"))
+                        .on_hover_text("Write these values into the experiment annotation")
+                        .on_disabled_hover_text("Open a user model to store the setup")
+                        .clicked()
+                    {
+                        self.save_setup_in_model();
                     }
                     if ui.button("OK").clicked() {
                         self.setup
@@ -306,6 +608,9 @@ impl OmolaApp {
         if after != before {
             self.setup_edited_by_user = true;
         }
+        if self.keep_results < keep_before {
+            self.evict_results();
+        }
     }
 
     fn path_dialog_window(&mut self, ctx: &egui::Context) {
@@ -324,6 +629,9 @@ impl OmolaApp {
             PathDialog::LoadResult(t) => {
                 ("Load Result", "Path to a result file (_res.mat)", t.clone())
             }
+            PathDialog::SaveResult(_, t) => {
+                ("Save result as", "Path to a result file (.mat)", t.clone())
+            }
         };
         let mut keep_open = true;
         let mut submitted = false;
@@ -341,21 +649,22 @@ impl OmolaApp {
             });
         if submitted && !text.trim().is_empty() {
             self.path_dialog = None;
-            let path = PathBuf::from(text.trim());
-            match dialog {
-                PathDialog::Open(_) => self.open_file(path),
-                PathDialog::SaveAs(_) => {
-                    if let Some(i) = self.active_doc() {
-                        self.documents[i].path = Some(path);
-                    }
-                    self.save();
-                }
-                PathDialog::RunScript(_) => self.run_script(&path),
-                PathDialog::ExportCsv(_) => self.export_csv(&path),
-                PathDialog::LoadResult(_) => self.load_result(path),
-            }
+            let path = Some(PathBuf::from(text.trim()));
+            let result = match dialog {
+                PathDialog::Open(_) => DialogResult::Open(path),
+                PathDialog::SaveAs(_) => DialogResult::SaveAs(path),
+                PathDialog::RunScript(_) => DialogResult::RunScript(path),
+                PathDialog::ExportCsv(_) => DialogResult::ExportCsv(path),
+                PathDialog::LoadResult(_) => DialogResult::LoadResult(path),
+                PathDialog::SaveResult(run_id, _) => DialogResult::SaveResult(run_id, path),
+            };
+            // This dialog has no "Replace file?" question of its own.
+            self.apply_dialog_result(result, true);
         } else if !keep_open {
             self.path_dialog = None;
+            if matches!(dialog, PathDialog::SaveAs(_)) {
+                self.apply_dialog_result(DialogResult::SaveAs(None), true);
+            }
         } else {
             self.path_dialog = Some(match dialog {
                 PathDialog::Open(_) => PathDialog::Open(text),
@@ -363,6 +672,7 @@ impl OmolaApp {
                 PathDialog::RunScript(_) => PathDialog::RunScript(text),
                 PathDialog::ExportCsv(_) => PathDialog::ExportCsv(text),
                 PathDialog::LoadResult(_) => PathDialog::LoadResult(text),
+                PathDialog::SaveResult(run_id, _) => PathDialog::SaveResult(run_id, text),
             });
         }
     }

@@ -31,6 +31,9 @@ pub struct Document {
     pub redo: Vec<String>,
     /// Editor state (cursor position, selection, syntax highlighting, etc.).
     pub editor: EditorState,
+    /// [`fingerprint`] of the file content when it was last read or written by Omola.
+    /// `None` when the document was never read from or written to `path`.
+    pub disk_stamp: Option<u64>,
 }
 
 impl Document {
@@ -42,6 +45,7 @@ impl Document {
             undo: Vec::new(),
             redo: Vec::new(),
             editor: EditorState::new(),
+            disk_stamp: None,
         }
     }
 
@@ -49,6 +53,7 @@ impl Document {
         let text = std::fs::read_to_string(&path)?;
         Ok(Self {
             path: Some(path),
+            disk_stamp: Some(fingerprint(text.as_bytes())),
             text,
             dirty: false,
             undo: Vec::new(),
@@ -61,7 +66,32 @@ impl Document {
         if let Some(path) = &self.path {
             write_atomic(path, &self.text)?;
             self.dirty = false;
+            self.disk_stamp = Some(fingerprint(self.text.as_bytes()));
         }
+        Ok(())
+    }
+
+    /// `true` when the file exists and its content differs from what Omola last read or
+    /// wrote (issue G43). A missing file is not a conflict: saving simply recreates it.
+    pub fn changed_on_disk(&self) -> bool {
+        let Some(path) = &self.path else { return false };
+        match std::fs::read(path) {
+            Ok(bytes) => Some(fingerprint(&bytes)) != self.disk_stamp,
+            Err(_) => false,
+        }
+    }
+
+    /// Replace the buffer with the file content (the "Reload from disk" answer of G43).
+    pub fn reload(&mut self) -> std::io::Result<()> {
+        let Some(path) = &self.path else {
+            return Ok(());
+        };
+        let text = std::fs::read_to_string(path)?;
+        self.disk_stamp = Some(fingerprint(text.as_bytes()));
+        self.text = text;
+        self.dirty = false;
+        self.undo.clear();
+        self.redo.clear();
         Ok(())
     }
 
@@ -81,31 +111,109 @@ impl Document {
     }
 }
 
+/// Fingerprint of file content, used to notice that another program changed a file.
+///
+/// Only compared inside one process, so the standard hasher is enough.
+pub fn fingerprint(bytes: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    hasher.finish()
+}
+
 /// Write `text` to `path` through a temporary sibling file followed by a rename.
 ///
 /// A crash, a full disk or a failed write therefore never leaves a half-written model
-/// behind: the original file is only replaced once the new content is completely on disk.
-/// A symbolic link is followed (the link target is replaced, not the link) and the
-/// permissions of an existing file are kept.
+/// behind: the original file is only replaced once the new content is completely on disk
+/// (`sync_all` before the rename). A symbolic link is followed (the link target is
+/// replaced, not the link) and the permissions of an existing file are kept. A read-only
+/// file is not replaced. The temporary file is created exclusively under a fresh name, so
+/// an existing file or a link planted under that name is never written through.
 pub fn write_atomic(path: &std::path::Path, text: &str) -> std::io::Result<()> {
     let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let file_name = target.file_name().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::InvalidInput, "path has no file name")
     })?;
-    let mut tmp_name = std::ffi::OsString::from(".");
-    tmp_name.push(file_name);
-    tmp_name.push(format!(".omola-tmp-{}", std::process::id()));
-    let tmp = target.with_file_name(tmp_name);
-    let result = std::fs::write(&tmp, text).and_then(|()| {
-        if let Ok(meta) = std::fs::metadata(&target) {
-            let _ = std::fs::set_permissions(&tmp, meta.permissions());
-        }
-        std::fs::rename(&tmp, &target)
-    });
+    let existing = match std::fs::metadata(&target) {
+        Ok(meta) => Some(meta.permissions()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error),
+    };
+    if existing.as_ref().is_some_and(|p| p.readonly()) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "the file is read-only",
+        ));
+    }
+    let (tmp, file) = create_temporary_sibling(&target, file_name)?;
+    let result = fill_and_replace(file, &tmp, &target, text, existing);
     if result.is_err() {
+        // `tmp` was created by this call (`create_new`), so removing it is safe.
         let _ = std::fs::remove_file(&tmp);
     }
     result
+}
+
+/// Create `.<file>.omola-tmp-<pid>-<nanos>-<n>` next to `target`; never opens an existing file.
+fn create_temporary_sibling(
+    target: &std::path::Path,
+    file_name: &std::ffi::OsStr,
+) -> std::io::Result<(PathBuf, std::fs::File)> {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    for attempt in 0..32u32 {
+        let mut name = std::ffi::OsString::from(".");
+        name.push(file_name);
+        name.push(format!(
+            ".omola-tmp-{}-{nanos}-{attempt}",
+            std::process::id()
+        ));
+        let tmp = target.with_file_name(name);
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            // Private until the content is complete; the final permissions are set later.
+            options.mode(0o600);
+        }
+        match options.open(&tmp) {
+            Ok(file) => return Ok((tmp, file)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AlreadyExists,
+        "could not create a temporary file next to the target",
+    ))
+}
+
+fn fill_and_replace(
+    mut file: std::fs::File,
+    tmp: &std::path::Path,
+    target: &std::path::Path,
+    text: &str,
+    existing: Option<std::fs::Permissions>,
+) -> std::io::Result<()> {
+    use std::io::Write;
+    file.write_all(text.as_bytes())?;
+    if let Some(permissions) = existing {
+        file.set_permissions(permissions)?;
+    }
+    file.sync_all()?;
+    drop(file);
+    std::fs::rename(tmp, target)?;
+    // Make the rename itself durable. The new content is already in place, so a failure
+    // here must not be reported as a failed save.
+    #[cfg(unix)]
+    if let Some(dir) = target.parent() {
+        if let Ok(dir) = std::fs::File::open(dir) {
+            let _ = dir.sync_all();
+        }
+    }
+    Ok(())
 }
 
 /// A class found by [`scan_classes`].
@@ -396,6 +504,54 @@ mod tests {
         assert!(dir.join("New.mo").is_file());
         // A missing directory is an error and creates nothing.
         assert!(write_atomic(&dir.join("missing").join("X.mo"), "x").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_atomic_ignores_a_planted_temporary_name_and_keeps_read_only_files() {
+        let dir = std::env::temp_dir().join(format!("omola-atomic-ro-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("M.mo");
+        std::fs::write(&path, "old").unwrap();
+        // The old, predictable temporary name; a file planted there must survive untouched.
+        let planted = dir.join(format!(".M.mo.omola-tmp-{}", std::process::id()));
+        std::fs::write(&planted, "planted").unwrap();
+        write_atomic(&path, "new").unwrap();
+        assert_eq!(std::fs::read_to_string(&planted).unwrap(), "planted");
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&path, permissions.clone()).unwrap();
+        assert!(write_atomic(&path, "blocked").is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
+        #[allow(clippy::permissions_set_readonly_false)]
+        permissions.set_readonly(false);
+        std::fs::set_permissions(&path, permissions).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn changed_on_disk_detects_an_external_write() {
+        let dir = std::env::temp_dir().join(format!("omola-stamp-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("M.mo");
+        std::fs::write(&path, "model M end M;").unwrap();
+        let mut doc = Document::open(path.clone()).unwrap();
+        assert!(!doc.changed_on_disk());
+        std::fs::write(&path, "model M Real x; end M;").unwrap();
+        assert!(doc.changed_on_disk());
+        doc.text = "model M Real y; end M;".into();
+        doc.save().unwrap();
+        assert!(!doc.changed_on_disk(), "our own save is not a conflict");
+        std::fs::write(&path, "model M Real z; end M;").unwrap();
+        doc.reload().unwrap();
+        assert_eq!(doc.text, "model M Real z; end M;");
+        assert!(!doc.changed_on_disk() && !doc.dirty);
+        std::fs::remove_file(&path).unwrap();
+        assert!(
+            !doc.changed_on_disk(),
+            "a deleted file is recreated by Save"
+        );
+        assert!(!Document::new_untitled("x").changed_on_disk());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

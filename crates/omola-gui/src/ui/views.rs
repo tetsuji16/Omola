@@ -121,7 +121,9 @@ impl OmolaApp {
                         activate = Some(class.clone());
                     }
                 }
-                resp.on_hover_text(&class);
+                resp.on_hover_text(format!(
+                    "{class}\nThe x closes the tab; File > Close closes the document."
+                ));
             }
             if flat_tab(ui, "+", false)
                 .on_hover_text("New model")

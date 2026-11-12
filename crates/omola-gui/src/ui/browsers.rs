@@ -668,6 +668,7 @@ impl OmolaApp {
         let mut reset: Vec<String> = Vec::new();
         // Context-menu request on a result header: `Some(kept)` pins/unpins, `None` closes.
         let mut run_action: Option<(u64, Option<bool>)> = None;
+        let mut save_run: Option<u64> = None;
         self.variable_time_row(ui);
         let run_ids: Vec<u64> = self.runs.iter().map(|r| r.id).collect();
         for id in run_ids {
@@ -763,6 +764,10 @@ impl OmolaApp {
                             }
                             if ui.button("Close result").clicked() {
                                 run_action = Some((run.id, None));
+                                ui.close();
+                            }
+                            if ui.button("Save result as...").clicked() {
+                                save_run = Some(run.id);
                                 ui.close();
                             }
                             if ui.button("Copy result path").clicked() {
@@ -893,6 +898,9 @@ impl OmolaApp {
             Some((id, Some(kept))) => self.set_result_kept(id, kept),
             Some((id, None)) => self.close_result(id),
             None => {}
+        }
+        if let Some(id) = save_run {
+            self.request_save_result_dialog(id);
         }
     }
 

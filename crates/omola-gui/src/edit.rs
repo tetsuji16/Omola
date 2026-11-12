@@ -35,6 +35,15 @@ pub enum EditOp {
         path: String,
         value: Option<String>,
     },
+    /// Store the simulation setup as the class's `experiment` annotation (G48).
+    ///
+    /// OMC replaces only the `experiment` element; other class annotations are kept.
+    SetExperiment {
+        start: f64,
+        stop: f64,
+        tolerance: f64,
+        interval: f64,
+    },
 }
 
 fn name(s: &str) -> bool {
@@ -204,6 +213,27 @@ pub fn edit_script(class: &str, ops: &[EditOp]) -> Result<String, String> {
                     format!("omolaEdit{i}"),
                 )
             }
+            EditOp::SetExperiment {
+                start,
+                stop,
+                tolerance,
+                interval,
+            } => {
+                let all = [*start, *stop, *tolerance, *interval];
+                if all.iter().any(|v| !v.is_finite()) {
+                    return Err("experiment values must be finite".into());
+                }
+                if stop <= start {
+                    return Err("experiment StopTime must be greater than StartTime".into());
+                }
+                if *tolerance <= 0.0 || *interval <= 0.0 {
+                    return Err("experiment Tolerance and Interval must be positive".into());
+                }
+                (
+                    format!("addClassAnnotation({class}, annotate=experiment(StartTime={start}, StopTime={stop}, Tolerance={tolerance}, Interval={interval}))"),
+                    format!("omolaEdit{i}"),
+                )
+            }
         };
         s.push_str(&format!("{ok} := {call};\nif not {ok} then print(\"OMOLA_EDIT_FAIL \" + getErrorString()); end if;\n"));
     }
@@ -326,5 +356,46 @@ mod tests {
             }]
         )
         .is_err());
+    }
+
+    #[test]
+    fn set_experiment_script_calls_add_class_annotation() {
+        let script = edit_script(
+            "Demo.M",
+            &[EditOp::SetExperiment {
+                start: 0.0,
+                stop: 2.5,
+                tolerance: 1e-6,
+                interval: 0.005,
+            }],
+        )
+        .unwrap();
+        assert!(script.contains(
+            "addClassAnnotation(Demo.M, annotate=experiment(StartTime=0, StopTime=2.5, Tolerance=0.000001, Interval=0.005))"
+        ), "{script}");
+        assert!(script.contains("OMOLA_EDIT_BEGIN"));
+    }
+
+    #[test]
+    fn set_experiment_rejects_non_finite_and_reversed_times() {
+        let op = |start, stop, tolerance, interval| EditOp::SetExperiment {
+            start,
+            stop,
+            tolerance,
+            interval,
+        };
+        for bad in [
+            op(0.0, f64::NAN, 1e-6, 0.1),
+            op(0.0, f64::INFINITY, 1e-6, 0.1),
+            op(1.0, 1.0, 1e-6, 0.1),
+            op(2.0, 1.0, 1e-6, 0.1),
+            op(0.0, 1.0, 0.0, 0.1),
+            op(0.0, 1.0, 1e-6, 0.0),
+        ] {
+            assert!(
+                edit_script("M", std::slice::from_ref(&bad)).is_err(),
+                "{bad:?}"
+            );
+        }
     }
 }
