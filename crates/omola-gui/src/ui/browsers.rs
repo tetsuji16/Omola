@@ -534,12 +534,20 @@ impl OmolaApp {
         if dock_header(ui, "Variable Browser") {
             self.docks.variable_browser = false;
         }
-        let widths = [88.0f32, 66.0, 50.0, 140.0];
+        let widths = [116.0f32, 62.0, 46.0, 132.0];
         const VROW: f32 = 19.0;
-        let footer = 24.0;
-        let height = (ui.available_height() - footer).max(60.0);
+        // The footer row, plus the two wrapped lines of the `More >>` row when it is open,
+        // must be reserved or the advanced row is drawn past the dock and clipped away.
+        let footer = if self.variable_advanced { 70.0 } else { 24.0 };
+        let height = (ui.available_height() - footer - 22.0).max(60.0);
         let mut toggles: Vec<PlotSignal> = Vec::new();
         let mut edits: Vec<(String, String)> = Vec::new();
+        let mut expand: Vec<(String, bool)> = Vec::new();
+        let mut reset: Vec<String> = Vec::new();
+        self.variable_time_row(ui);
+        let filter = self.variable_filter.to_lowercase();
+        let latest = self.runs.last().map(|r| r.id);
+        let time = self.variable_time;
         Self::browser_frame(ui, |ui| {
             egui::ScrollArea::both()
                 .id_salt("variable_tree")
@@ -576,8 +584,6 @@ impl OmolaApp {
                         );
                         return;
                     }
-                    let filter = self.variable_filter.to_lowercase();
-                    let latest = self.runs.last().map(|r| r.id);
                     for run in self.runs.iter().rev() {
                         let open_id = egui::Id::NULL.with(("run_open", run.id));
                         let mut open = ui.ctx().data_mut(|d| *d.get_temp_mut_or(open_id, true));
@@ -624,112 +630,63 @@ impl OmolaApp {
                             continue;
                         }
                         let result = &run.outcome.result;
-                        let order = variable_order(self, run);
-                        for i in order {
-                            let var = &result.variables[i];
-                            if var.name == "time"
-                                || (!filter.is_empty()
-                                    && !var.name.to_lowercase().contains(&filter))
-                            {
-                                continue;
+                        // Only the newest result can be re-run, so only its parameters are
+                        // editable.
+                        let ctx = VarCtx {
+                            run_id: run.id,
+                            latest: Some(run.id) == latest,
+                            time,
+                            plotted: &self.plotted,
+                            overrides: &self.pending_overrides,
+                            expanded: &self.variable_expanded,
+                        };
+                        let names: Vec<(usize, &str)> = variable_order(self, run)
+                            .into_iter()
+                            .filter_map(|i| {
+                                let var = &result.variables[i];
+                                if var.name == "time" {
+                                    return None;
+                                }
+                                let shown = if var.is_parameter {
+                                    self.variable_show_parameters
+                                } else {
+                                    self.variable_show_time_varying
+                                };
+                                if !shown {
+                                    return None;
+                                }
+                                if !filter.is_empty() && !var.name.to_lowercase().contains(&filter)
+                                {
+                                    return None;
+                                }
+                                Some((i, var.name.as_str()))
+                            })
+                            .collect();
+                        let mut actions = VarActions::default();
+                        if filter.is_empty() {
+                            let tree = crate::var_tree::build_variable_tree(&names);
+                            variable_rows(ui, &tree, 0, "", &ctx, result, widths, &mut actions);
+                        } else {
+                            // A search shows matching variables as a flat list.
+                            for (i, name) in &names {
+                                variable_row(
+                                    ui,
+                                    0,
+                                    name,
+                                    Some(*i),
+                                    None,
+                                    name,
+                                    &ctx,
+                                    result,
+                                    widths,
+                                    &mut actions,
+                                );
                             }
-                            let signal = PlotSignal {
-                                run_id: run.id,
-                                variable: var.name.clone(),
-                            };
-                            let mut on = self.plotted.contains(&signal);
-                            let is_state = result.index_of(&format!("der({})", var.name)).is_some();
-                            let editable = Some(run.id) == latest && (var.is_parameter || is_state);
-                            ui.horizontal(|ui| {
-                                ui.set_height(VROW);
-                                ui.add_space(22.0);
-                                let (name_rect, name_resp) = ui.allocate_exact_size(
-                                    Vec2::new(widths[0] - 22.0, VROW),
-                                    Sense::click(),
-                                );
-                                let box_rect = egui::Rect::from_min_size(
-                                    egui::pos2(name_rect.left() + 1.0, name_rect.center().y - 6.5),
-                                    Vec2::splat(13.0),
-                                );
-                                super::widgets::check_box(ui, box_rect, on);
-                                ui.painter().text(
-                                    egui::pos2(name_rect.left() + 20.0, name_rect.center().y),
-                                    Align2::LEFT_CENTER,
-                                    &var.name,
-                                    FontId::proportional(12.0),
-                                    theme::TEXT,
-                                );
-                                if name_resp.clicked() {
-                                    on = !on;
-                                    toggles.push(signal.clone());
-                                }
-                                let _ = on;
-                                let (unit, description) = split_unit(&var.description);
-                                let (value_rect, _) = ui.allocate_exact_size(
-                                    Vec2::new(widths[1], VROW),
-                                    Sense::hover(),
-                                );
-                                if editable {
-                                    let value =
-                                        result.values[i].first().copied().unwrap_or(f64::NAN);
-                                    let mut text = self
-                                        .pending_overrides
-                                        .get(&var.name)
-                                        .cloned()
-                                        .unwrap_or_else(|| format_value(value));
-                                    let field = egui::Rect::from_min_size(
-                                        value_rect.left_top() + Vec2::new(0.0, 1.0),
-                                        Vec2::new(widths[1], VROW - 2.0),
-                                    );
-                                    ui.painter().rect(
-                                        field,
-                                        0.0,
-                                        Color32::WHITE,
-                                        Stroke::new(1.0, theme::FIELD_BORDER),
-                                        egui::StrokeKind::Inside,
-                                    );
-                                    let _ = &field;
-                                    let mut child = ui.new_child(
-                                        egui::UiBuilder::new()
-                                            .max_rect(field.shrink2(Vec2::new(3.0, 0.0))),
-                                    );
-                                    let changed = child
-                                        .add(
-                                            egui::TextEdit::singleline(&mut text)
-                                                .frame(egui::Frame::NONE)
-                                                .font(FontId::proportional(12.0))
-                                                .align(egui::Align2::RIGHT_CENTER)
-                                                .desired_width(field.width() - 6.0),
-                                        )
-                                        .changed();
-                                    if changed {
-                                        edits.push((var.name.clone(), text));
-                                    }
-                                }
-                                let (unit_rect, _) = ui.allocate_exact_size(
-                                    Vec2::new(widths[2], VROW),
-                                    Sense::hover(),
-                                );
-                                ui.painter().text(
-                                    egui::pos2(unit_rect.left() + 4.0, unit_rect.center().y),
-                                    Align2::LEFT_CENTER,
-                                    unit,
-                                    FontId::proportional(12.0),
-                                    theme::TEXT,
-                                );
-                                let (d_rect, _) = ui.allocate_exact_size(
-                                    Vec2::new(widths[3], VROW),
-                                    Sense::hover(),
-                                );
-                                ui.painter().text(
-                                    egui::pos2(d_rect.left() + 4.0, d_rect.center().y),
-                                    Align2::LEFT_CENTER,
-                                    description,
-                                    FontId::proportional(12.0),
-                                    theme::TEXT,
-                                );
-                            });
                         }
+                        toggles.append(&mut actions.toggles);
+                        edits.append(&mut actions.edits);
+                        expand.append(&mut actions.expand);
+                        reset.append(&mut actions.reset);
                     }
                 });
         });
@@ -751,17 +708,21 @@ impl OmolaApp {
             ui.painter().text(
                 button.center(),
                 Align2::CENTER_CENTER,
-                "More >>",
+                if self.variable_advanced {
+                    "More <<"
+                } else {
+                    "More >>"
+                },
                 FontId::proportional(12.0),
                 theme::TEXT,
             );
-            if resp
-                .on_hover_text("Advanced variable browser: issue G09")
-                .clicked()
-            {
-                self.not_implemented("Advanced variable browser");
+            if resp.on_hover_text("Filter and overrides").clicked() {
+                self.variable_advanced = !self.variable_advanced;
             }
         });
+        if self.variable_advanced {
+            self.variable_advanced_row(ui);
+        }
         for signal in toggles {
             if let Some(pos) = self.plotted.iter().position(|s| *s == signal) {
                 self.plotted.remove(pos);
@@ -772,6 +733,320 @@ impl OmolaApp {
         for (name, text) in edits {
             self.pending_overrides.insert(name, text);
         }
+        for (path, open) in expand {
+            self.variable_expanded.insert(path, open);
+        }
+        for name in reset {
+            self.pending_overrides.remove(&name);
+        }
+    }
+
+    /// `Time:` field of the Variable Browser: the instant shown in the Value column.
+    fn variable_time_row(&mut self, ui: &mut egui::Ui) {
+        let range = self
+            .runs
+            .last()
+            .and_then(|r| crate::series::time_range(&r.outcome.result.time));
+        let Some((min, max)) = range else {
+            return;
+        };
+        let mut t = self.variable_time.unwrap_or(max);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.add_space(4.0);
+            ui.label(RichText::new("Time:").size(12.0).color(theme::TEXT));
+            let step = ((max - min) / 200.0).max(1e-9);
+            let resp = ui.add(
+                egui::DragValue::new(&mut t)
+                    .range(min..=max)
+                    .speed(step)
+                    .max_decimals(9),
+            );
+            if resp.changed() {
+                self.variable_time = Some(t);
+            }
+            if ui.button("End").clicked() {
+                self.variable_time = None;
+            }
+        });
+    }
+
+    /// The `More >>` row: the filter toggles and "Reset overrides".
+    fn variable_advanced_row(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            ui.add_space(2.0);
+            ui.checkbox(&mut self.variable_show_parameters, "Parameters")
+                .on_hover_text("Show parameters in the variable tree");
+            ui.checkbox(&mut self.variable_show_time_varying, "Time-varying")
+                .on_hover_text("Show variables that change over time");
+            let edited = !self.pending_overrides.is_empty();
+            if ui
+                .add_enabled(edited, egui::Button::new("Reset overrides"))
+                .on_hover_text("Drop every value edited in the Variable Browser")
+                .clicked()
+            {
+                self.pending_overrides.clear();
+            }
+        });
+    }
+}
+
+/// What a row of the Variable Browser asked for, applied after the borrow of `runs` ends.
+#[derive(Default)]
+struct VarActions {
+    toggles: Vec<PlotSignal>,
+    edits: Vec<(String, String)>,
+    expand: Vec<(String, bool)>,
+    reset: Vec<String>,
+}
+
+/// Read-only view of the app state the rows need.
+struct VarCtx<'a> {
+    run_id: u64,
+    latest: bool,
+    time: Option<f64>,
+    plotted: &'a [PlotSignal],
+    overrides: &'a std::collections::BTreeMap<String, String>,
+    expanded: &'a std::collections::BTreeMap<String, bool>,
+}
+
+/// Draw the children of `node`, descending into the expanded ones.
+#[allow(clippy::too_many_arguments)]
+fn variable_rows(
+    ui: &mut egui::Ui,
+    node: &crate::var_tree::VarNode,
+    depth: usize,
+    path: &str,
+    ctx: &VarCtx,
+    result: &omola_core::mat::TrajectoryResult,
+    widths: [f32; 4],
+    actions: &mut VarActions,
+) {
+    for child in &node.children {
+        let child_path = if path.is_empty() {
+            child.label.clone()
+        } else {
+            format!("{path}.{}", child.label)
+        };
+        let key = format!("{}:{}", ctx.run_id, child_path);
+        let has_children = !child.children.is_empty();
+        // Closed by default, except a top-level node with at most 20 children.
+        let open = has_children
+            && ctx
+                .expanded
+                .get(&key)
+                .copied()
+                .unwrap_or(crate::var_tree::starts_open(depth, child.children.len()));
+        variable_row(
+            ui,
+            depth,
+            &child.label,
+            child.leaf,
+            has_children.then_some(open),
+            &key,
+            ctx,
+            result,
+            widths,
+            actions,
+        );
+        if open {
+            variable_rows(
+                ui,
+                child,
+                depth + 1,
+                &child_path,
+                ctx,
+                result,
+                widths,
+                actions,
+            );
+        }
+    }
+}
+
+/// One row: expander, checkbox, name, value, unit, description.
+#[allow(clippy::too_many_arguments)]
+fn variable_row(
+    ui: &mut egui::Ui,
+    depth: usize,
+    label: &str,
+    leaf: Option<usize>,
+    expander: Option<bool>,
+    key: &str,
+    ctx: &VarCtx,
+    result: &omola_core::mat::TrajectoryResult,
+    widths: [f32; 4],
+    actions: &mut VarActions,
+) {
+    const VROW: f32 = 19.0;
+    let indent = 6.0 + depth as f32 * 12.0;
+    let name_w = (widths[0] - indent).max(40.0);
+    let mut signal = None;
+    ui.horizontal(|ui| {
+        ui.set_height(VROW);
+        ui.add_space(indent);
+        let (name_rect, name_resp) =
+            ui.allocate_exact_size(Vec2::new(name_w, VROW), Sense::click());
+        let var = leaf.map(|i| &result.variables[i]);
+        let name = var.map(|v| v.name.clone()).unwrap_or_default();
+        let overridden = !name.is_empty() && ctx.overrides.contains_key(&name);
+        // Only parameters can be overridden with OMC's `-override`, so only they get a
+        // text field; a state shows its value at the selected time like any other variable.
+        let editable = ctx.latest && var.is_some_and(|v| v.is_parameter);
+        if let Some(open) = expander {
+            let tw = egui::Rect::from_center_size(
+                egui::pos2(name_rect.left() + 6.0, name_rect.center().y),
+                Vec2::splat(12.0),
+            );
+            paint_icon(
+                ui,
+                tw.center(),
+                if open {
+                    ICON_EXPAND_MORE
+                } else {
+                    ICON_CHEVRON_RIGHT
+                },
+                13.0,
+                theme::TEXT,
+            );
+        }
+        if leaf.is_some() {
+            let box_rect = egui::Rect::from_min_size(
+                egui::pos2(name_rect.left() + 14.0, name_rect.center().y - 6.5),
+                Vec2::splat(13.0),
+            );
+            let on = ctx
+                .plotted
+                .iter()
+                .any(|s| s.run_id == ctx.run_id && s.variable == name);
+            super::widgets::check_box(ui, box_rect, on);
+        }
+        let text_x = if leaf.is_some() { 31.0 } else { 14.0 };
+        // An edited value is shown in bold, like Dymola marks a modified parameter.
+        let font = if overridden {
+            FontId::new(12.0, theme::bold())
+        } else {
+            FontId::proportional(12.0)
+        };
+        ui.painter().text(
+            egui::pos2(name_rect.left() + text_x, name_rect.center().y),
+            Align2::LEFT_CENTER,
+            label,
+            font,
+            theme::TEXT,
+        );
+        if name_resp.clicked() {
+            let in_twisty = name_resp
+                .interact_pointer_pos()
+                .is_some_and(|p| p.x < name_rect.left() + 14.0);
+            if expander.is_some() && (in_twisty || leaf.is_none()) {
+                actions
+                    .expand
+                    .push((key.to_owned(), !expander.unwrap_or(false)));
+            } else if leaf.is_some() {
+                signal = Some(PlotSignal {
+                    run_id: ctx.run_id,
+                    variable: name.clone(),
+                });
+            }
+        }
+        let (unit, description) = var.map(|v| split_unit(&v.description)).unwrap_or(("", ""));
+        let (value_rect, _) = ui.allocate_exact_size(Vec2::new(widths[1], VROW), Sense::hover());
+        if let Some(i) = leaf {
+            if editable {
+                let value = result.values[i].first().copied().unwrap_or(f64::NAN);
+                let mut text = ctx
+                    .overrides
+                    .get(&name)
+                    .cloned()
+                    .unwrap_or_else(|| format_value(value));
+                let field_w = if overridden {
+                    widths[1] - 15.0
+                } else {
+                    widths[1]
+                };
+                let field = egui::Rect::from_min_size(
+                    value_rect.left_top() + Vec2::new(0.0, 1.0),
+                    Vec2::new(field_w, VROW - 2.0),
+                );
+                ui.painter().rect(
+                    field,
+                    0.0,
+                    Color32::WHITE,
+                    Stroke::new(1.0, theme::FIELD_BORDER),
+                    egui::StrokeKind::Inside,
+                );
+                let mut child = ui
+                    .new_child(egui::UiBuilder::new().max_rect(field.shrink2(Vec2::new(3.0, 0.0))));
+                // A value that is not a number cannot reach OMC; show it in red.
+                let numeric = text.trim().parse::<f64>().is_ok();
+                let changed = child
+                    .add(
+                        egui::TextEdit::singleline(&mut text)
+                            .frame(egui::Frame::NONE)
+                            .font(FontId::proportional(12.0))
+                            .text_color(if numeric {
+                                theme::TEXT
+                            } else {
+                                Color32::from_rgb(0xC0, 0x1B, 0x1B)
+                            })
+                            .align(egui::Align2::RIGHT_CENTER)
+                            .desired_width(field.width() - 6.0),
+                    )
+                    .changed();
+                if changed {
+                    actions.edits.push((name.clone(), text));
+                }
+                if overridden {
+                    let x_rect = egui::Rect::from_center_size(
+                        egui::pos2(value_rect.right() - 7.0, value_rect.center().y),
+                        Vec2::splat(13.0),
+                    );
+                    paint_icon(ui, x_rect.center(), ICON_CLOSE, 12.0, theme::TEXT_WEAK);
+                    let resp = ui.interact(
+                        x_rect,
+                        ui.scope_id().with(("reset_override", &name)),
+                        Sense::click(),
+                    );
+                    if resp.clicked() {
+                        actions.reset.push(name.clone());
+                    }
+                    resp.on_hover_text("Discard this override");
+                }
+            } else {
+                let value = match ctx.time {
+                    Some(t) => crate::series::value_at(&result.time, &result.values[i], t),
+                    None => result.values[i].last().copied(),
+                };
+                ui.painter().text(
+                    egui::pos2(value_rect.right() - 4.0, value_rect.center().y),
+                    Align2::RIGHT_CENTER,
+                    value.map(format_value).unwrap_or_default(),
+                    FontId::proportional(12.0),
+                    theme::TEXT,
+                );
+            }
+        }
+        let (unit_rect, _) = ui.allocate_exact_size(Vec2::new(widths[2], VROW), Sense::hover());
+        ui.painter().text(
+            egui::pos2(unit_rect.left() + 4.0, unit_rect.center().y),
+            Align2::LEFT_CENTER,
+            unit,
+            FontId::proportional(12.0),
+            theme::TEXT,
+        );
+        let (d_rect, _) = ui.allocate_exact_size(Vec2::new(widths[3], VROW), Sense::hover());
+        ui.painter().text(
+            egui::pos2(d_rect.left() + 4.0, d_rect.center().y),
+            Align2::LEFT_CENTER,
+            description,
+            FontId::proportional(12.0),
+            theme::TEXT,
+        );
+    });
+    if let Some(signal) = signal {
+        actions.toggles.push(signal);
     }
 }
 
