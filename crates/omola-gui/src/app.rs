@@ -820,6 +820,9 @@ impl eframe::App for OmolaApp {
         let close_requested = ctx.input(|i| i.viewport().close_requested());
         if close_requested && self.hold_close_for_edit() {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            // The warning must be visible: bring a minimized window back.
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
             ctx.request_repaint();
         } else if close_requested && self.must_confirm_exit() {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
