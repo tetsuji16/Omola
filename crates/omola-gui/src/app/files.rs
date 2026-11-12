@@ -466,6 +466,10 @@ impl OmolaApp {
             LogTab::Syntax,
             "A model edit is still running; close again to exit without it.".into(),
         );
+        // The warning must be on screen, whatever the dock showed before.
+        self.log_tab = LogTab::Syntax;
+        self.bottom_pane = BottomPane::Logs;
+        self.docks.bottom = true;
         true
     }
 

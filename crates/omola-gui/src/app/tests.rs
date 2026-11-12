@@ -1463,8 +1463,12 @@ fn the_first_close_request_waits_for_a_running_model_edit() {
     let mut app = app();
     assert!(!app.hold_close_for_edit(), "nothing is running");
     app.pending_edit = Some("A".to_owned());
+    app.docks.bottom = false;
+    app.bottom_pane = BottomPane::Commands;
     assert!(app.hold_close_for_edit());
     assert!(has_log(&app, LogLevel::Warning, "close again to exit"));
+    assert!(app.docks.bottom && app.bottom_pane == BottomPane::Logs);
+    assert!(app.log_tab == LogTab::Syntax);
     // A second request is let through: a hanging edit must not trap the user.
     assert!(!app.hold_close_for_edit());
 
