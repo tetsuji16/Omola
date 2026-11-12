@@ -157,7 +157,13 @@ impl OmolaApp {
     /// window may close. Otherwise the dialog closes and the log shows what went wrong.
     pub fn save_all_and_exit(&mut self) -> bool {
         self.confirm_exit = false;
-        if self.save_all().is_empty() {
+        if self.pending_edit.is_some() {
+            // The edit changes the buffer when it returns: saving now would lose it.
+            self.error(
+                LogTab::Syntax,
+                "A model edit is still running; try again when it has finished.".into(),
+            );
+        } else if self.save_all().is_empty() {
             self.exit_confirmed = true;
             return true;
         }
@@ -252,7 +258,16 @@ impl OmolaApp {
         // Document indices changed: questions about a document are no longer valid.
         self.pending_close = None;
         self.close_after_save = None;
-        self.save_as_doc = None;
+        if self.save_as_doc.take().is_some() {
+            if matches!(self.path_dialog, Some(PathDialog::SaveAs(_))) {
+                self.path_dialog = None;
+            }
+            if matches!(self.overwrite_confirm, Some(PendingWrite::SaveAs(_))) {
+                self.overwrite_confirm = None;
+            }
+            // A native dialog cannot be closed from here: its answer is ignored.
+            self.stale_save_as = self.dialog_rx.is_some();
+        }
         self.save_conflict = None;
         self.goto_line_dialog = None;
         self.replace_dialog = None;
@@ -304,7 +319,7 @@ impl OmolaApp {
                 .save_as_doc
                 .or_else(|| self.active_doc())
                 .and_then(|i| self.documents.get(i))
-                .is_some_and(|d| d.path.as_deref() == Some(path.as_path())),
+                .is_some_and(|d| d.path.as_deref().is_some_and(|own| same_file(own, path))),
             _ => false,
         };
         if confirm && !own_file && write.path().exists() {
@@ -357,6 +372,15 @@ impl OmolaApp {
                     path.display()
                 ),
             );
+        }
+        if self.documents[i]
+            .path
+            .as_deref()
+            .is_some_and(|own| same_file(own, &path))
+        {
+            // The document's own file: an ordinary save, with the changed-on-disk check.
+            self.save_document(i, false);
+            return;
         }
         let previous = (self.documents[i].path.clone(), self.documents[i].disk_stamp);
         self.documents[i].path = Some(path);
@@ -428,6 +452,25 @@ impl OmolaApp {
                 }
             }
         }
+    }
+
+    /// Whether a request to close the window is held back because a model edit is still
+    /// running: closing now would drop the edit without a word. Only the first request
+    /// is held back; closing again exits anyway (G53).
+    pub fn hold_close_for_edit(&mut self) -> bool {
+        if self.pending_edit.is_none() || self.exit_confirmed || self.edit_close_warned {
+            return false;
+        }
+        self.edit_close_warned = true;
+        self.warn(
+            LogTab::Syntax,
+            "A model edit is still running; close again to exit without it.".into(),
+        );
+        // The warning must be on screen, whatever the dock showed before.
+        self.log_tab = LogTab::Syntax;
+        self.bottom_pane = BottomPane::Logs;
+        self.docks.bottom = true;
+        true
     }
 
     /// Whether a request to close the window must be held back for confirmation (G42).
@@ -569,4 +612,14 @@ impl OmolaApp {
         }
         Some((time, columns))
     }
+}
+
+/// Whether two paths name the same file, also when they are spelled differently
+/// (relative and absolute, another case on Windows).
+fn same_file(a: &std::path::Path, b: &std::path::Path) -> bool {
+    a == b
+        || matches!(
+            (std::fs::canonicalize(a), std::fs::canonicalize(b)),
+            (Ok(a), Ok(b)) if a == b
+        )
 }

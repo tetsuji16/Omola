@@ -15,6 +15,7 @@ impl OmolaApp {
             return;
         };
         self.pending_edit = Some(class.to_owned());
+        self.pending_edit_text = Some(self.documents[doc].text.clone());
         let libs = self.loaded_specs();
         self.worker.submit(Job::EditModel {
             doc_text: self.documents[doc].text.clone(),
@@ -133,10 +134,22 @@ impl OmolaApp {
             return;
         };
         self.pending_edit = None;
+        self.edit_close_warned = false;
+        let submitted = self.pending_edit_text.take();
         match result {
             Ok(source) => {
                 if let Some(doc) = self.doc_of(&class) {
-                    if let Some(updated) =
+                    if submitted.is_some_and(|text| text != self.documents[doc].text) {
+                        // The result was computed from an older text: applying it would
+                        // drop what was typed (or undone) in the meantime.
+                        self.warn(
+                            LogTab::Syntax,
+                            format!(
+                                "The text of {class} changed while the edit was running; \
+                                 the edit was not applied."
+                            ),
+                        );
+                    } else if let Some(updated) =
                         crate::model::replace_class_text(&self.documents[doc].text, &class, &source)
                     {
                         let old_text = self.documents[doc].text.clone();

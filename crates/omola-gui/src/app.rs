@@ -468,6 +468,15 @@ pub struct OmolaApp {
     pub exit_confirmed: bool,
     pub frame_stats: crate::perf::FrameStats,
     pub pending_edit: Option<String>,
+    /// Text of the document when the running edit was submitted: a result for an
+    /// older text is not applied (G53).
+    pub pending_edit_text: Option<String>,
+    /// The native "Save as" dialog that is still open belongs to a document whose
+    /// index is no longer valid; its answer is ignored (G53).
+    pub stale_save_as: bool,
+    /// A close request was already held back for the running model edit; the next
+    /// one is let through, so a hanging edit cannot keep the window open (G53).
+    pub edit_close_warned: bool,
     pub rename_dialog: Option<RenameDialog>,
     pub parameter_dialog: Option<ParameterDialog>,
     pub diagram_drag: Option<DiagramDrag>,
@@ -618,6 +627,9 @@ impl OmolaApp {
             exit_confirmed: false,
             frame_stats: crate::perf::FrameStats::disabled(),
             pending_edit: None,
+            pending_edit_text: None,
+            stale_save_as: false,
+            edit_close_warned: false,
             rename_dialog: None,
             parameter_dialog: None,
             diagram_drag: None,
@@ -805,7 +817,14 @@ impl eframe::App for OmolaApp {
     /// Runs even when nothing is painted (a minimized window), so a close request can
     /// never slip past the unsaved-changes question (G42).
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if ctx.input(|i| i.viewport().close_requested()) && self.must_confirm_exit() {
+        let close_requested = ctx.input(|i| i.viewport().close_requested());
+        if close_requested && self.hold_close_for_edit() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            // The warning must be visible: bring a minimized window back.
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            ctx.request_repaint();
+        } else if close_requested && self.must_confirm_exit() {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             // The question must be visible: bring a minimized window back.
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
