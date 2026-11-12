@@ -1180,14 +1180,16 @@ pub fn lock_session_dir(dir: &Path) -> Option<std::fs::File> {
 }
 
 /// Whether another process holds the lock of the work folder `dir`. A folder without a
-/// lock file (an older Omola, or one that crashed early) is not in use.
+/// lock file (an older Omola, or one that crashed early) is not in use. A lock file
+/// that exists but cannot be opened counts as in use: the folder is kept.
 pub fn session_dir_in_use(dir: &Path) -> bool {
-    let Ok(file) = std::fs::OpenOptions::new()
+    let file = match std::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .open(dir.join(SESSION_LOCK_FILE))
-    else {
-        return false;
+    {
+        Ok(file) => file,
+        Err(error) => return error.kind() != std::io::ErrorKind::NotFound,
     };
     match file.try_lock() {
         Ok(()) => false,

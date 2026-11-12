@@ -1438,3 +1438,41 @@ fn an_unreadable_file_counts_as_changed_on_disk() {
     assert_eq!(app.save_conflict, Some(doc));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn save_as_onto_the_own_file_is_recognised_by_another_spelling() {
+    let dir = test_dir("g53-own-file-spelling");
+    let (mut app, file, doc) = app_with_file(&dir, "A");
+    app.documents[doc].dirty = true;
+    std::fs::write(&file, "model A\n  Real other;\nend A;\n").unwrap();
+
+    // The same file, spelled with a detour through a sub-folder.
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    let spelled = dir.join("sub").join("..").join(file.file_name().unwrap());
+    assert_ne!(spelled, file);
+    app.save_as_doc = Some(doc);
+    app.request_write(PendingWrite::SaveAs(spelled), true);
+    assert!(app.overwrite_confirm.is_none());
+    assert_eq!(app.save_conflict, Some(doc));
+    assert!(std::fs::read_to_string(&file).unwrap().contains("other"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_first_close_request_waits_for_a_running_model_edit() {
+    let mut app = app();
+    assert!(!app.hold_close_for_edit(), "nothing is running");
+    app.pending_edit = Some("A".to_owned());
+    assert!(app.hold_close_for_edit());
+    assert!(has_log(&app, LogLevel::Warning, "close again to exit"));
+    // A second request is let through: a hanging edit must not trap the user.
+    assert!(!app.hold_close_for_edit());
+
+    // The next edit is protected again.
+    app.handle_model_edited_event(Event::ModelEdited {
+        class: "A".to_owned(),
+        result: Err("failed".to_owned()),
+    });
+    app.pending_edit = Some("A".to_owned());
+    assert!(app.hold_close_for_edit());
+}

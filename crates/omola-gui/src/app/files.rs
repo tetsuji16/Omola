@@ -319,7 +319,7 @@ impl OmolaApp {
                 .save_as_doc
                 .or_else(|| self.active_doc())
                 .and_then(|i| self.documents.get(i))
-                .is_some_and(|d| d.path.as_deref() == Some(path.as_path())),
+                .is_some_and(|d| d.path.as_deref().is_some_and(|own| same_file(own, path))),
             _ => false,
         };
         if confirm && !own_file && write.path().exists() {
@@ -373,7 +373,11 @@ impl OmolaApp {
                 ),
             );
         }
-        if self.documents[i].path.as_deref() == Some(path.as_path()) {
+        if self.documents[i]
+            .path
+            .as_deref()
+            .is_some_and(|own| same_file(own, &path))
+        {
             // The document's own file: an ordinary save, with the changed-on-disk check.
             self.save_document(i, false);
             return;
@@ -448,6 +452,21 @@ impl OmolaApp {
                 }
             }
         }
+    }
+
+    /// Whether a request to close the window is held back because a model edit is still
+    /// running: closing now would drop the edit without a word. Only the first request
+    /// is held back; closing again exits anyway (G53).
+    pub fn hold_close_for_edit(&mut self) -> bool {
+        if self.pending_edit.is_none() || self.exit_confirmed || self.edit_close_warned {
+            return false;
+        }
+        self.edit_close_warned = true;
+        self.warn(
+            LogTab::Syntax,
+            "A model edit is still running; close again to exit without it.".into(),
+        );
+        true
     }
 
     /// Whether a request to close the window must be held back for confirmation (G42).
@@ -589,4 +608,14 @@ impl OmolaApp {
         }
         Some((time, columns))
     }
+}
+
+/// Whether two paths name the same file, also when they are spelled differently
+/// (relative and absolute, another case on Windows).
+fn same_file(a: &std::path::Path, b: &std::path::Path) -> bool {
+    a == b
+        || matches!(
+            (std::fs::canonicalize(a), std::fs::canonicalize(b)),
+            (Ok(a), Ok(b)) if a == b
+        )
 }

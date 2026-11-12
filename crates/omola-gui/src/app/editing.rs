@@ -134,6 +134,7 @@ impl OmolaApp {
             return;
         };
         self.pending_edit = None;
+        self.edit_close_warned = false;
         let submitted = self.pending_edit_text.take();
         match result {
             Ok(source) => {

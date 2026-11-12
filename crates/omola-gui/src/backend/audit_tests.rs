@@ -152,3 +152,14 @@ fn copy_result_file_keeps_the_destination_when_the_copy_fails() {
     assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_lock_file_that_cannot_be_opened_keeps_the_folder() {
+    let root = std::env::temp_dir().join(format!("omola-g53-badlock-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let session = root.join("session-1");
+    // The lock "file" is a folder: opening it fails with something other than NotFound.
+    std::fs::create_dir_all(session.join(SESSION_LOCK_FILE)).unwrap();
+    assert!(session_dir_in_use(&session));
+    let _ = std::fs::remove_dir_all(&root);
+}
