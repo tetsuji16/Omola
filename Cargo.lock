@@ -2240,7 +2240,7 @@ dependencies = [
 
 [[package]]
 name = "omola"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "omola-core",
  "quick-xml 0.38.4",
@@ -2253,14 +2253,14 @@ dependencies = [
 
 [[package]]
 name = "omola-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "windows-sys 0.59.0",
 ]
 
 [[package]]
 name = "omola-gui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "eframe",
  "egui",
