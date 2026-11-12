@@ -73,11 +73,12 @@ impl Document {
 
     /// `true` when the file exists and its content differs from what Omola last read or
     /// wrote (issue G43). A missing file is not a conflict: saving simply recreates it.
+    /// A file that exists but cannot be read counts as changed, so the user is asked.
     pub fn changed_on_disk(&self) -> bool {
         let Some(path) = &self.path else { return false };
         match std::fs::read(path) {
             Ok(bytes) => Some(fingerprint(&bytes)) != self.disk_stamp,
-            Err(_) => false,
+            Err(error) => error.kind() != std::io::ErrorKind::NotFound,
         }
     }
 

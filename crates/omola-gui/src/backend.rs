@@ -306,6 +306,11 @@ impl Worker {
             .spawn(move || {
                 // Old work folders are removed here, never on the UI thread (G50). A work
                 // root chosen by the caller (tests) is left alone.
+                let _session_lock = if work_root == default_work_root() {
+                    lock_session_dir(&work_root)
+                } else {
+                    None
+                };
                 if work_root == default_work_root() {
                     let removed = work_root
                         .parent()
@@ -1084,7 +1089,8 @@ pub const MAX_SWEEP_POINTS: usize = 50;
 /// Copy a result file for `Save result as...` (G14).
 ///
 /// Without `replace` an existing destination is never opened for writing (`create_new`).
-/// A partly written destination is removed when the copy fails.
+/// With `replace` the copy goes to a temporary file next to the destination, which is
+/// renamed over it only after the copy succeeded: a failed copy keeps the old file.
 pub fn copy_result_file(source: &Path, dest: &Path, replace: bool) -> Result<(), String> {
     let src = std::fs::canonicalize(source)
         .map_err(|e| format!("could not read {}: {e}", source.display()))?;
@@ -1093,24 +1099,40 @@ pub fn copy_result_file(source: &Path, dest: &Path, replace: bool) -> Result<(),
     }
     let mut input = std::fs::File::open(&src)
         .map_err(|e| format!("could not read {}: {e}", source.display()))?;
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true);
-    if replace {
-        options.create(true).truncate(true);
+    // The file that is written: the destination itself, or a temporary sibling.
+    let target = if replace {
+        let mut name = dest
+            .file_name()
+            .ok_or_else(|| format!("{} is not a file name.", dest.display()))?
+            .to_owned();
+        name.push(format!(".omola-tmp-{}", std::process::id()));
+        dest.with_file_name(name)
     } else {
-        options.create_new(true);
-    }
-    let mut output = options.open(dest).map_err(|e| {
-        if e.kind() == std::io::ErrorKind::AlreadyExists {
-            format!("{} already exists.", dest.display())
-        } else {
-            format!("could not write {}: {e}", dest.display())
-        }
-    })?;
+        dest.to_path_buf()
+    };
+    let mut output = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&target)
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                format!("{} already exists.", target.display())
+            } else {
+                format!("could not write {}: {e}", dest.display())
+            }
+        })?;
     let copied = std::io::copy(&mut input, &mut output).and_then(|_| output.sync_all());
     drop(output);
-    if let Err(error) = copied {
-        let _ = std::fs::remove_file(dest);
+    let finished = copied.and_then(|()| {
+        if replace {
+            std::fs::rename(&target, dest)
+        } else {
+            Ok(())
+        }
+    });
+    if let Err(error) = finished {
+        // Only the file this call created is removed, never an older destination.
+        let _ = std::fs::remove_file(&target);
         return Err(format!("could not write {}: {error}", dest.display()));
     }
     Ok(())
@@ -1139,10 +1161,45 @@ pub fn default_work_root() -> PathBuf {
 /// Work folders of earlier sessions are removed once they are this old (G50).
 pub const STALE_SESSION_AGE: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 3600);
 
+/// Name of the file a running Omola keeps locked in its work folder (G53).
+pub const SESSION_LOCK_FILE: &str = "session.lock";
+
+/// Create and lock the lock file of the work folder `dir`. The lock is held as long as
+/// the returned file is alive and tells other Omola processes that the folder is in use.
+pub fn lock_session_dir(dir: &Path) -> Option<std::fs::File> {
+    std::fs::create_dir_all(dir).ok()?;
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(dir.join(SESSION_LOCK_FILE))
+        .ok()?;
+    file.try_lock().ok()?;
+    Some(file)
+}
+
+/// Whether another process holds the lock of the work folder `dir`. A folder without a
+/// lock file (an older Omola, or one that crashed early) is not in use.
+pub fn session_dir_in_use(dir: &Path) -> bool {
+    let Ok(file) = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(dir.join(SESSION_LOCK_FILE))
+    else {
+        return false;
+    };
+    match file.try_lock() {
+        Ok(()) => false,
+        Err(std::fs::TryLockError::WouldBlock) => true,
+        // Not knowing is treated as "in use": the folder is kept.
+        Err(std::fs::TryLockError::Error(_)) => true,
+    }
+}
+
 /// The `session-*` directories directly under `root` that may be removed: not `current`,
-/// not a symbolic link, and last modified more than `max_age` before `now`.
-///
-/// Another Omola may still be running, so only the age decides, never the process id.
+/// not a symbolic link, last modified more than `max_age` before `now`, and not locked
+/// by a running Omola (a window may stay open for longer than `max_age`).
 pub fn stale_session_dirs(
     root: &Path,
     current: &Path,
@@ -1168,6 +1225,7 @@ pub fn stale_session_dirs(
                         .is_some_and(|age| age > max_age)
             })
         })
+        .filter(|path| !session_dir_in_use(path))
         .collect();
     stale.sort();
     stale

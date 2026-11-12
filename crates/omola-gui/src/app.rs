@@ -468,6 +468,12 @@ pub struct OmolaApp {
     pub exit_confirmed: bool,
     pub frame_stats: crate::perf::FrameStats,
     pub pending_edit: Option<String>,
+    /// Text of the document when the running edit was submitted: a result for an
+    /// older text is not applied (G53).
+    pub pending_edit_text: Option<String>,
+    /// The native "Save as" dialog that is still open belongs to a document whose
+    /// index is no longer valid; its answer is ignored (G53).
+    pub stale_save_as: bool,
     pub rename_dialog: Option<RenameDialog>,
     pub parameter_dialog: Option<ParameterDialog>,
     pub diagram_drag: Option<DiagramDrag>,
@@ -618,6 +624,8 @@ impl OmolaApp {
             exit_confirmed: false,
             frame_stats: crate::perf::FrameStats::disabled(),
             pending_edit: None,
+            pending_edit_text: None,
+            stale_save_as: false,
             rename_dialog: None,
             parameter_dialog: None,
             diagram_drag: None,

@@ -1288,3 +1288,153 @@ fn lowering_keep_results_evicts_old_results() {
     let classes: Vec<&str> = app.runs.iter().map(|r| r.outcome.class.as_str()).collect();
     assert_eq!(classes, ["Third", "Fifth"]);
 }
+
+// --- G53: review follow-up ---
+
+#[test]
+fn replace_question_blocks_another_save_as() {
+    let dir = test_dir("g53-overwrite");
+    let (mut app, _file, doc) = app_with_file(&dir, "A");
+    let other = dir.join("Other.mo");
+    std::fs::write(&other, "model Other end Other;").unwrap();
+    app.save_as_doc = Some(doc);
+    app.request_write(PendingWrite::SaveAs(other.clone()), true);
+    assert!(app.overwrite_confirm.is_some());
+
+    // While "Replace file?" is open no other Save As may take over `save_as_doc`.
+    assert!(app.dialog_in_flight());
+    app.new_model();
+    let second = app.documents.len() - 1;
+    app.request_save_as_dialog_for(second);
+    assert_eq!(app.save_as_doc, Some(doc));
+
+    app.resolve_overwrite(true);
+    assert!(std::fs::read_to_string(&other).unwrap().contains("model A"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn closing_a_document_cancels_a_pending_save_as() {
+    let dir = test_dir("g53-stale-save-as");
+    let (mut app, file_a, doc_a) = app_with_file(&dir, "A");
+    let file_b = dir.join("B.mo");
+    std::fs::write(&file_b, "model B\nend B;\n").unwrap();
+    app.open_file(file_b.clone());
+    let doc_b = app
+        .documents
+        .iter()
+        .position(|d| d.path.as_deref() == Some(file_b.as_path()))
+        .unwrap();
+
+    // Text fallback: the path question of A is open, then B is closed.
+    app.save_as_doc = Some(doc_a);
+    app.path_dialog = Some(PathDialog::SaveAs(String::new()));
+    app.close_document(doc_b);
+    assert!(app.path_dialog.is_none() && app.save_as_doc.is_none());
+    assert!(!app.stale_save_as, "no native dialog is open");
+
+    // Native dialog: it cannot be closed, so its answer is ignored.
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.dialog_rx = Some(rx);
+    app.save_as_doc = Some(0);
+    app.open_file(file_b.clone());
+    let doc_b = app.documents.len() - 1;
+    app.close_document(doc_b);
+    assert!(app.stale_save_as);
+    let target = dir.join("Target.mo");
+    tx.send(DialogResult::SaveAs(Some(target.clone()))).unwrap();
+    app.poll_dialog();
+    assert!(!target.exists(), "the stale answer wrote nothing");
+    assert!(!app.stale_save_as);
+    assert!(has_log(&app, LogLevel::Warning, "Save As was cancelled"));
+    assert!(file_a.exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn save_as_onto_the_own_file_still_detects_a_change_on_disk() {
+    let dir = test_dir("g53-own-file");
+    let (mut app, file, doc) = app_with_file(&dir, "A");
+    app.documents[doc].text.push_str("// mine\n");
+    app.documents[doc].dirty = true;
+    std::fs::write(&file, "model A\n  Real other;\nend A;\n").unwrap();
+
+    app.save_as_doc = Some(doc);
+    app.request_write(PendingWrite::SaveAs(file.clone()), true);
+    assert!(
+        app.overwrite_confirm.is_none(),
+        "the own file needs no Replace question"
+    );
+    assert_eq!(app.save_conflict, Some(doc));
+    assert!(std::fs::read_to_string(&file).unwrap().contains("other"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn save_all_and_exit_waits_for_a_running_model_edit() {
+    let dir = test_dir("g53-exit-edit");
+    let (mut app, file, doc) = app_with_file(&dir, "A");
+    let on_disk = std::fs::read_to_string(&file).unwrap();
+    app.documents[doc].text.push_str("// edited\n");
+    app.documents[doc].dirty = true;
+    app.pending_edit = Some("A".to_owned());
+
+    assert!(!app.save_all_and_exit());
+    assert!(!app.exit_confirmed);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), on_disk);
+    assert!(has_log(
+        &app,
+        LogLevel::Error,
+        "model edit is still running"
+    ));
+
+    app.pending_edit = None;
+    assert!(app.save_all_and_exit());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_edit_result_for_an_older_text_is_not_applied() {
+    let dir = test_dir("g53-edit-race");
+    let (mut app, _file, doc) = app_with_file(&dir, "A");
+    let submitted = app.documents[doc].text.clone();
+    app.pending_edit = Some("A".to_owned());
+    app.pending_edit_text = Some(submitted.clone());
+
+    // The user types in the Text layer before OMC answers.
+    app.documents[doc].text = submitted.replace("Real x;", "Real x;\n  Real typed;");
+    let typed = app.documents[doc].text.clone();
+    app.handle_model_edited_event(Event::ModelEdited {
+        class: "A".to_owned(),
+        result: Ok("model A\n  Real fromOmc;\nend A;".to_owned()),
+    });
+    assert_eq!(app.documents[doc].text, typed);
+    assert!(app.pending_edit.is_none() && app.pending_edit_text.is_none());
+    assert!(has_log(&app, LogLevel::Warning, "the edit was not applied"));
+
+    // An unchanged text takes the result as before.
+    app.pending_edit = Some("A".to_owned());
+    app.pending_edit_text = Some(typed);
+    app.handle_model_edited_event(Event::ModelEdited {
+        class: "A".to_owned(),
+        result: Ok("model A\n  Real fromOmc;\nend A;".to_owned()),
+    });
+    assert!(app.documents[doc].text.contains("fromOmc"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_unreadable_file_counts_as_changed_on_disk() {
+    let dir = test_dir("g53-unreadable");
+    let (mut app, file, doc) = app_with_file(&dir, "A");
+    // A missing file is not a conflict: saving recreates it.
+    std::fs::remove_file(&file).unwrap();
+    assert!(!app.documents[doc].changed_on_disk());
+    // A path that exists but cannot be read as a file (here: a folder).
+    std::fs::create_dir_all(&file).unwrap();
+    assert!(app.documents[doc].changed_on_disk());
+    app.documents[doc].dirty = true;
+    assert!(!app.save_document(doc, false));
+    assert_eq!(app.save_conflict, Some(doc));
+    let _ = std::fs::remove_dir_all(&dir);
+}

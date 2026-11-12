@@ -157,7 +157,13 @@ impl OmolaApp {
     /// window may close. Otherwise the dialog closes and the log shows what went wrong.
     pub fn save_all_and_exit(&mut self) -> bool {
         self.confirm_exit = false;
-        if self.save_all().is_empty() {
+        if self.pending_edit.is_some() {
+            // The edit changes the buffer when it returns: saving now would lose it.
+            self.error(
+                LogTab::Syntax,
+                "A model edit is still running; try again when it has finished.".into(),
+            );
+        } else if self.save_all().is_empty() {
             self.exit_confirmed = true;
             return true;
         }
@@ -252,7 +258,16 @@ impl OmolaApp {
         // Document indices changed: questions about a document are no longer valid.
         self.pending_close = None;
         self.close_after_save = None;
-        self.save_as_doc = None;
+        if self.save_as_doc.take().is_some() {
+            if matches!(self.path_dialog, Some(PathDialog::SaveAs(_))) {
+                self.path_dialog = None;
+            }
+            if matches!(self.overwrite_confirm, Some(PendingWrite::SaveAs(_))) {
+                self.overwrite_confirm = None;
+            }
+            // A native dialog cannot be closed from here: its answer is ignored.
+            self.stale_save_as = self.dialog_rx.is_some();
+        }
         self.save_conflict = None;
         self.goto_line_dialog = None;
         self.replace_dialog = None;
@@ -357,6 +372,11 @@ impl OmolaApp {
                     path.display()
                 ),
             );
+        }
+        if self.documents[i].path.as_deref() == Some(path.as_path()) {
+            // The document's own file: an ordinary save, with the changed-on-disk check.
+            self.save_document(i, false);
+            return;
         }
         let previous = (self.documents[i].path.clone(), self.documents[i].disk_stamp);
         self.documents[i].path = Some(path);

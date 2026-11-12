@@ -99,3 +99,56 @@ fn intervals_for_length_rounds_and_clamps() {
     assert_eq!(intervals_for_length(0.0, 1.0, 1e-12), 10_000_000);
     assert_eq!(intervals_for_length(1.0, 1.0, 0.1), 1);
 }
+
+// --- G53: review follow-up ---
+
+#[test]
+fn a_locked_session_folder_is_never_stale() {
+    use std::time::{Duration, SystemTime};
+    let root = std::env::temp_dir().join(format!("omola-g53-lock-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let (open, closed) = (root.join("session-1"), root.join("session-2"));
+    std::fs::create_dir_all(&closed).unwrap();
+    let lock = lock_session_dir(&open).expect("the folder can be locked");
+    assert!(session_dir_in_use(&open));
+    assert!(!session_dir_in_use(&closed));
+
+    let later = SystemTime::now() + Duration::from_secs(30 * 24 * 3600);
+    let current = root.join("session-current");
+    assert_eq!(
+        stale_session_dirs(&root, &current, later, STALE_SESSION_AGE),
+        std::slice::from_ref(&closed)
+    );
+    // When the other Omola has ended, its folder may go.
+    drop(lock);
+    assert!(!session_dir_in_use(&open));
+    assert_eq!(
+        stale_session_dirs(&root, &current, later, STALE_SESSION_AGE),
+        [open, closed]
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn copy_result_file_keeps_the_destination_when_the_copy_fails() {
+    let dir = std::env::temp_dir().join(format!("omola-g53-copy-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let (source, dest) = (dir.join("a_res.mat"), dir.join("kept.mat"));
+    std::fs::write(&source, "new").unwrap();
+    std::fs::write(&dest, "old").unwrap();
+
+    // The temporary sibling already exists (as a folder): the copy cannot start.
+    let tmp = dir.join(format!("kept.mat.omola-tmp-{}", std::process::id()));
+    std::fs::create_dir_all(&tmp).unwrap();
+    assert!(copy_result_file(&source, &dest, true).is_err());
+    assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old");
+    std::fs::remove_dir_all(&tmp).unwrap();
+
+    // A successful replacement leaves no temporary file behind.
+    copy_result_file(&source, &dest, true).unwrap();
+    assert_eq!(std::fs::read_to_string(&dest).unwrap(), "new");
+    assert!(!tmp.exists());
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2);
+    let _ = std::fs::remove_dir_all(&dir);
+}

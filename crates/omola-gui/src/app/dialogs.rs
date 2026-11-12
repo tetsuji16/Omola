@@ -38,7 +38,8 @@ impl OmolaApp {
 
     /// True while a file dialog (native or text fallback) is already open.
     pub(super) fn dialog_in_flight(&self) -> bool {
-        self.dialog_rx.is_some() || self.path_dialog.is_some()
+        // The "Replace file?" question is part of the dialog that asked for the path.
+        self.dialog_rx.is_some() || self.path_dialog.is_some() || self.overwrite_confirm.is_some()
     }
 
     /// Open a native "Open file" dialog on a background thread.
@@ -150,6 +151,13 @@ impl OmolaApp {
         let result = self.dialog_rx.as_ref().and_then(|rx| rx.try_recv().ok());
         if let Some(result) = result {
             self.dialog_rx = None;
+            if std::mem::take(&mut self.stale_save_as) && matches!(result, DialogResult::SaveAs(_))
+            {
+                return self.warn(
+                    LogTab::Syntax,
+                    "Save As was cancelled because a document was closed.".into(),
+                );
+            }
             // The native dialog already asked before replacing an existing file.
             self.apply_dialog_result(result, false);
         }
