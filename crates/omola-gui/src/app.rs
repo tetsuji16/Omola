@@ -173,6 +173,8 @@ pub struct LogEntry {
     pub tab: LogTab,
     pub level: LogLevel,
     pub text: String,
+    /// Source locations found in an OMC error, clickable in the log window.
+    pub diagnostics: Vec<crate::diagnostics::Diagnostic>,
 }
 
 /// Serializable subset of [`OmolaApp`] persisted across restarts via eframe storage.
@@ -236,6 +238,8 @@ pub struct OmolaApp {
     pub next_run_id: u64,
     pub keep_results: usize,
     pub variable_filter: String,
+    /// Line and column the Text layer should move the caret to on the next frame.
+    pub goto_line: Option<(usize, usize)>,
     pub plotted: Vec<PlotSignal>,
     /// Values edited in the variable browser, applied as overrides on the next simulation.
     pub pending_overrides: BTreeMap<String, String>,
@@ -334,6 +338,7 @@ impl OmolaApp {
             next_run_id: 1,
             keep_results: 2,
             variable_filter: String::new(),
+            goto_line: None,
             plotted: Vec::new(),
             pending_overrides: BTreeMap::new(),
             plot_view: None,
@@ -839,6 +844,7 @@ impl OmolaApp {
             tab,
             level: LogLevel::Info,
             text,
+            diagnostics: Vec::new(),
         });
     }
 
@@ -847,6 +853,7 @@ impl OmolaApp {
         self.logs.push(LogEntry {
             tab,
             level: LogLevel::Error,
+            diagnostics: crate::diagnostics::parse_omc_diagnostics(&text),
             text,
         });
     }
@@ -896,7 +903,17 @@ impl OmolaApp {
                     } else if matches!(tab, LogTab::Translation | LogTab::Simulation) {
                         self.log_tab = tab;
                     }
-                    self.logs.push(LogEntry { tab, level, text });
+                    let diagnostics = if level == LogLevel::Error {
+                        crate::diagnostics::parse_omc_diagnostics(&text)
+                    } else {
+                        Vec::new()
+                    };
+                    self.logs.push(LogEntry {
+                        tab,
+                        level,
+                        text,
+                        diagnostics,
+                    });
                 }
                 Event::Command(text) => self.command_history.push(text),
                 Event::OmcVersion(version) => {
@@ -907,6 +924,7 @@ impl OmolaApp {
                             tab: LogTab::Version,
                             level: LogLevel::Warning,
                             text: OMC_SETUP_HINT.into(),
+                            diagnostics: Vec::new(),
                         });
                     }
                     self.omc_version = version;

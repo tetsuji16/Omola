@@ -6,7 +6,9 @@
 mod app;
 mod backend;
 mod cache;
+mod diagnostics;
 mod graphics;
+mod highlight;
 mod html;
 mod instance;
 mod library;

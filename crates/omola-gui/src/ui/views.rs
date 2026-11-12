@@ -120,22 +120,61 @@ impl OmolaApp {
 
     fn text_layer(&mut self, ui: &mut egui::Ui, class: &str) {
         if let Some(i) = self.doc_of(class) {
+            let goto = self.goto_line.take();
             let doc = &mut self.documents[i];
-            let changed = egui::ScrollArea::both()
+            let editor_id = ui.make_persistent_id(("user_text", i));
+            let dark = ui.visuals().dark_mode;
+            let font = egui::TextStyle::Monospace.resolve(ui.style());
+            let numbers = crate::highlight::line_numbers(&doc.text);
+            let job = crate::highlight::layout_job(&doc.text, font.clone(), dark);
+            let mut layouter = |ui: &egui::Ui, _text: &dyn egui::TextBuffer, wrap_width: f32| {
+                let mut job = job.clone();
+                job.wrap.max_width = wrap_width;
+                ui.fonts_mut(|f| f.layout_job(job))
+            };
+            let edited = egui::ScrollArea::both()
                 .id_salt(("user_text", i))
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    ui.add(
-                        egui::TextEdit::multiline(&mut doc.text)
-                            .code_editor()
-                            .frame(egui::Frame::NONE)
-                            .desired_width(f32::INFINITY)
-                            .desired_rows(40),
-                    )
-                    .changed()
+                    ui.horizontal_top(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(numbers)
+                                    .monospace()
+                                    .size(font.size)
+                                    .color(theme::TEXT_WEAK),
+                            )
+                            .selectable(false)
+                            .wrap_mode(egui::TextWrapMode::Extend),
+                        );
+                        ui.add(
+                            egui::TextEdit::multiline(&mut doc.text)
+                                .id(editor_id)
+                                .code_editor()
+                                .frame(egui::Frame::NONE)
+                                .desired_width(f32::INFINITY)
+                                .desired_rows(40)
+                                .layouter(&mut layouter),
+                        )
+                    })
+                    .inner
                 })
                 .inner;
-            if changed {
+            // A click on a Message location moves the caret to that line.
+            if let Some((line, column)) = goto {
+                if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), editor_id) {
+                    let index = crate::highlight::char_index(&doc.text, line, column);
+                    state
+                        .cursor
+                        .set_char_range(Some(egui::text::CCursorRange::one(
+                            egui::text::CCursor::new(index),
+                        )));
+                    state.store(ui.ctx(), editor_id);
+                    edited.request_focus();
+                }
+            }
+            if edited.changed() {
                 self.user_text_changed(i);
             }
             return;
@@ -157,6 +196,15 @@ impl OmolaApp {
             }
             Some(Loadable::Ready(text)) => {
                 let mut text = text.as_str();
+                let dark = ui.visuals().dark_mode;
+                let font = egui::TextStyle::Monospace.resolve(ui.style());
+                let job = crate::highlight::layout_job(text, font, dark);
+                let mut layouter =
+                    |ui: &egui::Ui, _text: &dyn egui::TextBuffer, wrap_width: f32| {
+                        let mut job = job.clone();
+                        job.wrap.max_width = wrap_width;
+                        ui.fonts_mut(|f| f.layout_job(job))
+                    };
                 egui::ScrollArea::both()
                     .id_salt(("lib_text", class))
                     .auto_shrink([false, false])
@@ -165,7 +213,8 @@ impl OmolaApp {
                             egui::TextEdit::multiline(&mut text)
                                 .code_editor()
                                 .frame(egui::Frame::NONE)
-                                .desired_width(f32::INFINITY),
+                                .desired_width(f32::INFINITY)
+                                .layouter(&mut layouter),
                         );
                     });
             }

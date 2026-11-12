@@ -62,7 +62,7 @@ impl OmolaApp {
                     }
                 }
             });
-            egui::Frame::new()
+            let goto = egui::Frame::new()
                 .fill(Color32::WHITE)
                 .stroke(Stroke::new(1.0, Color32::from_rgb(0x82, 0x87, 0x90)))
                 .inner_margin(egui::Margin {
@@ -74,6 +74,7 @@ impl OmolaApp {
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.set_height(ui.available_height());
+                    let mut goto = None;
                     egui::ScrollArea::vertical()
                         .id_salt(("logs", self.log_tab as u8))
                         .auto_shrink([false, false])
@@ -91,10 +92,30 @@ impl OmolaApp {
                                         .size(12.0)
                                         .color(color),
                                 );
+                                for diagnostic in &entry.diagnostics {
+                                    if ui
+                                        .link(format!(
+                                            "line {}:{}",
+                                            diagnostic.line, diagnostic.column
+                                        ))
+                                        .clicked()
+                                    {
+                                        goto = Some((diagnostic.line, diagnostic.column));
+                                    }
+                                }
                                 ui.add_space(12.0);
                             }
                         });
-                });
+                    goto
+                })
+                .inner;
+            if let Some((line, column)) = goto {
+                self.goto_line = Some((line, column));
+                if let Some(class) = self.active.clone() {
+                    self.request_text(&class);
+                }
+                self.tab = RibbonTab::Text;
+            }
         });
     }
 
