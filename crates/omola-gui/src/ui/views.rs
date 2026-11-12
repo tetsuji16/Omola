@@ -200,196 +200,324 @@ impl OmolaApp {
         }
     }
 
+    /// Plot window: `diagrams` stacked vertically, sharing one time axis.
     pub fn plot_window(&mut self, ui: &mut egui::Ui) {
-        let curves: Vec<Curve> = self
-            .plotted
+        if self.diagrams.is_empty() {
+            self.diagrams.push(crate::app::PlotDiagram::default());
+            self.active_diagram = 0;
+        }
+        let panels: Vec<Vec<Curve>> = self
+            .diagrams
             .iter()
-            .enumerate()
-            .filter_map(|(i, signal)| {
-                let run = self.run(signal.run_id)?;
-                let series = run.outcome.result.series(&signal.variable)?;
-                let points = run
-                    .outcome
-                    .result
-                    .time
+            .map(|diagram| {
+                diagram
+                    .signals
                     .iter()
-                    .zip(series)
-                    .map(|(t, v)| [*t, *v])
-                    .collect();
-                let name = if self.runs.len() > 1 {
-                    format!("{}.{}", run.label, signal.variable)
-                } else {
-                    signal.variable.clone()
-                };
-                Some(Curve {
-                    name,
-                    color: CURVE_COLORS[i % CURVE_COLORS.len()],
-                    points,
-                })
+                    .enumerate()
+                    .filter_map(|(i, signal)| {
+                        let run = self.run(signal.run_id)?;
+                        let values = run.outcome.result.series(&signal.variable)?;
+                        let name = if self.runs.len() > 1 {
+                            format!("{}.{}", run.label, signal.variable)
+                        } else {
+                            signal.variable.clone()
+                        };
+                        Some(Curve {
+                            name,
+                            color: CURVE_COLORS[i % CURVE_COLORS.len()],
+                            time: run.outcome.result.time.clone(),
+                            values: values.to_vec(),
+                        })
+                    })
+                    .collect()
             })
             .collect();
+        let data = data_bounds(panels.iter().flatten());
         let (panel, response) =
             ui.allocate_exact_size(ui.available_size(), Sense::click_and_drag());
         let painter = ui.painter_at(panel);
         painter.rect_filled(panel, 0.0, Color32::WHITE);
-        let frame = egui::Rect::from_min_max(
-            egui::pos2(panel.left() + 53.0, panel.top() + 31.0),
-            egui::pos2(panel.right() - 24.0, panel.bottom() - 29.0),
-        );
-        if frame.width() < 40.0 || frame.height() < 40.0 {
-            return;
-        }
-        // Legend above the frame.
-        let mut lx = frame.left() - 2.0;
-        for c in &curves {
-            let y = panel.top() + 16.5;
-            painter.hline(lx..=lx + 26.0, y, Stroke::new(1.0, c.color));
-            let g = painter.layout_no_wrap(c.name.clone(), FontId::proportional(12.0), theme::TEXT);
-            let w = g.size().x;
-            painter.galley(egui::pos2(lx + 31.0, y - g.size().y / 2.0), g, theme::TEXT);
-            lx += 31.0 + w + 18.0;
-        }
-        let data = data_bounds(&curves);
-        let fitted = data.map(|(x0, x1, y0, y1)| {
-            let (y0, y1, step) = nice_range(y0, y1, frame.height() / 50.0);
-            ((x0, x1, y0, y1), step)
-        });
-        let view = self.plot_view.or(fitted.map(|f| f.0));
-        let Some((x0, x1, y0, y1)) = view else {
-            painter.rect_stroke(
-                frame,
-                0.0,
-                Stroke::new(1.0, Color32::from_rgb(0x3A, 0x3A, 0x3A)),
-                egui::StrokeKind::Inside,
-            );
-            return;
-        };
+        let n = panels.len().max(1);
+        let sub_h = panel.height() / n as f32;
+        let (x0, x1) = self
+            .plot_view
+            .or_else(|| data.map(|(a, b, _, _)| (a, b)))
+            .unwrap_or((0.0, 1.0));
         let (x0, x1) = if x1 > x0 {
             (x0, x1)
         } else {
             (x0 - 1.0, x0 + 1.0)
         };
-        let (y0, y1) = if y1 > y0 {
-            (y0, y1)
-        } else {
-            (y0 - 1.0, y0 + 1.0)
-        };
-        let to_screen = |x: f64, y: f64| {
-            egui::pos2(
-                frame.left() + ((x - x0) / (x1 - x0)) as f32 * frame.width(),
-                frame.bottom() - ((y - y0) / (y1 - y0)) as f32 * frame.height(),
-            )
-        };
-        let x_major = nice_step((x1 - x0) / (frame.width() / 130.0).max(1.0) as f64);
-        let y_major = match (self.plot_view, fitted) {
-            (None, Some((_, step))) => step,
-            _ => nice_step((y1 - y0) / (frame.height() / 50.0).max(1.0) as f64),
-        };
-        let grid = Stroke::new(1.0, Color32::from_rgb(0xEA, 0xEA, 0xEA));
+        let x_major = nice_step((x1 - x0) / (panel.width() / 130.0).max(1.0) as f64);
         let axis = Color32::from_rgb(0x3A, 0x3A, 0x3A);
-        for x in ticks(x0, x1, minor_step(x_major)) {
-            let p = to_screen(x, y0);
-            painter.vline(p.x.round() + 0.5, frame.y_range(), grid);
-        }
-        for y in ticks(y0, y1, minor_step(y_major)) {
-            let p = to_screen(x0, y);
-            let stroke = if y.abs() < y_major * 1e-6 {
-                Stroke::new(1.0, Color32::from_rgb(0xCA, 0xCA, 0xCA))
-            } else {
-                grid
-            };
-            painter.hline(frame.x_range(), p.y.round() + 0.5, stroke);
-            painter.hline(
-                (frame.left() - 4.0)..=frame.left(),
-                p.y.round() + 0.5,
-                Stroke::new(1.0, axis),
-            );
-        }
         let label_font = FontId::proportional(11.5);
-        for x in ticks(x0, x1, x_major) {
-            let p = to_screen(x, y0);
-            painter.vline(
-                p.x.round() + 0.5,
-                frame.bottom()..=(frame.bottom() + 4.0),
+        let mut geoms: Vec<Geom> = Vec::new();
+        for (i, curves) in panels.iter().enumerate() {
+            let top = panel.top() + i as f32 * sub_h;
+            let sub = egui::Rect::from_min_max(
+                egui::pos2(panel.left(), top),
+                egui::pos2(panel.right(), top + sub_h),
+            );
+            let frame = egui::Rect::from_min_max(
+                egui::pos2(sub.left() + 53.0, sub.top() + 31.0),
+                egui::pos2(sub.right() - 24.0, sub.bottom() - 29.0),
+            );
+            if frame.width() < 40.0 || frame.height() < 40.0 {
+                continue;
+            }
+            let (y0, y1, y_major) = match self.diagrams[i].y_view {
+                Some((a, b)) if b > a => (
+                    a,
+                    b,
+                    nice_step((b - a) / (frame.height() / 50.0).max(1.0) as f64),
+                ),
+                _ => match data_bounds(curves.iter()) {
+                    Some((_, _, a, b)) => {
+                        let (a, b, step) = nice_range(a, b, frame.height() / 50.0);
+                        (a, b, step)
+                    }
+                    None => (-1.0, 1.0, 1.0),
+                },
+            };
+            geoms.push(Geom {
+                index: i,
+                sub,
+                frame,
+                y0,
+                y1,
+                y_major,
+            });
+        }
+        if geoms.is_empty() {
+            return;
+        }
+        for g in &geoms {
+            let curves = &panels[g.index];
+            let (y0, y1) = (g.y0, g.y1);
+            // Legend above each frame.
+            let mut lx = g.frame.left() - 2.0;
+            for c in curves {
+                let y = g.sub.top() + 16.5;
+                painter.hline(lx..=lx + 26.0, y, Stroke::new(1.0, c.color));
+                let galley =
+                    painter.layout_no_wrap(c.name.clone(), FontId::proportional(12.0), theme::TEXT);
+                let w = galley.size().x;
+                painter.galley(
+                    egui::pos2(lx + 31.0, y - galley.size().y / 2.0),
+                    galley,
+                    theme::TEXT,
+                );
+                lx += 31.0 + w + 18.0;
+            }
+            let to_screen = |x: f64, y: f64| {
+                egui::pos2(
+                    g.frame.left() + ((x - x0) / (x1 - x0)) as f32 * g.frame.width(),
+                    g.frame.bottom() - ((y - y0) / (y1 - y0)) as f32 * g.frame.height(),
+                )
+            };
+            let grid = Stroke::new(1.0, Color32::from_rgb(0xEA, 0xEA, 0xEA));
+            for x in ticks(x0, x1, minor_step(x_major)) {
+                let p = to_screen(x, y0);
+                painter.vline(p.x.round() + 0.5, g.frame.y_range(), grid);
+            }
+            for y in ticks(y0, y1, minor_step(g.y_major)) {
+                let p = to_screen(x0, y);
+                let stroke = if y.abs() < g.y_major * 1e-6 {
+                    Stroke::new(1.0, Color32::from_rgb(0xCA, 0xCA, 0xCA))
+                } else {
+                    grid
+                };
+                painter.hline(g.frame.x_range(), p.y.round() + 0.5, stroke);
+                painter.hline(
+                    (g.frame.left() - 4.0)..=g.frame.left(),
+                    p.y.round() + 0.5,
+                    Stroke::new(1.0, axis),
+                );
+            }
+            for x in ticks(x0, x1, x_major) {
+                let p = to_screen(x, y0);
+                painter.vline(
+                    p.x.round() + 0.5,
+                    g.frame.bottom()..=(g.frame.bottom() + 4.0),
+                    Stroke::new(1.0, axis),
+                );
+                painter.text(
+                    egui::pos2(p.x, g.frame.bottom() + 12.0),
+                    Align2::CENTER_CENTER,
+                    format_tick(x, x_major),
+                    label_font.clone(),
+                    theme::TEXT,
+                );
+            }
+            for y in ticks(y0, y1, g.y_major) {
+                let p = to_screen(x0, y);
+                painter.hline(
+                    (g.frame.left() - 6.0)..=g.frame.left(),
+                    p.y.round() + 0.5,
+                    Stroke::new(1.0, axis),
+                );
+                painter.text(
+                    egui::pos2(g.frame.left() - 8.0, p.y),
+                    Align2::RIGHT_CENTER,
+                    format_tick(y, g.y_major),
+                    label_font.clone(),
+                    theme::TEXT,
+                );
+            }
+            let clip = painter.with_clip_rect(g.frame);
+            for c in curves {
+                let pts: Vec<egui::Pos2> = c
+                    .time
+                    .iter()
+                    .zip(&c.values)
+                    .map(|(x, y)| to_screen(*x, *y))
+                    .collect();
+                clip.add(egui::Shape::line(pts, Stroke::new(1.0, c.color)));
+            }
+            painter.rect_stroke(
+                g.frame,
+                0.0,
                 Stroke::new(1.0, axis),
-            );
-            painter.text(
-                egui::pos2(p.x, frame.bottom() + 12.0),
-                Align2::CENTER_CENTER,
-                format_tick(x, x_major),
-                label_font.clone(),
-                theme::TEXT,
+                egui::StrokeKind::Inside,
             );
         }
-        for y in ticks(y0, y1, y_major) {
-            let p = to_screen(x0, y);
-            painter.hline(
-                (frame.left() - 6.0)..=frame.left(),
-                p.y.round() + 0.5,
-                Stroke::new(1.0, axis),
-            );
-            painter.text(
-                egui::pos2(frame.left() - 8.0, p.y),
-                Align2::RIGHT_CENTER,
-                format_tick(y, y_major),
-                label_font.clone(),
-                theme::TEXT,
-            );
-        }
-        let clip = painter.with_clip_rect(frame);
-        for c in &curves {
-            let pts: Vec<egui::Pos2> = c.points.iter().map(|[x, y]| to_screen(*x, *y)).collect();
-            clip.add(egui::Shape::line(pts, Stroke::new(1.0, c.color)));
-        }
-        painter.rect_stroke(frame, 0.0, Stroke::new(1.0, axis), egui::StrokeKind::Inside);
 
-        // Interaction: drag a rectangle to zoom, double-click to reset.
+        // Interaction: drag a rectangle to zoom (x is shared), double-click to reset.
         if response.double_clicked() {
             self.plot_view = None;
+            for diagram in &mut self.diagrams {
+                diagram.y_view = None;
+            }
         }
         let drag_id = ui.scope_id().with("plot_drag_start");
         if response.drag_started() {
             if let Some(p) = response.interact_pointer_pos() {
-                ui.ctx().data_mut(|d| d.insert_temp(drag_id, p));
-            }
-        }
-        if let (Some(start), Some(now)) = (
-            ui.ctx().data(|d| d.get_temp::<egui::Pos2>(drag_id)),
-            response.interact_pointer_pos(),
-        ) {
-            let r = egui::Rect::from_two_pos(start, now).intersect(frame);
-            if response.dragged() {
-                painter.rect(
-                    r,
-                    0.0,
-                    Color32::from_rgba_unmultiplied(0x1F, 0x6F, 0xC8, 30),
-                    Stroke::new(1.0, theme::ACCENT),
-                    egui::StrokeKind::Inside,
-                );
-            }
-            if response.drag_stopped() {
-                ui.ctx().data_mut(|d| d.remove::<egui::Pos2>(drag_id));
-                if r.width() > 4.0 && r.height() > 4.0 {
-                    let from = |p: egui::Pos2| {
-                        (
-                            x0 + ((p.x - frame.left()) / frame.width()) as f64 * (x1 - x0),
-                            y0 + ((frame.bottom() - p.y) / frame.height()) as f64 * (y1 - y0),
-                        )
-                    };
-                    let (ax, ay) = from(r.left_bottom());
-                    let (bx, by) = from(r.right_top());
-                    self.plot_view = Some((ax, bx, ay, by));
+                if let Some(g) = geoms.iter().find(|g| g.frame.contains(p)) {
+                    ui.ctx().data_mut(|d| d.insert_temp(drag_id, (p, g.index)));
                 }
             }
         }
-        if let Some(p) = response.hover_pos().filter(|p| frame.contains(*p)) {
-            let t = x0 + ((p.x - frame.left()) / frame.width()) as f64 * (x1 - x0);
-            let v = y0 + ((frame.bottom() - p.y) / frame.height()) as f64 * (y1 - y0);
-            response.on_hover_text_at_pointer(format!(
-                "t = {}\ny = {}",
-                crate::ui::browsers_format(t),
-                crate::ui::browsers_format(v)
-            ));
+        if let Some((start, index)) = ui
+            .ctx()
+            .data(|d| d.get_temp::<(egui::Pos2, usize)>(drag_id))
+        {
+            if let (Some(g), Some(now)) = (
+                geoms.iter().find(|g| g.index == index),
+                response.interact_pointer_pos(),
+            ) {
+                let r = egui::Rect::from_two_pos(start, now).intersect(g.frame);
+                if response.dragged() {
+                    painter.rect(
+                        r,
+                        0.0,
+                        Color32::from_rgba_unmultiplied(0x1F, 0x6F, 0xC8, 30),
+                        Stroke::new(1.0, theme::ACCENT),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+                if response.drag_stopped() {
+                    ui.ctx()
+                        .data_mut(|d| d.remove::<(egui::Pos2, usize)>(drag_id));
+                    if r.width() > 4.0 && r.height() > 4.0 {
+                        let from_x = |x: f32| {
+                            x0 + ((x - g.frame.left()) / g.frame.width()) as f64 * (x1 - x0)
+                        };
+                        let from_y = |y: f32| {
+                            g.y0 + ((g.frame.bottom() - y) / g.frame.height()) as f64
+                                * (g.y1 - g.y0)
+                        };
+                        self.plot_view = Some((from_x(r.left()), from_x(r.right())));
+                        self.diagrams[g.index].y_view = Some((from_y(r.bottom()), from_y(r.top())));
+                    }
+                }
+            }
+        }
+
+        // Measurement cursor: one time for every diagram, values at the top right.
+        let hover = response
+            .hover_pos()
+            .filter(|p| geoms.iter().any(|g| g.frame.contains(*p)));
+        if let Some(p) = hover {
+            let first = &geoms[0];
+            let t = x0 + ((p.x - first.frame.left()) / first.frame.width()) as f64 * (x1 - x0);
+            if self.cursor_enabled {
+                for g in &geoms {
+                    let x = g.frame.left() + ((t - x0) / (x1 - x0)) as f32 * g.frame.width();
+                    painter.vline(
+                        x.round() + 0.5,
+                        g.frame.y_range(),
+                        Stroke::new(1.0, theme::ACCENT),
+                    );
+                    let mut y = g.frame.top() + 5.0;
+                    for c in &panels[g.index] {
+                        if let Some(v) = crate::series::value_at(&c.time, &c.values, t) {
+                            let text = format!("{} = {}", c.name, crate::ui::browsers_format(v));
+                            let galley =
+                                painter.layout_no_wrap(text, FontId::proportional(11.0), c.color);
+                            let w = galley.size().x;
+                            let h = galley.size().y;
+                            painter.galley(
+                                egui::pos2(g.frame.right() - 6.0 - w, y),
+                                galley,
+                                c.color,
+                            );
+                            y += h + 1.0;
+                        }
+                    }
+                }
+            } else {
+                response.on_hover_text_at_pointer(format!("t = {}", crate::ui::browsers_format(t)));
+            }
+        }
+    }
+
+    /// Export the active diagram's curves of its newest run as Omola CSV.
+    pub fn export_active_diagram_csv(&mut self, path: &std::path::Path) {
+        let diagram = &self.diagrams[self.active_diagram];
+        let Some(newest) = diagram.signals.iter().map(|s| s.run_id).max() else {
+            return self.warn(
+                crate::backend::LogTab::Simulation,
+                "There is no curve to export.".into(),
+            );
+        };
+        let mixed = diagram.signals.iter().any(|s| s.run_id != newest);
+        let Some(run) = self.run(newest) else {
+            return self.warn(
+                crate::backend::LogTab::Simulation,
+                "The result of this curve is no longer kept.".into(),
+            );
+        };
+        let time = run.outcome.result.time.clone();
+        let columns: Vec<(String, Vec<f64>)> = diagram
+            .signals
+            .iter()
+            .filter(|s| s.run_id == newest)
+            .filter_map(|s| {
+                run.outcome
+                    .result
+                    .series(&s.variable)
+                    .map(|v| (s.variable.clone(), v.to_vec()))
+            })
+            .collect();
+        let refs: Vec<(&str, &[f64])> = columns
+            .iter()
+            .map(|(name, values)| (name.as_str(), values.as_slice()))
+            .collect();
+        match std::fs::write(path, plotted_csv(&time, &refs)) {
+            Ok(()) => self.info(
+                crate::backend::LogTab::Simulation,
+                format!("Exported {} curve(s) to {}", refs.len(), path.display()),
+            ),
+            Err(e) => self.error(
+                crate::backend::LogTab::Simulation,
+                format!("Could not write {}: {e}", path.display()),
+            ),
+        }
+        if mixed {
+            self.warn(
+                crate::backend::LogTab::Simulation,
+                "The diagram mixes results; only the newest run was exported.".into(),
+            );
         }
     }
 }
@@ -397,21 +525,79 @@ impl OmolaApp {
 struct Curve {
     name: String,
     color: Color32,
-    points: Vec<[f64; 2]>,
+    time: Vec<f64>,
+    values: Vec<f64>,
 }
 
-fn data_bounds(curves: &[Curve]) -> Option<(f64, f64, f64, f64)> {
+/// Screen geometry and y range of one drawn diagram.
+struct Geom {
+    index: usize,
+    /// The vertical slice of the plot window, including the legend area.
+    sub: egui::Rect,
+    frame: egui::Rect,
+    y0: f64,
+    y1: f64,
+    y_major: f64,
+}
+
+fn data_bounds<'a>(curves: impl IntoIterator<Item = &'a Curve>) -> Option<(f64, f64, f64, f64)> {
     let mut b: Option<(f64, f64, f64, f64)> = None;
-    for [x, y] in curves.iter().flat_map(|c| c.points.iter()) {
-        if !x.is_finite() || !y.is_finite() {
-            continue;
+    for curve in curves {
+        for (x, y) in curve.time.iter().zip(&curve.values) {
+            if !x.is_finite() || !y.is_finite() {
+                continue;
+            }
+            b = Some(match b {
+                None => (*x, *x, *y, *y),
+                Some((a, bb, c, d)) => (a.min(*x), bb.max(*x), c.min(*y), d.max(*y)),
+            });
         }
-        b = Some(match b {
-            None => (*x, *x, *y, *y),
-            Some((a, bb, c, d)) => (a.min(*x), bb.max(*x), c.min(*y), d.max(*y)),
-        });
     }
     b
+}
+
+/// Omola CSV of the plotted curves: `time` first, then one column per curve.
+///
+/// Every sample is written, including the repeated times of events, which
+/// `omola results inspect` accepts because time only has to be non-decreasing.
+pub fn plotted_csv(time: &[f64], columns: &[(&str, &[f64])]) -> String {
+    let mut out = String::from("time");
+    for (name, _) in columns {
+        out.push(',');
+        push_csv_field(&mut out, name);
+    }
+    out.push('\n');
+    for (row, t) in time.iter().enumerate() {
+        let values: Option<Vec<f64>> = columns
+            .iter()
+            .map(|(_, values)| values.get(row).copied())
+            .collect();
+        let Some(values) = values else {
+            continue;
+        };
+        out.push_str(&format!("{t}"));
+        for v in values {
+            out.push(',');
+            out.push_str(&format!("{v}"));
+        }
+        out.push('\n');
+    }
+    out
+}
+
+fn push_csv_field(out: &mut String, field: &str) {
+    if field.contains([',', '"', '\n', '\r']) {
+        out.push('"');
+        for ch in field.chars() {
+            if ch == '"' {
+                out.push('"');
+            }
+            out.push(ch);
+        }
+        out.push('"');
+    } else {
+        out.push_str(field);
+    }
 }
 
 /// A "nice" step (1, 2, 2.5, 4, 5 x 10^k) not smaller than `raw`.
@@ -559,6 +745,31 @@ mod tests {
         assert_eq!(format_tick(0.0, 2.5), "0.0");
         assert_eq!(format_tick(1e-17, 0.4), "0.0");
         assert_eq!(format_tick(4.0, 2.0), "4.0");
+    }
+
+    #[test]
+    fn csv_export_writes_headers_quotes_and_values() {
+        use super::plotted_csv;
+        let time = [0.0, 0.1];
+        let a = [1.0, 2.5];
+        let b = [-1.0, 0.0];
+        let csv = plotted_csv(&time, &[("a", &a[..]), ("x,\"y\"", &b[..])]);
+        assert_eq!(csv, "time,a,\"x,\"\"y\"\"\"\n0,1,-1\n0.1,2.5,0\n");
+        // Values round-trip through `f64` parsing, as `results inspect` requires.
+        for line in csv.lines().skip(1) {
+            for field in line.split(',') {
+                field.parse::<f64>().unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn csv_export_skips_rows_with_missing_samples() {
+        use super::plotted_csv;
+        let time = [0.0, 1.0, 2.0];
+        let short = [5.0, 6.0];
+        let csv = plotted_csv(&time, &[("x", &short[..])]);
+        assert_eq!(csv, "time,x\n0,5\n1,6\n");
     }
 
     #[test]

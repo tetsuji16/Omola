@@ -144,12 +144,21 @@ pub struct PlotSignal {
     pub variable: String,
 }
 
+/// One vertically stacked diagram of the plot window. All diagrams share the time axis.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PlotDiagram {
+    pub signals: Vec<PlotSignal>,
+    /// Zoomed y range of this diagram; `None` = fit to its curves.
+    pub y_view: Option<(f64, f64)>,
+}
+
 /// Small text-input dialogs (fallback when `OMOLA_GUI_TEXT_DIALOGS=1` or no native portal).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PathDialog {
     Open(String),
     SaveAs(String),
     RunScript(String),
+    ExportCsv(String),
 }
 
 /// Async result from a native file dialog (picked on a background thread).
@@ -157,6 +166,7 @@ pub enum PathDialog {
 pub enum DialogResult {
     Open(Option<PathBuf>),
     SaveAs(Option<PathBuf>),
+    ExportCsv(Option<PathBuf>),
 }
 
 /// Maximum number of entries in the "Recent files" menu.
@@ -247,11 +257,15 @@ pub struct OmolaApp {
     pub variable_show_time_varying: bool,
     /// The `More >>` row of the Variable Browser is open.
     pub variable_advanced: bool,
-    pub plotted: Vec<PlotSignal>,
+    /// At least one diagram; `active_diagram` indexes it.
+    pub diagrams: Vec<PlotDiagram>,
+    pub active_diagram: usize,
+    /// Draw the measurement cursor and the value list of every diagram.
+    pub cursor_enabled: bool,
     /// Values edited in the variable browser, applied as overrides on the next simulation.
     pub pending_overrides: BTreeMap<String, String>,
-    /// Zoomed plot range (x0, x1, y0, y1); `None` = fit to data.
-    pub plot_view: Option<(f64, f64, f64, f64)>,
+    /// Shared zoomed time range of all diagrams; `None` = fit to the plotted data.
+    pub plot_view: Option<(f64, f64)>,
     pub logs: Vec<LogEntry>,
     pub log_tab: LogTab,
     pub bottom_pane: BottomPane,
@@ -350,7 +364,9 @@ impl OmolaApp {
             variable_show_parameters: true,
             variable_show_time_varying: true,
             variable_advanced: false,
-            plotted: Vec::new(),
+            diagrams: vec![PlotDiagram::default()],
+            active_diagram: 0,
+            cursor_enabled: false,
             pending_overrides: BTreeMap::new(),
             plot_view: None,
             logs: Vec::new(),
@@ -1048,35 +1064,46 @@ impl OmolaApp {
             .filter(|r| r.outcome.class == outcome.class)
             .map(|r| r.id)
             .max();
-        let mut replot: Vec<PlotSignal> = self
-            .plotted
-            .iter()
-            .filter(|s| Some(s.run_id) == latest_previous)
-            .map(|s| PlotSignal {
-                run_id: id,
-                variable: s.variable.clone(),
-            })
-            .collect();
-        if replot.is_empty() && self.plotted.is_empty() {
+        // A re-simulation keeps every diagram's curves on the newest result of the model.
+        let any_signals = self.diagrams.iter().any(|d| !d.signals.is_empty());
+        for diagram in &mut self.diagrams {
+            let replot: Vec<PlotSignal> = diagram
+                .signals
+                .iter()
+                .filter(|s| Some(s.run_id) == latest_previous)
+                .map(|s| PlotSignal {
+                    run_id: id,
+                    variable: s.variable.clone(),
+                })
+                .collect();
+            let moving = !replot.is_empty() && latest_previous.is_some();
+            diagram
+                .signals
+                .retain(|s| !(moving && Some(s.run_id) == latest_previous));
+            diagram.signals.extend(replot);
+            // New samples may not fit the previous y range.
+            diagram.y_view = None;
+        }
+        if !any_signals {
             if let Some(var) = outcome.result.variables.iter().find(|v| {
                 let leaf = v.name.rsplit('.').next().unwrap_or(&v.name);
                 !v.is_parameter && leaf != "time" && !v.name.contains("der(")
             }) {
-                replot.push(PlotSignal {
+                self.diagrams[0].signals.push(PlotSignal {
                     run_id: id,
                     variable: var.name.clone(),
                 });
             }
         }
-        let moving = !replot.is_empty() && latest_previous.is_some();
-        self.plotted
-            .retain(|s| !(moving && Some(s.run_id) == latest_previous));
-        self.plotted.extend(replot);
         self.runs.push(ResultRun { id, label, outcome });
         while self.runs.len() > self.keep_results.max(1) {
             let removed = self.runs.remove(0);
-            self.plotted.retain(|s| s.run_id != removed.id);
+            for diagram in &mut self.diagrams {
+                diagram.signals.retain(|s| s.run_id != removed.id);
+            }
         }
+        // The time axis of the new result is different: fit again.
+        self.plot_view = None;
         // A new result has its own time axis: show its last sample again.
         self.variable_time = None;
         self.tab = RibbonTab::Simulation;
@@ -1085,6 +1112,23 @@ impl OmolaApp {
 
     pub fn run(&self, id: u64) -> Option<&ResultRun> {
         self.runs.iter().find(|r| r.id == id)
+    }
+
+    /// Add an empty diagram below the others and make it active.
+    pub fn add_plot_diagram(&mut self) {
+        self.diagrams.push(PlotDiagram::default());
+        self.active_diagram = self.diagrams.len() - 1;
+    }
+
+    /// Remove the active diagram; the last remaining diagram is kept.
+    pub fn remove_plot_diagram(&mut self) {
+        if self.diagrams.len() <= 1 {
+            return;
+        }
+        self.diagrams.remove(self.active_diagram);
+        if self.active_diagram >= self.diagrams.len() {
+            self.active_diagram = self.diagrams.len() - 1;
+        }
     }
 
     /// The edit-window layer for the current ribbon tab.
@@ -1208,6 +1252,31 @@ impl OmolaApp {
         });
     }
 
+    /// Open a native "Save as" dialog for the active diagram's curves.
+    pub fn request_export_csv_dialog(&mut self) {
+        let file_name = format!(
+            "{}.csv",
+            self.active
+                .as_deref()
+                .map(crate::library::short_name)
+                .unwrap_or("plot")
+        );
+        if Self::use_text_dialogs() {
+            self.path_dialog = Some(PathDialog::ExportCsv(file_name));
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel::<DialogResult>();
+        self.dialog_rx = Some(rx);
+        let suggested = file_name.clone();
+        std::thread::spawn(move || {
+            let result = rfd::FileDialog::new()
+                .add_filter("CSV", &["csv"])
+                .set_file_name(&suggested)
+                .save_file();
+            let _ = tx.send(DialogResult::ExportCsv(result));
+        });
+    }
+
     /// Poll the native dialog channel and apply results.
     pub fn poll_dialog(&mut self) {
         let result = self.dialog_rx.as_ref().and_then(|rx| rx.try_recv().ok());
@@ -1223,6 +1292,8 @@ impl OmolaApp {
                     self.save();
                 }
                 DialogResult::SaveAs(None) => {}
+                DialogResult::ExportCsv(Some(path)) => self.export_active_diagram_csv(&path),
+                DialogResult::ExportCsv(None) => {}
             }
         }
     }
@@ -1364,7 +1435,7 @@ mod tests {
         app.add_run(outcome("BouncingBall"));
         assert_eq!(app.tab, RibbonTab::Simulation);
         assert_eq!(
-            app.plotted,
+            app.diagrams[0].signals,
             vec![PlotSignal {
                 run_id: 1,
                 variable: "height".into()
@@ -1374,8 +1445,37 @@ mod tests {
         app.add_run(outcome("BouncingBall"));
         let ids: Vec<_> = app.runs.iter().map(|r| r.id).collect();
         assert_eq!(ids, vec![2, 3]);
-        assert!(app.plotted.iter().all(|s| s.run_id == 3));
-        assert_eq!(app.plotted.len(), 1);
+        assert!(app.diagrams[0].signals.iter().all(|s| s.run_id == 3));
+        assert_eq!(app.diagrams[0].signals.len(), 1);
+    }
+
+    #[test]
+    fn diagrams_keep_the_active_index_in_range() {
+        let mut app = app();
+        assert_eq!(app.diagrams.len(), 1);
+        app.remove_plot_diagram();
+        assert_eq!(app.diagrams.len(), 1);
+        app.add_plot_diagram();
+        app.add_plot_diagram();
+        assert_eq!(app.active_diagram, 2);
+        app.remove_plot_diagram();
+        assert_eq!(app.diagrams.len(), 2);
+        assert_eq!(app.active_diagram, 1);
+        app.remove_plot_diagram();
+        assert_eq!(app.active_diagram, 0);
+        app.remove_plot_diagram();
+        assert_eq!(app.diagrams.len(), 1);
+    }
+
+    #[test]
+    fn replotting_moves_every_diagram_to_the_new_run() {
+        let mut app = app();
+        app.add_run(outcome("BouncingBall"));
+        app.add_plot_diagram();
+        app.add_run(outcome("BouncingBall"));
+        // The first diagram followed the model to run 2; the new diagram starts empty.
+        assert_eq!(app.diagrams[0].signals[0].run_id, 2);
+        assert!(app.diagrams[1].signals.is_empty());
     }
 
     fn experiment() -> library::Experiment {

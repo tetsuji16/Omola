@@ -636,7 +636,7 @@ impl OmolaApp {
                             run_id: run.id,
                             latest: Some(run.id) == latest,
                             time,
-                            plotted: &self.plotted,
+                            plotted: &self.diagrams[self.active_diagram].signals,
                             overrides: &self.pending_overrides,
                             expanded: &self.variable_expanded,
                         };
@@ -723,11 +723,13 @@ impl OmolaApp {
         if self.variable_advanced {
             self.variable_advanced_row(ui);
         }
+        // Checkboxes add and remove curves of the active diagram only.
+        let active = &mut self.diagrams[self.active_diagram];
         for signal in toggles {
-            if let Some(pos) = self.plotted.iter().position(|s| *s == signal) {
-                self.plotted.remove(pos);
+            if let Some(pos) = active.signals.iter().position(|s| *s == signal) {
+                active.signals.remove(pos);
             } else {
-                self.plotted.push(signal);
+                active.signals.push(signal);
             }
         }
         for (name, text) in edits {

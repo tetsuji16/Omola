@@ -125,7 +125,7 @@
 | Diagram 層 | 同上 | 座標系グリッドのみ(G12) |
 | Simulation | `backend.rs` | ライブラリのクラス(例: `Modelica.Blocks.Examples.PID_Controller`)とユーザーモデルを OMC で実行。experiment 注釈の StopTime を反映 |
 | Variable Browser | `ui/browsers.rs` + `var_tree.rs` | 変数名のドット・配列添字・`der()` で木構造(`CollapsingHeader`、既定は閉、深さ 1 で子が 20 個以下なら開)。Value/Unit/Description、`Time:` の `DragValue` で任意時刻の値を線形補間表示(既定は最終時刻)、フィルタ入力中は一致する葉の平坦リスト。最新結果のパラメータは Value 欄で編集でき、太字 + `x` で取り消し、次の Simulate で `-override` として渡す(`More >>` に Parameters / Time-varying のトグルと Reset overrides) |
-| プロット | `ui/views.rs` | 自前描画(ドラッグでズーム、ダブルクリックで戻す、ホバーで値) |
+| プロット | `ui/views.rs` | 自前描画。縦に複数のダイアグラム(時間軸は共通)、ドラッグでズーム、ダブルクリックで戻す、カーソルで各曲線の値を表示、アクティブなダイアグラムを CSV に出力 |
 | Logs / Commands | `ui/bottom.rs` | ログのタブ分け、Commands 窓から OMC スクリプト実行、Run Script |
 
 現在の画面。開発専用の偽 omc で撮影しています(MSL 4.1.0 の実テキストを返し、Pendulum の結果は事前計算値)。実 OMC での動作は CI の `msl_browse_document_and_simulate_with_real_omc` で検証しています。
