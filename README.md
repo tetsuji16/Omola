@@ -231,7 +231,9 @@ cargo run -p omola-gui --example demo_mat -- target/demo_res.mat
 OMOLA_FAKE_MAT="$PWD/target/demo_res.mat" OMOLA_OMC="$PWD/scripts/fake-omc.sh" cargo run -p omola-gui -- examples/BouncingBall.mo
 ```
 
-Not implemented yet: graphical diagram/icon rendering and editing, component hierarchy, animation, sweeps, and the remaining Simulation Setup fields; see issues G01–G14 in [`docs/issues/gui`](docs/issues/gui/README.md). Screenshots: [`docs/images/omola-gui`](docs/images/omola-gui).
+Not implemented yet: animation, linearization, continuing a simulation from its final state, and multi-parameter sweeps (a sweep varies one parameter). The open items are listed in [`docs/issues/gui`](docs/issues/gui/README.md).
+
+Results are written to a work folder under the system temporary directory. Work folders older than seven days are removed when the GUI starts, so use `Save result as...` (right-click a result) to keep a `.mat` file. Screenshots: [`docs/images/omola-gui`](docs/images/omola-gui).
 
 性能を調べるときは `OMOLA_FRAME_STATS=1` を付けて起動すると、1 秒ごとの描画時間が標準エラーに出ます。
 

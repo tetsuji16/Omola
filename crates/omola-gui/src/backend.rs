@@ -29,138 +29,96 @@ pub struct SimulationSetup {
     pub parameters: Vec<(String, String)>,
 }
 
-#[cfg(test)]
-mod edit_integration_test {
-    use super::*;
-    use crate::edit::EditOp;
-    use std::time::Duration;
-
-    #[test]
-    #[ignore = "needs OpenModelica; run with --ignored and OMOLA_OMC set"]
-    fn edit_model_adds_component_with_real_omc() {
-        if std::env::var_os("OMOLA_OMC").is_none() {
-            eprintln!("OMOLA_OMC is not set; skipping real-OMC edit test");
-            return;
+impl SimulationSetup {
+    /// Reject settings OMC would only fail on after a long translation (issue G44).
+    ///
+    /// The message is shown as-is in the Translation log and in the Simulation Setup
+    /// dialog, so it names the offending field.
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.start_time.is_finite() || !self.stop_time.is_finite() {
+            return Err("Start time and stop time must be finite numbers.".into());
         }
-        let root = std::env::temp_dir().join(format!("omola-gui-edit-{}", std::process::id()));
-        let worker = Worker::spawn(root.join("work"), || {});
-        worker.submit(Job::EditModel {
-            doc_text: "model A Real x; equation der(x)=-x; end A;".into(),
-            file_name: "A.mo".into(),
-            class: "A".into(),
-            ops: vec![EditOp::AddComponent {
-                name: "k".into(),
-                type_name: "Modelica.Blocks.Sources.Constant".into(),
-                extent: [[-10., -10.], [10., 10.]],
-                origin: [0., 0.],
-            }],
-            libraries: vec![LibrarySpec::new("Modelica", Some("4.1.0"))],
-        });
-        let deadline = Instant::now() + Duration::from_secs(60);
-        let mut result = None;
-        while result.is_none() && Instant::now() < deadline {
-            for event in worker.poll() {
-                if let Event::ModelEdited { result: r, .. } = event {
-                    result = Some(r);
-                }
-            }
-            thread::sleep(Duration::from_millis(20));
+        if self.stop_time <= self.start_time {
+            return Err(format!(
+                "Stop time ({} s) must be greater than start time ({} s).",
+                self.stop_time, self.start_time
+            ));
         }
-        assert!(result.expect("edit result").unwrap().contains("Constant k"));
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    #[ignore = "needs OpenModelica with MSL 4.1.0; run with --ignored and OMOLA_OMC set"]
-    fn edit_model_adds_connection_with_real_omc() {
-        if std::env::var_os("OMOLA_OMC").is_none() {
-            return;
+        if self.number_of_intervals == 0 {
+            return Err("Number of intervals must be at least 1.".into());
         }
-        let root = std::env::temp_dir().join(format!("omola-gui-connect-{}", std::process::id()));
-        let worker = Worker::spawn(root.join("work"), || {});
-        worker.submit(Job::EditModel {
-            doc_text: "model A Modelica.Blocks.Sources.Sine sine; Modelica.Blocks.Continuous.FirstOrder firstOrder; end A;".into(),
-            file_name: "A.mo".into(), class: "A".into(),
-            ops: vec![EditOp::AddConnection { from: "sine.y".into(), to: "firstOrder.u".into(), points: vec![[0.0, 0.0], [10.0, 0.0]] }],
-            libraries: vec![LibrarySpec::new("Modelica", Some("4.1.0"))],
-        });
-        let deadline = Instant::now() + Duration::from_secs(60);
-        let mut result = None;
-        while result.is_none() && Instant::now() < deadline {
-            for event in worker.poll() {
-                if let Event::ModelEdited { result: r, .. } = event {
-                    result = Some(r);
-                }
-            }
-            thread::sleep(Duration::from_millis(20));
+        if !self.tolerance.is_finite() || self.tolerance <= 0.0 {
+            return Err("Tolerance must be a positive number.".into());
         }
-        assert!(result
-            .expect("edit result")
-            .unwrap()
-            .contains("connect(sine.y, firstOrder.u)"));
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    #[ignore = "needs OpenModelica with MSL 4.1.0; run with --ignored and OMOLA_OMC set"]
-    fn load_parameter_rows_and_current_modifier_with_real_omc() {
-        if std::env::var_os("OMOLA_OMC").is_none() {
-            return;
+        if !omola_core::SIMULATION_METHODS.contains(&self.method.as_str()) {
+            return Err(format!(
+                "Unknown integration method \"{}\". Supported: {}.",
+                self.method,
+                omola_core::SIMULATION_METHODS.join(", ")
+            ));
         }
-        let root =
-            std::env::temp_dir().join(format!("omola-gui-parameters-{}", std::process::id()));
-        let worker = Worker::spawn(root.join("work"), || {});
-        worker.submit(Job::LoadParameters {
-            component_type: "Modelica.Blocks.Continuous.FirstOrder".into(),
-            class: "A".into(),
-            component: "firstOrder".into(),
-            context: ClassContext {
-                libraries: vec![LibrarySpec::new("Modelica", Some("4.1.0"))],
-                user_source: Some(
-                    "model A Modelica.Blocks.Continuous.FirstOrder firstOrder(T=2); end A;".into(),
-                ),
-            },
-        });
-        let deadline = Instant::now() + Duration::from_secs(60);
-        let mut result = None;
-        while result.is_none() && Instant::now() < deadline {
-            for event in worker.poll() {
-                if let Event::Parameters { result: r, .. } = event {
-                    result = Some(r);
-                }
-            }
-            thread::sleep(Duration::from_millis(20));
-        }
-        let rows = result.expect("parameter result").unwrap();
-        let t = rows.iter().find(|p| p.name == "T").expect("T parameter");
-        assert_eq!(t.default_value.as_deref(), Some("1"));
-        assert_eq!(t.current_value.as_deref(), Some("2"));
-        assert_eq!(t.unit, "s");
-        worker.submit(Job::EditModel {
-            doc_text: "model A Modelica.Blocks.Continuous.FirstOrder firstOrder; end A;".into(),
-            file_name: "A.mo".into(),
-            class: "A".into(),
-            ops: vec![EditOp::SetModifier {
-                path: "firstOrder.T".into(),
-                value: Some("2".into()),
-            }],
-            libraries: vec![LibrarySpec::new("Modelica", Some("4.1.0"))],
-        });
-        let deadline = Instant::now() + Duration::from_secs(60);
-        let mut edited = None;
-        while edited.is_none() && Instant::now() < deadline {
-            for event in worker.poll() {
-                if let Event::ModelEdited { result, .. } = event {
-                    edited = Some(result);
-                }
-            }
-            thread::sleep(Duration::from_millis(20));
-        }
-        let edited = edited.expect("modifier edit result").unwrap();
-        assert!(edited.contains("T = 2"), "{edited}");
-        let _ = std::fs::remove_dir_all(root);
+        Ok(())
     }
 }
+
+/// Class name shown for a result file loaded from disk (issue G14).
+///
+/// OpenModelica writes `<Class>_res.mat`; other tools write `<name>.mat`. The suffix is
+/// stripped so `BouncingBall_res.mat` is listed as `BouncingBall`. Never empty.
+pub fn result_class_from_path(path: &Path) -> String {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let lower = name.to_ascii_lowercase();
+    let stem = if lower.ends_with("_res.mat") {
+        &name[..name.len() - "_res.mat".len()]
+    } else if lower.ends_with(".mat") {
+        &name[..name.len() - ".mat".len()]
+    } else {
+        name.as_str()
+    };
+    if stem.is_empty() {
+        "result".to_owned()
+    } else {
+        stem.to_owned()
+    }
+}
+
+/// Read a result file from disk and publish it like a finished simulation (issue G14).
+///
+/// Needs no OMC: the MAT v4 reader lives in `omola-core`.
+fn load_result(path: &Path, send: &dyn Fn(Event)) {
+    let started = Instant::now();
+    match mat::read_trajectory_file(path) {
+        Ok(trajectory) => {
+            send(Event::Log(
+                LogTab::Simulation,
+                LogLevel::Info,
+                format!(
+                    "Loaded result \"{}\"\n... {} variables, {} result points",
+                    path.display(),
+                    trajectory.variables.len(),
+                    trajectory.time.len()
+                ),
+            ));
+            send(Event::SimulationFinished(Box::new(SimulationOutcome {
+                class: result_class_from_path(path),
+                result_file: path.to_path_buf(),
+                result: trajectory,
+                elapsed_seconds: started.elapsed().as_secs_f64(),
+            })));
+        }
+        Err(error) => send(Event::Log(
+            LogTab::Simulation,
+            LogLevel::Error,
+            format!("Could not load result {}: {error}", path.display()),
+        )),
+    }
+}
+
+#[cfg(test)]
+mod edit_integration_test;
 
 impl Default for SimulationSetup {
     fn default() -> Self {
@@ -220,6 +178,15 @@ pub enum Job {
     Check {
         class: String,
         context: ClassContext,
+    },
+    /// Build the model (`buildModel`) without running it (G46).
+    Translate {
+        class: String,
+        context: ClassContext,
+    },
+    /// Read an existing result file (`*_res.mat`) into the Variable Browser (G14).
+    LoadResult {
+        path: PathBuf,
     },
     Simulate {
         class: String,
@@ -306,6 +273,10 @@ pub enum Event {
     /// Diagram graphics + component placement + connections (G12).
     Diagram(String, Result<crate::diagram::Diagram, String>),
     SimulationFinished(Box<SimulationOutcome>),
+    /// A `Simulate` job of this class ended without a result (error or Stop). Every
+    /// `Simulate` job ends in exactly one of `SimulationFinished` / `SimulationFailed`,
+    /// which is what a parameter sweep waits for (G49).
+    SimulationFailed(String),
     /// `InstallLibraries` finished (`true` when the Modelica Standard Library is installed).
     LibrariesInstalled(bool),
     ModelEdited {
@@ -333,6 +304,21 @@ impl Worker {
         thread::Builder::new()
             .name("omola-omc-worker".into())
             .spawn(move || {
+                // Old work folders are removed here, never on the UI thread (G50). A work
+                // root chosen by the caller (tests) is left alone.
+                if work_root == default_work_root() {
+                    let removed = work_root
+                        .parent()
+                        .map_or(0, |root| remove_stale_sessions(root, &work_root));
+                    if removed > 0 {
+                        let _ = event_tx.send(Event::Log(
+                            LogTab::Translation,
+                            LogLevel::Info,
+                            format!("Removed {removed} old work folders."),
+                        ));
+                        wake();
+                    }
+                }
                 let mut run_counter = 0u32;
                 for job in job_rx {
                     cancel_worker.store(false, std::sync::atomic::Ordering::Relaxed);
@@ -390,6 +376,11 @@ fn run_job(
     cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     send: &dyn Fn(Event),
 ) {
+    // Reading a result file needs no OMC, so it also works before OpenModelica is set up.
+    let job = match job {
+        Job::LoadResult { path } => return load_result(&path, send),
+        other => other,
+    };
     let omc = match Omc::discover().map(|omc| omc.with_cancel_flag(cancel.clone())) {
         Ok(omc) => omc,
         Err(error) => {
@@ -719,7 +710,22 @@ fn run_job(
             class,
             context,
             setup,
-        } => simulate(&omc, run_dir, class, context, setup, send),
+        } => {
+            let finished = std::cell::Cell::new(false);
+            let name = class.clone();
+            simulate(&omc, run_dir, class, context, setup, &|event| {
+                if matches!(event, Event::SimulationFinished(_)) {
+                    finished.set(true);
+                }
+                send(event);
+            });
+            if !finished.get() {
+                send(Event::SimulationFailed(name));
+            }
+        }
+        Job::Translate { class, context } => translate(&omc, run_dir, &class, &context, send),
+        // Handled before OMC discovery above.
+        Job::LoadResult { path } => load_result(&path, send),
         Job::InstallLibraries => {
             send(Event::Log(
                 LogTab::Version,
@@ -870,7 +876,8 @@ fn fail_job(job: Job, message: String, send: &dyn Fn(Event)) {
             result: Err(message),
         }),
         Job::InstallLibraries => send(Event::LibrariesInstalled(false)),
-        Job::Doctor | Job::Check { .. } | Job::Simulate { .. } => {}
+        Job::Simulate { class, .. } => send(Event::SimulationFailed(class)),
+        Job::Doctor | Job::Check { .. } | Job::Translate { .. } | Job::LoadResult { .. } => {}
     }
 }
 
@@ -996,6 +1003,119 @@ fn simulate(
     }
 }
 
+/// `Translate` (G46): build the model in `<run_dir>/build` and report to the Translation tab.
+fn translate(omc: &Omc, run_dir: &Path, class: &str, context: &ClassContext, send: &dyn Fn(Event)) {
+    let log = |level, text: String| send(Event::Log(LogTab::Translation, level, text));
+    log(
+        LogLevel::Info,
+        format!("Translating {class} (buildModel, no simulation) ..."),
+    );
+    let build_dir = run_dir.join("build");
+    if let Err(error) = std::fs::create_dir_all(&build_dir) {
+        return log(
+            LogLevel::Error,
+            format!("could not create {}: {error}", build_dir.display()),
+        );
+    }
+    let cancelled = std::cell::Cell::new(false);
+    let result = with_user_file(run_dir, class, context, |file| {
+        let script = library::translate_script(class, &context.libraries, file, &build_dir)
+            .map_err(|e| e.to_string())?;
+        omc.run_query_script(&script)
+            .map(|out| out.output)
+            .map_err(|e| {
+                cancelled.set(matches!(e, omola_core::BackendError::Cancelled));
+                e.to_string()
+            })
+    });
+    match result {
+        Ok(output) => {
+            let sections = library::parse_sections(&output);
+            let build = sections.get("build").map(|s| s.trim()).unwrap_or("");
+            let errors = sections.get("errors").map(|s| s.trim()).unwrap_or("");
+            if build.is_empty() {
+                log(
+                    LogLevel::Error,
+                    if errors.is_empty() {
+                        format!("Translation of {class} failed.")
+                    } else {
+                        format!("Translation of {class} failed.\n{errors}")
+                    },
+                );
+            } else {
+                let mut text = format!("Translation of {class} finished ({build}).");
+                if !errors.is_empty() {
+                    text.push('\n');
+                    text.push_str(errors);
+                }
+                log(LogLevel::Info, text);
+            }
+        }
+        Err(_) if cancelled.get() => log(LogLevel::Warning, "Translation stopped.".into()),
+        Err(message) => log(LogLevel::Error, message),
+    }
+}
+
+/// Values of a parameter sweep (G49): `points` evenly spaced values from `from` to `to`.
+///
+/// The last value is exactly `to`, so rounding never produces `0.30000000000000004`
+/// where the user typed `0.3` as the end.
+pub fn sweep_values(from: f64, to: f64, points: usize) -> Result<Vec<f64>, String> {
+    if !from.is_finite() || !to.is_finite() {
+        return Err("From and To must be finite numbers.".into());
+    }
+    if from == to {
+        return Err("From and To must differ.".into());
+    }
+    if !(2..=MAX_SWEEP_POINTS).contains(&points) {
+        return Err(format!(
+            "The number of runs must be between 2 and {MAX_SWEEP_POINTS}."
+        ));
+    }
+    let step = (to - from) / (points - 1) as f64;
+    let mut values: Vec<f64> = (0..points).map(|i| from + step * i as f64).collect();
+    values[points - 1] = to;
+    Ok(values)
+}
+
+/// Upper bound of [`sweep_values`]; every run is kept in memory.
+pub const MAX_SWEEP_POINTS: usize = 50;
+
+/// Copy a result file for `Save result as...` (G14).
+///
+/// Without `replace` an existing destination is never opened for writing (`create_new`).
+/// A partly written destination is removed when the copy fails.
+pub fn copy_result_file(source: &Path, dest: &Path, replace: bool) -> Result<(), String> {
+    let src = std::fs::canonicalize(source)
+        .map_err(|e| format!("could not read {}: {e}", source.display()))?;
+    if std::fs::canonicalize(dest).is_ok_and(|d| d == src) {
+        return Err("The result is already stored in that file.".into());
+    }
+    let mut input = std::fs::File::open(&src)
+        .map_err(|e| format!("could not read {}: {e}", source.display()))?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true);
+    if replace {
+        options.create(true).truncate(true);
+    } else {
+        options.create_new(true);
+    }
+    let mut output = options.open(dest).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::AlreadyExists {
+            format!("{} already exists.", dest.display())
+        } else {
+            format!("could not write {}: {e}", dest.display())
+        }
+    })?;
+    let copied = std::io::copy(&mut input, &mut output).and_then(|_| output.sync_all());
+    drop(output);
+    if let Err(error) = copied {
+        let _ = std::fs::remove_file(dest);
+        return Err(format!("could not write {}: {error}", dest.display()));
+    }
+    Ok(())
+}
+
 /// Write the editor buffer to `<run_dir>/<Class>.mo` (the user's file is never touched).
 fn write_source(run_dir: &Path, class: &str, text: &str) -> Result<PathBuf, String> {
     std::fs::create_dir_all(run_dir)
@@ -1015,629 +1135,69 @@ pub fn default_work_root() -> PathBuf {
         .join("omola-gui")
         .join(format!("session-{}", std::process::id()))
 }
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::library::LibrarySpec;
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
-    use std::time::Duration;
 
-    /// End-to-end through the real `omola-core` adapter with a fake `omc` executable that
-    /// copies a pre-built OpenModelica-style MAT file. Real OMC is covered by CI integration.
-    #[test]
-    #[cfg(unix)]
-    fn simulate_job_reads_result_through_fake_omc() {
-        let root = std::env::temp_dir().join(format!("omola-gui-test-{}", std::process::id()));
-        std::fs::create_dir_all(&root).unwrap();
-        let mat_path = root.join("fixture.mat");
-        let var = |name: &str| mat::ResultVariable {
-            name: name.into(),
-            description: String::new(),
-            is_parameter: false,
-        };
-        let fixture = mat::TrajectoryResult {
-            variables: vec![var("time"), var("x")],
-            time: vec![0.0, 0.5, 1.0],
-            values: vec![vec![0.0, 0.5, 1.0], vec![1.0, 0.6, 0.3]],
-        };
-        std::fs::write(&mat_path, mat::write_trajectory(&fixture).unwrap()).unwrap();
-        let fake = root.join("fake-omc");
-        std::fs::write(
-            &fake,
-            format!(
-                "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'OpenModelica 1.27.1 (fake)'; exit 0; fi\ncp '{}' ./fake_res.mat\necho 'OMOLA_RESULT_FILE:fake_res.mat'\n",
-                mat_path.display()
-            ),
-        )
-        .unwrap();
-        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
-        std::env::set_var("OMOLA_OMC", &fake);
+/// Work folders of earlier sessions are removed once they are this old (G50).
+pub const STALE_SESSION_AGE: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 3600);
 
-        let worker = Worker::spawn(root.join("work"), || {});
-        worker.submit(Job::Simulate {
-            class: "M".into(),
-            context: ClassContext {
-                libraries: vec![],
-                user_source: Some("model M Real x(start=1); equation der(x) = -x; end M;".into()),
-            },
-            setup: SimulationSetup::default(),
-        });
-        let deadline = Instant::now() + Duration::from_secs(20);
-        let mut outcome = None;
-        while outcome.is_none() && Instant::now() < deadline {
-            for event in worker.poll() {
-                if let Event::SimulationFinished(done) = event {
-                    outcome = Some(done);
-                } else if let Event::Log(_, LogLevel::Error, message) = event {
-                    panic!("worker error: {message}");
-                }
-            }
-            thread::sleep(Duration::from_millis(20));
-        }
-        let outcome = outcome.expect("simulation finished");
-        assert_eq!(outcome.class, "M");
-        assert_eq!(outcome.result.series("x").unwrap(), [1.0, 0.6, 0.3]);
-        assert!(outcome.result_file.ends_with("M_res.mat"));
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// Real OpenModelica through the GUI worker. Ignored by default because it needs `omc`
-    /// and mutates nothing global (it only reads `OMOLA_OMC`); CI runs it on its own with
-    /// `cargo test -p omola-gui -- --ignored --test-threads=1 simulate_bouncing_ball_with_real_omc`.
-    #[test]
-    #[ignore = "needs OpenModelica; run with --ignored and OMOLA_OMC set"]
-    fn simulate_bouncing_ball_with_real_omc() {
-        if std::env::var_os("OMOLA_OMC").is_none() {
-            eprintln!("OMOLA_OMC is not set; skipping the real-OMC GUI backend test");
-            return;
-        }
-        let root = std::env::temp_dir().join(format!("omola-gui-real-omc-{}", std::process::id()));
-        let worker = Worker::spawn(root.join("work"), || {});
-        worker.submit(Job::Simulate {
-            class: "BouncingBall".into(),
-            context: ClassContext {
-                libraries: vec![],
-                user_source: Some(include_str!("../../../examples/BouncingBall.mo").into()),
-            },
-            setup: SimulationSetup {
-                stop_time: 3.0,
-                ..SimulationSetup::default()
-            },
-        });
-        // OMC translates and compiles C code, which can take a while on a cold CI runner.
-        let deadline = Instant::now() + Duration::from_secs(180);
-        let mut outcome = None;
-        while outcome.is_none() && Instant::now() < deadline {
-            for event in worker.poll() {
-                match event {
-                    Event::SimulationFinished(done) => outcome = Some(done),
-                    Event::Log(_, LogLevel::Error, message) => panic!("worker error: {message}"),
-                    _ => {}
-                }
-            }
-            thread::sleep(Duration::from_millis(50));
-        }
-        let outcome = outcome.expect("simulation finished within 180 s");
-        let result = &outcome.result;
-
-        assert_eq!(result.time.first(), Some(&0.0));
-        let last = *result.time.last().expect("time samples");
-        assert!((last - 3.0).abs() < 1e-6, "last time was {last}");
-
-        let height = result.series("height").expect("height variable");
-        assert!(
-            (height[0] - 1.0).abs() < 1e-6,
-            "initial height was {}",
-            height[0]
-        );
-        // BouncingBall has no Zeno handling: after the bounces converge (about t = 2.56 s)
-        // `when height <= 0` never fires again and OMC lets the ball fall through the floor.
-        // That is real model behavior, so physics is only checked before that point.
-        let before_zeno: Vec<(f64, f64)> = result
-            .time
-            .iter()
-            .cloned()
-            .zip(height.iter().cloned())
-            .filter(|(t, _)| *t <= 2.0)
-            .collect();
-        assert!(
-            before_zeno.iter().all(|(_, h)| *h >= -1e-4),
-            "ball went below the ground before t = 2 s: {:?}",
-            before_zeno
-                .iter()
-                .find(|(_, h)| *h < -1e-4)
-                .expect("a violating sample")
-        );
-        // First impact happens at sqrt(2 * 1 / 9.81) = 0.4515 s: an event sample sits on the floor.
-        assert!(
-            before_zeno
-                .iter()
-                .any(|(t, h)| (0.44..=0.47).contains(t) && h.abs() < 1e-3),
-            "no floor contact near t = 0.4515 s"
-        );
-        // After the bounce (restitution 0.7) the ball rises again to about 0.49 m.
-        let peak = before_zeno
-            .iter()
-            .filter(|(t, _)| (0.5..=0.8).contains(t))
-            .map(|(_, h)| *h)
-            .fold(f64::NEG_INFINITY, f64::max);
-        assert!(
-            (0.4..=0.6).contains(&peak),
-            "expected a rebound peak near 0.49 m, got {peak}"
-        );
-
-        let gravity = result.index_of("gravity").expect("gravity variable");
-        assert!(result.variables[gravity].is_parameter);
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    #[ignore = "needs OpenModelica; run with --ignored and OMOLA_OMC set"]
-    fn edit_model_adds_component_with_real_omc() {
-        if std::env::var_os("OMOLA_OMC").is_none() {
-            eprintln!("OMOLA_OMC is not set; skipping real-OMC edit test");
-            return;
-        }
-        let root = std::env::temp_dir().join(format!("omola-gui-edit-{}", std::process::id()));
-        let worker = Worker::spawn(root.join("work"), || {});
-        worker.submit(Job::EditModel {
-            doc_text: "model A Real x; equation der(x)=-x; end A;".into(),
-            file_name: "A.mo".into(),
-            class: "A".into(),
-            ops: vec![EditOp::AddComponent {
-                name: "k".into(),
-                type_name: "Modelica.Blocks.Sources.Constant".into(),
-                extent: [[-10., -10.], [10., 10.]],
-                origin: [0., 0.],
-            }],
-            libraries: vec![LibrarySpec::new("Modelica", Some("4.1.0"))],
-        });
-        let deadline = Instant::now() + Duration::from_secs(30);
-        let mut result = None;
-        while result.is_none() && Instant::now() < deadline {
-            for event in worker.poll() {
-                if let Event::ModelEdited { result: r, .. } = event {
-                    result = Some(r);
-                }
-            }
-            thread::sleep(Duration::from_millis(20));
-        }
-        assert!(result.expect("edit result").unwrap().contains("Constant k"));
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    /// Icon annotations of three Modelica Standard Library classes through the GUI worker:
-    /// `getModelInstanceAnnotation(..., {"Icon"})` is parsed into paintable shapes, and a
-    /// class without an Icon of its own inherits the one of its base class.
-    #[test]
-    #[ignore = "needs OpenModelica with MSL 4.1.0; run with --ignored and OMOLA_OMC set"]
-    fn icon_annotations_with_real_omc() {
-        if std::env::var_os("OMOLA_OMC").is_none() {
-            eprintln!("OMOLA_OMC is not set; skipping");
-            return;
-        }
-        let root = std::env::temp_dir().join(format!("omola-gui-icons-{}", std::process::id()));
-        let worker = Worker::spawn(root.join("work"), || {});
-        let context = ClassContext {
-            libraries: vec![LibrarySpec::new("Modelica", Some("4.1.0"))],
-            user_source: None,
-        };
-        let load = |class: &str| {
-            worker.submit(Job::LoadIcon {
-                class: class.into(),
-                context: context.clone(),
-            });
-            wait_for(&worker, 300, |e| match e {
-                Event::Icon(_, result) => Some(result.expect("icon annotation")),
-                _ => None,
+/// The `session-*` directories directly under `root` that may be removed: not `current`,
+/// not a symbolic link, and last modified more than `max_age` before `now`.
+///
+/// Another Omola may still be running, so only the age decides, never the process id.
+pub fn stale_session_dirs(
+    root: &Path,
+    current: &Path,
+    now: std::time::SystemTime,
+    max_age: std::time::Duration,
+) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut stale: Vec<PathBuf> = entries
+        .flatten()
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with("session-"))
+        .map(|entry| entry.path())
+        .filter(|path| path != current)
+        .filter(|path| {
+            // `symlink_metadata` does not follow links: a link is never a directory here.
+            std::fs::symlink_metadata(path).is_ok_and(|meta| {
+                meta.is_dir()
+                    && meta
+                        .modified()
+                        .ok()
+                        .and_then(|modified| now.duration_since(modified).ok())
+                        .is_some_and(|age| age > max_age)
             })
-        };
-
-        let resistor = load("Modelica.Electrical.Analog.Basic.Resistor");
-        // Rectangle + two lines + two texts; the conditional `useHeatPort` line is dropped.
-        assert_eq!(resistor.len(), 5, "{:?}", resistor.skipped);
-        assert_eq!(resistor.coordinate_extent.x1, -100.0);
-
-        let first_order = load("Modelica.Blocks.Continuous.FirstOrder");
-        assert_eq!(first_order.len(), 9);
-
-        let inertia = load("Modelica.Mechanics.Rotational.Components.Inertia");
-        assert_eq!(inertia.len(), 15);
-
-        // A model without an Icon of its own inherits the one of `Modelica.Blocks.Icons.Block`
-        // through two `extends` levels (see `tests/fixtures/icon_InheritedBlock.json`).
-        worker.submit(Job::LoadIcon {
-            class: "InheritsBlockIcon".into(),
-            context: ClassContext {
-                libraries: context.libraries.clone(),
-                user_source: Some(include_str!("../tests/fixtures/icon_InheritedBlock.mo").into()),
-            },
-        });
-        let inherited = wait_for(&worker, 300, |e| match e {
-            Event::Icon(_, result) => Some(result.expect("inherited icon")),
-            _ => None,
-        });
-        assert!(!inherited.is_empty());
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    #[ignore = "needs OpenModelica with MSL 4.1.0; run with --ignored and OMOLA_OMC set"]
-    fn diagram_reuses_cached_icons_with_real_omc() {
-        if std::env::var_os("OMOLA_OMC").is_none() {
-            eprintln!("OMOLA_OMC is not set; skipping");
-            return;
-        }
-        let root = std::env::temp_dir().join(format!("omola-gui-cache-{}", std::process::id()));
-        let worker = Worker::spawn(root.join("work"), || {});
-        let class = "Modelica.Blocks.Examples.PID_Controller";
-        let context = ClassContext {
-            libraries: vec![LibrarySpec::new("Modelica", Some("4.1.0"))],
-            user_source: None,
-        };
-        let load = |cached_icons| {
-            worker.submit(Job::LoadDiagram {
-                class: class.into(),
-                context: context.clone(),
-                cached_icons,
-            });
-            wait_for(&worker, 180, |event| match event {
-                Event::Diagram(_, result) => Some(result.expect("diagram")),
-                _ => None,
-            })
-        };
-        let first = load(Default::default());
-        let component = first
-            .components
-            .iter()
-            .find(|c| c.icon.is_some())
-            .expect("component icon");
-        let mut cached = component.icon.clone().unwrap();
-        cached.skipped.push("cache verification marker".into());
-        let type_name = component.type_name.clone();
-        let second = load([(type_name.clone(), cached.clone())].into_iter().collect());
-        assert_eq!(
-            second
-                .components
-                .iter()
-                .find(|c| c.type_name == type_name)
-                .unwrap()
-                .icon
-                .as_ref(),
-            Some(&cached)
-        );
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    #[ignore = "needs OpenModelica; run with --ignored and OMOLA_OMC set"]
-    fn diagram_loads_user_component_icon_with_real_omc() {
-        if std::env::var_os("OMOLA_OMC").is_none() {
-            eprintln!("OMOLA_OMC is not set; skipping");
-            return;
-        }
-        let root = std::env::temp_dir().join(format!("omola-gui-user-icon-{}", std::process::id()));
-        let worker = Worker::spawn(root.join("work"), || {});
-        worker.submit(Job::LoadDiagram {
-            class: "A".into(),
-            context: ClassContext {
-                libraries: vec![],
-                user_source: Some(
-                    r#"model A
-  model Custom
-    annotation(Icon(graphics={Rectangle(extent={{-100,-100},{100,100}})}));
-  end Custom;
-  Custom part annotation(Placement(transformation(extent={{-10,-10},{10,10}})));
-end A;"#
-                        .into(),
-                ),
-            },
-            cached_icons: Default::default(),
-        });
-        let diagram = wait_for(&worker, 120, |event| match event {
-            Event::Diagram(_, result) => Some(result.expect("diagram")),
-            _ => None,
-        });
-        let part = diagram
-            .components
-            .iter()
-            .find(|c| c.name == "part")
-            .expect("placed part");
-        assert!(
-            part.icon.as_ref().is_some_and(|icon| !icon.is_empty()),
-            "user component icon: {:?}",
-            part.icon
-        );
-        let _ = std::fs::remove_dir_all(&root);
-    }
-
-    /// Exercise the component editing flow used by G29-G32 against a real OMC installation.
-    /// This does not replace the GUI acceptance screenshots, but catches scripting API and
-    /// Modelica source regressions in placement, connection, rename, delete, check, and simulate.
-    #[test]
-    #[ignore = "needs OpenModelica with MSL 4.1.0; run with --ignored and OMOLA_OMC set"]
-    fn diagram_edit_flow_with_real_omc() {
-        if std::env::var_os("OMOLA_OMC").is_none() {
-            eprintln!("OMOLA_OMC is not set; skipping real-OMC diagram edit flow");
-            return;
-        }
-        let root =
-            std::env::temp_dir().join(format!("omola-gui-diagram-flow-{}", std::process::id()));
-        let worker = Worker::spawn(root.join("work"), || {});
-        let libraries = vec![LibrarySpec::new("Modelica", Some("4.1.0"))];
-        let context_for = |source: &str| ClassContext {
-            libraries: libraries.clone(),
-            user_source: Some(source.to_owned()),
-        };
-        let mut source = "model A end A;".to_owned();
-
-        worker.submit(Job::EditModel {
-            doc_text: source.clone(),
-            file_name: "A.mo".into(),
-            class: "A".into(),
-            ops: vec![
-                EditOp::AddComponent {
-                    name: "sine".into(),
-                    type_name: "Modelica.Blocks.Sources.Sine".into(),
-                    extent: [[-10.0, -10.0], [10.0, 10.0]],
-                    origin: [-40.0, 0.0],
-                },
-                EditOp::AddComponent {
-                    name: "firstOrder".into(),
-                    type_name: "Modelica.Blocks.Continuous.FirstOrder".into(),
-                    extent: [[-10.0, -10.0], [10.0, 10.0]],
-                    origin: [40.0, 0.0],
-                },
-            ],
-            libraries: libraries.clone(),
-        });
-        source = wait_for(&worker, 60, |event| match event {
-            Event::ModelEdited { result, .. } => Some(result.expect("add Sine and FirstOrder")),
-            _ => None,
-        });
-        assert!(source.contains("Sine sine"), "{source}");
-        assert!(source.contains("FirstOrder firstOrder"), "{source}");
-        assert!(
-            source.contains("Placement"),
-            "component Placement missing: {source}"
-        );
-
-        worker.submit(Job::EditModel {
-            doc_text: source.clone(),
-            file_name: "A.mo".into(),
-            class: "A".into(),
-            ops: vec![EditOp::SetPlacement {
-                component: "firstOrder".into(),
-                type_name: "Modelica.Blocks.Continuous.FirstOrder".into(),
-                extent: [[-10.0, -10.0], [10.0, 10.0]],
-                origin: [60.0, 20.0],
-                rotation: 90.0,
-            }],
-            libraries: libraries.clone(),
-        });
-        source = wait_for(&worker, 60, |event| match event {
-            Event::ModelEdited { result, .. } => Some(result.expect("move FirstOrder")),
-            _ => None,
-        });
-        assert!(source.contains("origin = {60, 20}"), "{source}");
-        assert!(source.contains("rotation = 90"), "{source}");
-
-        worker.submit(Job::EditModel {
-            doc_text: source.clone(),
-            file_name: "A.mo".into(),
-            class: "A".into(),
-            ops: vec![EditOp::AddConnection {
-                from: "sine.y".into(),
-                to: "firstOrder.u".into(),
-                points: vec![[-30.0, 0.0], [0.0, 0.0], [30.0, 0.0]],
-            }],
-            libraries: libraries.clone(),
-        });
-        source = wait_for(&worker, 60, |event| match event {
-            Event::ModelEdited { result, .. } => Some(result.expect("connect Sine to FirstOrder")),
-            _ => None,
-        });
-        assert!(source.contains("connect(sine.y, firstOrder.u)"), "{source}");
-
-        worker.submit(Job::Check {
-            class: "A".into(),
-            context: context_for(&source),
-        });
-        let check = wait_for(&worker, 60, |event| match event {
-            Event::Log(LogTab::Syntax, LogLevel::Info, message)
-                if message.contains("completed successfully") =>
-            {
-                Some(message)
-            }
-            _ => None,
-        });
-        assert!(check.contains("completed successfully"), "{check}");
-
-        worker.submit(Job::Simulate {
-            class: "A".into(),
-            context: context_for(&source),
-            setup: SimulationSetup {
-                stop_time: 1.0,
-                ..SimulationSetup::default()
-            },
-        });
-        let outcome = wait_for(&worker, 180, |event| match event {
-            Event::SimulationFinished(outcome) => Some(outcome),
-            _ => None,
-        });
-        assert!(outcome.result.series("firstOrder.y").is_some());
-
-        worker.submit(Job::EditModel {
-            doc_text: source.clone(),
-            file_name: "A.mo".into(),
-            class: "A".into(),
-            ops: vec![EditOp::RenameComponent {
-                old: "firstOrder".into(),
-                new: "filter".into(),
-            }],
-            libraries: libraries.clone(),
-        });
-        source = wait_for(&worker, 60, |event| match event {
-            Event::ModelEdited { result, .. } => Some(result.expect("rename FirstOrder")),
-            _ => None,
-        });
-        assert!(source.contains("connect(sine.y, filter.u)"), "{source}");
-
-        worker.submit(Job::EditModel {
-            doc_text: source.clone(),
-            file_name: "A.mo".into(),
-            class: "A".into(),
-            ops: vec![
-                EditOp::DeleteConnection {
-                    from: "sine.y".into(),
-                    to: "filter.u".into(),
-                },
-                EditOp::DeleteComponent {
-                    name: "filter".into(),
-                },
-            ],
-            libraries: libraries.clone(),
-        });
-        source = wait_for(&worker, 60, |event| match event {
-            Event::ModelEdited { result, .. } => Some(result.expect("delete connected FirstOrder")),
-            _ => None,
-        });
-        assert!(!source.contains("FirstOrder filter"), "{source}");
-        assert!(!source.contains("connect(sine.y, filter.u)"), "{source}");
-
-        worker.submit(Job::Check {
-            class: "A".into(),
-            context: context_for(&source),
-        });
-        let check = wait_for(&worker, 60, |event| match event {
-            Event::Log(LogTab::Syntax, LogLevel::Info, message)
-                if message.contains("completed successfully") =>
-            {
-                Some(message)
-            }
-            _ => None,
-        });
-        assert!(check.contains("completed successfully"), "{check}");
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    /// Wait for the first event accepted by `pick`, failing on worker errors.
-    fn wait_for<T>(worker: &Worker, secs: u64, mut pick: impl FnMut(Event) -> Option<T>) -> T {
-        let deadline = Instant::now() + Duration::from_secs(secs);
-        while Instant::now() < deadline {
-            for event in worker.poll() {
-                if let Event::Log(_, LogLevel::Error, message) = &event {
-                    panic!("worker error: {message}");
-                }
-                if let Some(value) = pick(event) {
-                    return value;
-                }
-            }
-            thread::sleep(Duration::from_millis(50));
-        }
-        panic!("timed out after {secs} s");
-    }
-
-    /// Modelica Standard Library 4.1.0 through the GUI worker: class index, the top-level
-    /// documentation shown in the Documentation layer (with its images), and simulating a
-    /// library example without any user file. Needs real OMC with MSL 4.1.0 installed.
-    #[test]
-    #[ignore = "needs OpenModelica with MSL 4.1.0; run with --ignored and OMOLA_OMC set"]
-    fn msl_browse_document_and_simulate_with_real_omc() {
-        if std::env::var_os("OMOLA_OMC").is_none() {
-            eprintln!("OMOLA_OMC is not set; skipping");
-            return;
-        }
-        let root = std::env::temp_dir().join(format!("omola-gui-msl-{}", std::process::id()));
-        let worker = Worker::spawn(root.join("work"), || {});
-        let msl = LibrarySpec::new("Modelica", Some("4.1.0"));
-
-        worker.submit(Job::LoadLibrary(msl.clone()));
-        let lib = wait_for(&worker, 300, |e| match e {
-            Event::LibraryLoaded(_, result) => Some(result.expect("MSL index")),
-            _ => None,
-        });
-        assert_eq!(lib.version, "4.1.0");
-        assert!(
-            lib.classes.len() > 1000,
-            "only {} classes",
-            lib.classes.len()
-        );
-        let top: Vec<&str> = lib
-            .children("Modelica")
-            .iter()
-            .map(|c| c.short_name())
-            .collect();
-        for expected in ["UsersGuide", "Blocks", "Electrical", "Mechanics"] {
-            assert!(top.contains(&expected), "missing {expected} in {top:?}");
-        }
-        assert_eq!(
-            lib.class("Modelica.Blocks.Examples.PID_Controller")
-                .map(|c| c.restriction.as_str()),
-            Some("model")
-        );
-
-        let context = ClassContext {
-            libraries: vec![msl.clone()],
-            user_source: None,
-        };
-        worker.submit(Job::LoadClassDoc {
-            class: "Modelica".into(),
-            context: context.clone(),
-        });
-        let doc = wait_for(&worker, 300, |e| match e {
-            Event::ClassDoc(_, result) => Some(result.expect("Modelica documentation")),
-            _ => None,
-        });
-        assert_eq!(doc.restriction, "package");
-        assert_eq!(doc.comment, "Modelica Standard Library");
-        assert!(doc.info_html.contains("Modelica_Libraries.svg"));
-        let blocks = crate::html::parse(&doc.info_html);
-        assert!(crate::html::plain_text(&blocks).contains("Modelica Standard Library"));
-        for src in [
-            "modelica://Modelica/Resources/Images/Logos/Modelica_Libraries.svg",
-            "modelica://Modelica/Resources/Images/UsersGuide/ModelicaLibraries.png",
-        ] {
-            match crate::library::resolve_link(src, "Modelica", &doc.roots) {
-                crate::library::LinkTarget::File(path) => {
-                    assert!(path.is_file(), "image not found: {}", path.display())
-                }
-                other => panic!("unexpected link target {other:?}"),
-            }
-        }
-
-        worker.submit(Job::LoadClassDoc {
-            class: "Modelica.Blocks.Examples.PID_Controller".into(),
-            context: context.clone(),
-        });
-        let example = wait_for(&worker, 300, |e| match e {
-            Event::ClassDoc(_, result) => Some(result.expect("example documentation")),
-            _ => None,
-        });
-        let experiment = example.experiment.expect("experiment annotation");
-        assert!((experiment.stop_time - 4.0).abs() < 1e-9, "{experiment:?}");
-
-        worker.submit(Job::Simulate {
-            class: "Modelica.Blocks.Examples.PID_Controller".into(),
-            context,
-            setup: SimulationSetup {
-                stop_time: experiment.stop_time,
-                ..SimulationSetup::default()
-            },
-        });
-        let outcome = wait_for(&worker, 600, |e| match e {
-            Event::SimulationFinished(done) => Some(done),
-            _ => None,
-        });
-        let result = &outcome.result;
-        assert!((result.time.last().copied().unwrap() - 4.0).abs() < 1e-6);
-        let speed = result.series("inertia1.w").expect("inertia1.w");
-        assert!(speed.iter().all(|v| v.is_finite()));
-        assert!(
-            speed.iter().cloned().fold(f64::MIN, f64::max) > 1.0,
-            "drive never spun up"
-        );
-        let _ = std::fs::remove_dir_all(&root);
-    }
+        })
+        .collect();
+    stale.sort();
+    stale
 }
+
+/// Remove the stale session folders under `root`; returns how many were removed. A
+/// folder that cannot be removed is tried again at the next start.
+pub fn remove_stale_sessions(root: &Path, current: &Path) -> usize {
+    stale_session_dirs(
+        root,
+        current,
+        std::time::SystemTime::now(),
+        STALE_SESSION_AGE,
+    )
+    .into_iter()
+    .filter(|dir| std::fs::remove_dir_all(dir).is_ok())
+    .count()
+}
+
+/// Number of output intervals for an interval length (Simulation Setup, G44). A length
+/// that is not positive and finite, or an empty time span, gives 1.
+pub fn intervals_for_length(start: f64, stop: f64, length: f64) -> u32 {
+    let count = (stop - start) / length;
+    if !count.is_finite() || length <= 0.0 {
+        return 1;
+    }
+    count.round().clamp(1.0, 1e7) as u32
+}
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
+mod audit_tests;

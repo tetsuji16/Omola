@@ -666,6 +666,9 @@ impl OmolaApp {
         let mut edits: Vec<(String, String)> = Vec::new();
         let mut expand: Vec<(String, bool)> = Vec::new();
         let mut reset: Vec<String> = Vec::new();
+        // Context-menu request on a result header: `Some(kept)` pins/unpins, `None` closes.
+        let mut run_action: Option<(u64, Option<bool>)> = None;
+        let mut save_run: Option<u64> = None;
         self.variable_time_row(ui);
         let run_ids: Vec<u64> = self.runs.iter().map(|r| r.id).collect();
         for id in run_ids {
@@ -736,7 +739,11 @@ impl OmolaApp {
                             egui::pos2(rect.left() + 24.0, rect.center().y),
                             ICON_KEEP,
                             13.0,
-                            theme::TEXT_WEAK,
+                            if run.kept {
+                                theme::TEXT
+                            } else {
+                                theme::TEXT_WEAK
+                            },
                         );
                         ui.painter().text(
                             egui::pos2(rect.left() + 34.0, rect.center().y),
@@ -745,11 +752,36 @@ impl OmolaApp {
                             FontId::proportional(12.0),
                             theme::TEXT,
                         );
+                        resp.context_menu(|ui| {
+                            let keep = if run.kept {
+                                "Release result"
+                            } else {
+                                "Keep result"
+                            };
+                            if ui.button(keep).clicked() {
+                                run_action = Some((run.id, Some(!run.kept)));
+                                ui.close();
+                            }
+                            if ui.button("Close result").clicked() {
+                                run_action = Some((run.id, None));
+                                ui.close();
+                            }
+                            if ui.button("Save result as...").clicked() {
+                                save_run = Some(run.id);
+                                ui.close();
+                            }
+                            if ui.button("Copy result path").clicked() {
+                                ui.ctx()
+                                    .copy_text(run.outcome.result_file.display().to_string());
+                                ui.close();
+                            }
+                        });
                         resp.on_hover_text(format!(
-                            "{}\n{}\nSimulated in {:.2} s",
+                            "{}\n{}\nSimulated in {:.2} s{}",
                             run.outcome.result_file.display(),
                             run.outcome.class,
-                            run.outcome.elapsed_seconds
+                            run.outcome.elapsed_seconds,
+                            if run.kept { "\nKept" } else { "" }
                         ));
                         if !open {
                             continue;
@@ -861,6 +893,14 @@ impl OmolaApp {
         }
         for name in reset {
             self.pending_overrides.remove(&name);
+        }
+        match run_action {
+            Some((id, Some(kept))) => self.set_result_kept(id, kept),
+            Some((id, None)) => self.close_result(id),
+            None => {}
+        }
+        if let Some(id) = save_run {
+            self.request_save_result_dialog(id);
         }
     }
 

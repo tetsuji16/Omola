@@ -1,6 +1,14 @@
 # G14: 結果の読み込み・保持/破棄・エクスポート
 
-> **2026-11-06 再オープン:** issue #42 は閉じられていましたが、`ResultRun.kept` / `Job::LoadResult` / 結果ノードの右クリックメニューはいずれも main に存在しません(未実装)。本文どおりに実装してください。Tools リボンの `Load Result: issue G14` アイコン(`ui/chrome.rs`)もこの issue で有効にします。G22 と同時に進める場合は `app.rs` の衝突に注意。
+> **2026-11-12 更新(残作業はこの枠内だけ):** 見直しの PR(`gui-audit-skeleton`)で、下の実装手順 1〜3、4 の Tools リボン分、5 の Keep / Close / Copy result path、6 のテストは**実装済み**です(`ResultRun.kept`、`evict_results`、`close_result`、`set_result_kept`、`Job::LoadResult`、`result_class_from_path`、`request_load_result_dialog`、`ui/browsers.rs` の結果ヘッダの右クリックメニュー)。作り直さないでください。
+>
+> **残り:**
+> 1. **Save result as…**(結果の右クリックメニュー): `app.rs` に `pub fn save_result_as(&mut self, run_id: u64, dest: PathBuf)` を足す。`dest` が存在したら**コピーせず** `"<dest> already exists; choose another name."` を Error ログに出す。存在しなければ `std::fs::copy(result_file, dest)`。保存先はネイティブダイアログ(`rfd`、`.mat` フィルタ)、`OMOLA_GUI_TEXT_DIALOGS=1` のときは `PathDialog::SaveResult(u64, String)` を足す(`PathDialog::LoadResult` の実装を手本に)。存在判定とコピーは純関数 `pub fn copy_result_file(src: &Path, dest: &Path) -> Result<(), String>` に分け、テスト `copy_result_file_refuses_to_overwrite` を書く。
+> 2. **メニューの `Simulation > Load Result…`**: メニューバーにも `request_load_result_dialog()` を呼ぶ項目を足す(今は Tools リボンのアイコンだけ)。
+> 3. **実 OMC での確認**: `omola simulate` で作った `_res.mat` を Load Result で開き、プロットできることを確認してスクリーンショットを PR に付ける(見直しの PR では OMC の無い環境だったため未確認)。
+> 4. kept の結果のヘッダ名の後ろに `(kept)` を付ける(今はアイコンの色とツールチップだけ)。
+>
+> 以下は元の本文です(経緯として残す)。
 
 - 難易度: 易 / 依存: なし(G03 があればファイルダイアログを使う) / 触るファイル: `src/backend.rs`, `src/app.rs`, `src/ui/browsers.rs`, `src/ui/chrome.rs`, `src/ui/dialogs.rs`
 - 先に `docs/issues/gui/README.md` と `docs/reference/dymola-gui.md` の R8 を読むこと。
