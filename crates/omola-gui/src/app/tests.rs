@@ -416,6 +416,89 @@ fn a_second_run_rebinds_the_curves_of_every_diagram() {
 }
 
 #[test]
+fn the_first_sweep_run_plots_next_to_another_models_curves() {
+    let mut app = app();
+    app.add_run(outcome("Other"));
+    assert_eq!(app.active_signals().len(), 1, "the first result plots");
+    app.add_run_tagged(outcome("A"), Some((" [e=0]".into(), false)));
+    assert_eq!(
+        app.active_signals(),
+        [
+            PlotSignal {
+                run_id: 1,
+                variable: "height".into()
+            },
+            PlotSignal {
+                run_id: 2,
+                variable: "height".into()
+            },
+        ],
+        "the first sweep run joins the other model's curve"
+    );
+    app.add_run_tagged(outcome("A"), Some((" [e=1]".into(), true)));
+    let ids: Vec<u64> = app.active_signals().iter().map(|s| s.run_id).collect();
+    assert_eq!(ids, vec![1, 2, 3]);
+}
+
+#[test]
+fn a_sweep_plots_into_the_active_diagram_only() {
+    let mut app = app();
+    app.add_run(outcome("Other"));
+    app.new_diagram();
+    app.add_run_tagged(outcome("A"), Some((" [e=0]".into(), false)));
+    assert_eq!(
+        app.diagrams[0].signals,
+        [PlotSignal {
+            run_id: 1,
+            variable: "height".into()
+        }],
+        "the other model's diagram is untouched"
+    );
+    assert_eq!(
+        app.diagrams[1].signals,
+        [PlotSignal {
+            run_id: 2,
+            variable: "height".into()
+        }]
+    );
+}
+
+#[test]
+fn a_sweep_plots_when_its_previous_run_is_not_plotted() {
+    let mut app = app();
+    app.add_run(outcome("Other"));
+    app.add_run(outcome("A"));
+    app.add_run_tagged(outcome("A"), Some((" [e=0]".into(), false)));
+    assert_eq!(
+        app.active_signals(),
+        [
+            PlotSignal {
+                run_id: 1,
+                variable: "height".into()
+            },
+            PlotSignal {
+                run_id: 3,
+                variable: "height".into()
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_plain_run_does_not_autoplot_next_to_other_curves() {
+    let mut app = app();
+    app.add_run(outcome("Other"));
+    app.add_run(outcome("A"));
+    assert_eq!(
+        app.active_signals(),
+        [PlotSignal {
+            run_id: 1,
+            variable: "height".into()
+        }]
+    );
+}
+
+#[test]
 fn the_csv_carries_the_curves_of_the_newest_result_only() {
     let mut app = app();
     app.add_run(outcome("BouncingBall"));
