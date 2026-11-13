@@ -359,6 +359,14 @@ pub struct ParameterDialog {
     pub error: Option<String>,
 }
 
+/// A clipboard action requested from the Text ribbon, applied to the editor (G45).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorCommand {
+    Cut,
+    Copy,
+    Paste,
+}
+
 pub struct OmolaApp {
     pub tab: RibbonTab,
     pub graphics_layer: Layer,
@@ -399,6 +407,8 @@ pub struct OmolaApp {
     pub selected_component: Option<String>,
     pub doc_view: DocView,
     pub find_open: bool,
+    /// Clipboard action waiting to be applied to the text editor (G45).
+    pub pending_editor_event: Option<EditorCommand>,
     pub find_query: String,
     pub setup: SimulationSetup,
     /// Classes whose experiment annotation has already been applied to `setup`.
@@ -583,6 +593,7 @@ impl OmolaApp {
             selected_component: None,
             doc_view: DocView::Formatted,
             find_open: false,
+            pending_editor_event: None,
             find_query: String::new(),
             setup: SimulationSetup::default(),
             setup_from: None,

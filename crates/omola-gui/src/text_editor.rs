@@ -6,6 +6,7 @@
 //! cached in [`EditorState`]. Line numbers, the error marker and the F7/F8 jumps are drawn
 //! on top of the text.
 
+use crate::app::EditorCommand;
 use egui::text::{CCursor, CCursorRange, LayoutJob, TextFormat};
 use egui::{Align, Align2, Color32, FontId, Rect, ScrollArea, Sense, Stroke, Ui, Vec2};
 use std::path::{Path, PathBuf};
@@ -127,8 +128,9 @@ pub fn draw_text_editor(
     text: &mut String,
     path: Option<&PathBuf>,
     error_lines: &[usize], // 1-indexed line numbers with errors
+    pending: Option<EditorCommand>,
 ) -> bool {
-    draw_text_editor_mode(ui, editor_state, text, path, error_lines, true)
+    draw_text_editor_mode(ui, editor_state, text, path, error_lines, true, pending)
 }
 
 /// Draw a selectable, copyable editor for library text without allowing edits.
@@ -138,9 +140,18 @@ pub fn draw_readonly_text_editor(
     text: &str,
     path: Option<&PathBuf>,
     error_lines: &[usize],
+    pending: Option<EditorCommand>,
 ) {
     let mut text = text;
-    let _ = draw_text_editor_mode(ui, editor_state, &mut text, path, error_lines, false);
+    let _ = draw_text_editor_mode(
+        ui,
+        editor_state,
+        &mut text,
+        path,
+        error_lines,
+        false,
+        pending,
+    );
 }
 
 fn draw_text_editor_mode<T: egui::TextBuffer>(
@@ -149,7 +160,8 @@ fn draw_text_editor_mode<T: egui::TextBuffer>(
     text: &mut T,
     path: Option<&PathBuf>,
     error_lines: &[usize],
-    _editable: bool,
+    editable: bool,
+    pending: Option<EditorCommand>,
 ) -> bool {
     let font = editor_font();
     let row_height = ui.ctx().fonts_mut(|f| f.row_height(&font));
@@ -212,6 +224,24 @@ fn draw_text_editor_mode<T: egui::TextBuffer>(
                         .show(ui)
                 };
                 changed = output.response.changed();
+                // G45: a ribbon clipboard button acts on the editor. Focus is restored
+                // and the event is delivered on the next frame (Paste asks the OS first).
+                let command = pending.filter(|c| editable || *c == EditorCommand::Copy);
+                if let Some(command) = command {
+                    ui.memory_mut(|m| m.request_focus(output.response.id));
+                    match command {
+                        EditorCommand::Copy => {
+                            ui.ctx().input_mut(|i| i.events.push(egui::Event::Copy));
+                        }
+                        EditorCommand::Cut => {
+                            ui.ctx().input_mut(|i| i.events.push(egui::Event::Cut));
+                        }
+                        EditorCommand::Paste => {
+                            ui.ctx()
+                                .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+                        }
+                    }
+                }
                 let text_rect = output.response.rect;
 
                 // Only the rows inside the viewport are painted.
@@ -615,7 +645,7 @@ no location here [
         input.events = events;
         let mut changed = false;
         let mut output = ctx.run_ui(input, |ui| {
-            changed = draw_text_editor(ui, state, text, None, &[]);
+            changed = draw_text_editor(ui, state, text, None, &[], None);
         });
         // No renderer is attached in a test, so the font atlas deltas must be discarded.
         output.textures_delta.clear();
