@@ -697,6 +697,24 @@ fn user_model_gets_its_own_tab_and_context() {
     assert_eq!(lib_ctx.libraries[0].name, "Modelica");
 }
 
+#[test]
+fn context_includes_classes_from_other_open_documents() {
+    let mut app = app();
+    app.documents
+        .push(Document::new_untitled("model Helper\n  Real x;\nend Helper;"));
+    app.documents
+        .push(Document::new_untitled("model Main\n  Helper h;\nend Main;"));
+    app.refresh_outline();
+    let source = app.context_for("Main").user_source.unwrap();
+    assert!(source.contains("model Main"));
+    assert!(
+        source.contains("model Helper"),
+        "the dependency's buffer is included"
+    );
+    assert_eq!(source.matches("model Main").count(), 1);
+    assert!(app.context_for("Modelica.Blocks").user_source.is_none());
+}
+
 // --- G02 persistence tests ---
 
 #[test]

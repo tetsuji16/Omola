@@ -64,6 +64,12 @@ impl OmolaApp {
     }
 
     /// Context for OMC queries about `class`: loaded libraries plus the user buffer if needed.
+    ///
+    /// A user model may depend on classes declared in the user's *other* open documents
+    /// (G53). Their editor buffers are appended to `user_source`, so the single private
+    /// copy written for OMC defines the queried class together with its neighbours and the
+    /// dependency resolves. The document of `class` itself is never duplicated; empty
+    /// documents are skipped. Library classes carry no user source.
     pub fn context_for(&self, class: &str) -> ClassContext {
         let top = class.split('.').next().unwrap_or(class);
         let user = self.is_user_class(class);
@@ -76,11 +82,23 @@ impl OmolaApp {
                 libraries.push(LibrarySpec::new(top, None));
             }
         }
+        let user_source = user.then(|| {
+            let own = self.doc_of(class);
+            let mut text = own.map(|i| self.documents[i].text.clone()).unwrap_or_default();
+            for (i, doc) in self.documents.iter().enumerate() {
+                if Some(i) == own || doc.text.is_empty() {
+                    continue;
+                }
+                if !text.is_empty() {
+                    text.push('\n');
+                }
+                text.push_str(&doc.text);
+            }
+            text
+        });
         ClassContext {
             libraries,
-            user_source: user
-                .then(|| self.doc_of(class).map(|i| self.documents[i].text.clone()))
-                .flatten(),
+            user_source,
         }
     }
 
