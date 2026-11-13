@@ -256,10 +256,10 @@ impl OmolaApp {
                 self.diagram_pan = egui::Vec2::ZERO;
             }
             if ui.button("+").clicked() {
-                self.diagram_zoom = (self.diagram_zoom * 1.2).clamp(0.1, 20.0);
+                self.zoom_diagram(1.2);
             }
             if ui.button("−").clicked() {
-                self.diagram_zoom = (self.diagram_zoom / 1.2).clamp(0.1, 20.0);
+                self.zoom_diagram(1.0 / 1.2);
             }
             ui.label(format!("Zoom: {:.0}%", self.diagram_zoom * 100.0));
         });
@@ -322,7 +322,7 @@ impl OmolaApp {
         // wheel zoom around cursor
         let scroll = ui.input(|i| i.zoom_delta());
         if scroll != 1.0 && scroll > 0.0 {
-            self.diagram_zoom = (self.diagram_zoom * scroll).clamp(0.1, 20.0);
+            self.zoom_diagram(scroll);
         }
         // Pan with middle/right drag. Primary drag is reserved for component movement.
         if response.dragged() {
