@@ -536,6 +536,7 @@ fn experiment() -> library::Experiment {
 #[test]
 fn experiment_annotation_seeds_the_setup_once() {
     let mut app = app();
+    app.active = Some("Annotated".into());
     app.apply_experiment("Annotated", "model", Some(experiment()));
     assert_eq!(app.setup.start_time, 0.5);
     assert_eq!(app.setup.stop_time, 5.0);
@@ -544,6 +545,7 @@ fn experiment_annotation_seeds_the_setup_once() {
     assert_eq!(app.setup_from.as_deref(), Some("Annotated"));
 
     // Another model's annotation replaces the seeded values ...
+    app.active = Some("Other".into());
     app.apply_experiment(
         "Other",
         "model",
@@ -555,8 +557,10 @@ fn experiment_annotation_seeds_the_setup_once() {
     assert_eq!(app.setup.stop_time, 2.0);
 
     // ... but a package never does, and the same class is not applied twice.
+    app.active = Some("Modelica.Blocks".into());
     app.apply_experiment("Modelica.Blocks", "package", Some(experiment()));
     assert_eq!(app.setup.stop_time, 2.0);
+    app.active = Some("Other".into());
     app.apply_experiment("Other", "model", Some(experiment()));
     assert_eq!(app.setup.stop_time, 2.0);
 }
@@ -564,11 +568,31 @@ fn experiment_annotation_seeds_the_setup_once() {
 #[test]
 fn manual_setup_edits_survive_a_later_annotation() {
     let mut app = app();
+    app.active = Some("Annotated".into());
     app.setup.stop_time = 7.0;
     app.setup_edited_by_user = true;
     app.apply_experiment("Annotated", "model", Some(experiment()));
     assert_eq!(app.setup.stop_time, 7.0);
     assert!(app.setup_from.is_none());
+}
+
+#[test]
+fn a_late_annotation_of_a_class_the_user_left_is_ignored() {
+    let mut app = app();
+    app.active = Some("Current".into());
+    app.apply_experiment("Current", "model", Some(experiment()));
+    assert_eq!(app.setup.stop_time, 5.0);
+    app.active = Some("Next".into());
+    app.apply_experiment(
+        "Left",
+        "model",
+        Some(library::Experiment {
+            stop_time: 99.0,
+            ..experiment()
+        }),
+    );
+    assert_eq!(app.setup.stop_time, 5.0);
+    assert_eq!(app.setup_from.as_deref(), Some("Current"));
 }
 
 #[test]

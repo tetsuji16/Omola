@@ -157,6 +157,8 @@ impl OmolaApp {
     /// The annotation only provides the initial values: once the user has changed the
     /// general fields by hand (`setup_edited_by_user`) their numbers are kept, and the
     /// annotation of the class already applied (`setup_from`) is not applied twice.
+    /// A late answer for a class the user has already left is ignored: only the
+    /// annotation of the class that is open now seeds the setup (G53).
     pub fn apply_experiment(
         &mut self,
         class: &str,
@@ -167,6 +169,7 @@ impl OmolaApp {
             return;
         };
         if restriction == "package"
+            || self.active.as_deref() != Some(class)
             || self.setup_edited_by_user
             || self.setup_from.as_deref() == Some(class)
         {
