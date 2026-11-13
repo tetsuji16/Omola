@@ -394,21 +394,15 @@ impl OmolaApp {
         }
     }
 
-    /// Copy the result file of run `run_id` to `dest` (G14).
+    /// Copy the result file of run `run_id` to `dest` on the worker thread (G14, G53).
     pub fn save_result_as(&mut self, run_id: u64, dest: &std::path::Path) {
         let Some(source) = self.run(run_id).map(|r| r.outcome.result_file.clone()) else {
             return self.error(LogTab::Simulation, "The result is no longer open.".into());
         };
-        match crate::backend::copy_result_file(&source, dest, true) {
-            Ok(()) => self.info(
-                LogTab::Simulation,
-                format!("Saved the result to {}", dest.display()),
-            ),
-            Err(message) => self.error(
-                LogTab::Simulation,
-                format!("Could not save the result: {message}"),
-            ),
-        }
+        self.worker.submit(Job::CopyResult {
+            source,
+            dest: dest.to_path_buf(),
+        });
     }
 
     pub fn refresh_outline(&mut self) {

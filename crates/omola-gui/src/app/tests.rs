@@ -989,6 +989,18 @@ fn has_log(app: &OmolaApp, level: LogLevel, needle: &str) -> bool {
         .any(|l| l.level == level && l.text.contains(needle))
 }
 
+/// Drive the event loop until a log line arrives (worker jobs are asynchronous).
+fn wait_for_log(app: &mut OmolaApp, level: LogLevel, needle: &str) {
+    for _ in 0..500 {
+        app.handle_events();
+        if has_log(app, level, needle) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    panic!("log line {needle:?} did not arrive from the worker");
+}
+
 #[test]
 fn closing_a_clean_document_removes_it_without_a_question() {
     let mut app = history_app();
@@ -1184,15 +1196,13 @@ fn save_result_as_copies_the_result_file() {
 
     let dest = dir.join("copy.mat");
     app.save_result_as(id, &dest);
+    // The copy runs on the worker thread: nothing is logged on the UI thread yet (G53).
+    assert!(!has_log(&app, LogLevel::Info, "Saved the result to"));
+    wait_for_log(&mut app, LogLevel::Info, "Saved the result to");
     assert_eq!(std::fs::read(&dest).unwrap(), b"result bytes");
-    assert!(has_log(&app, LogLevel::Info, "Saved the result to"));
 
     app.save_result_as(id, &source);
-    assert!(has_log(
-        &app,
-        LogLevel::Error,
-        "already stored in that file"
-    ));
+    wait_for_log(&mut app, LogLevel::Error, "already stored in that file");
     app.save_result_as(id + 100, &dest);
     assert!(has_log(&app, LogLevel::Error, "no longer open"));
     let _ = std::fs::remove_dir_all(&dir);

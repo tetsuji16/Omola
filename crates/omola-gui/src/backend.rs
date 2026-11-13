@@ -188,6 +188,11 @@ pub enum Job {
     LoadResult {
         path: PathBuf,
     },
+    /// Copy a result file to a user-chosen destination off the UI thread (G14, G53).
+    CopyResult {
+        source: PathBuf,
+        dest: PathBuf,
+    },
     Simulate {
         class: String,
         context: ClassContext,
@@ -279,6 +284,11 @@ pub enum Event {
     SimulationFailed(String),
     /// `InstallLibraries` finished (`true` when the Modelica Standard Library is installed).
     LibrariesInstalled(bool),
+    /// A `CopyResult` job finished; `dest` is the file the user chose.
+    ResultCopied {
+        dest: PathBuf,
+        result: Result<(), String>,
+    },
     ModelEdited {
         class: String,
         result: Result<String, String>,
@@ -384,6 +394,10 @@ fn run_job(
     // Reading a result file needs no OMC, so it also works before OpenModelica is set up.
     let job = match job {
         Job::LoadResult { path } => return load_result(&path, send),
+        Job::CopyResult { source, dest } => {
+            let result = copy_result_file(&source, &dest, true);
+            return send(Event::ResultCopied { dest, result });
+        }
         other => other,
     };
     let omc = match Omc::discover().map(|omc| omc.with_cancel_flag(cancel.clone())) {
@@ -882,7 +896,11 @@ fn fail_job(job: Job, message: String, send: &dyn Fn(Event)) {
         }),
         Job::InstallLibraries => send(Event::LibrariesInstalled(false)),
         Job::Simulate { class, .. } => send(Event::SimulationFailed(class)),
-        Job::Doctor | Job::Check { .. } | Job::Translate { .. } | Job::LoadResult { .. } => {}
+        Job::Doctor
+        | Job::Check { .. }
+        | Job::Translate { .. }
+        | Job::LoadResult { .. }
+        | Job::CopyResult { .. } => {}
     }
 }
 

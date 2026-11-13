@@ -795,6 +795,16 @@ impl OmolaApp {
                     self.sweep_run_finished();
                 }
                 Event::SimulationFailed(class) => self.sweep_run_failed(&class),
+                Event::ResultCopied { dest, result } => match result {
+                    Ok(()) => self.info(
+                        LogTab::Simulation,
+                        format!("Saved the result to {}", dest.display()),
+                    ),
+                    Err(message) => self.error(
+                        LogTab::Simulation,
+                        format!("Could not save the result: {message}"),
+                    ),
+                },
                 Event::LibrariesInstalled(ok) => {
                     if ok {
                         self.docs.clear();
