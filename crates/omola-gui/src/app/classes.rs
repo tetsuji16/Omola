@@ -84,7 +84,9 @@ impl OmolaApp {
         }
         let user_source = user.then(|| {
             let own = self.doc_of(class);
-            let mut text = own.map(|i| self.documents[i].text.clone()).unwrap_or_default();
+            let mut text = own
+                .map(|i| self.documents[i].text.clone())
+                .unwrap_or_default();
             for (i, doc) in self.documents.iter().enumerate() {
                 if Some(i) == own || doc.text.is_empty() {
                     continue;

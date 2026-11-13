@@ -198,7 +198,11 @@ pub fn merge_overrides(
 ) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = setup
         .iter()
-        .filter(|(n, _)| !edited.get(n).is_some_and(|v| v.trim().parse::<f64>().is_ok()))
+        .filter(|(n, _)| {
+            !edited
+                .get(n)
+                .is_some_and(|v| v.trim().parse::<f64>().is_ok())
+        })
         .cloned()
         .collect();
     out.extend(

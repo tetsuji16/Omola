@@ -64,7 +64,9 @@ impl OmolaApp {
                 })
                 .map(|v| v.name.clone())
         };
-        let active = self.active_diagram.min(self.diagrams.len().saturating_sub(1));
+        let active = self
+            .active_diagram
+            .min(self.diagrams.len().saturating_sub(1));
         for (index, diagram) in self.diagrams.iter_mut().enumerate() {
             let mut replot: Vec<PlotSignal> = diagram
                 .signals

@@ -700,8 +700,9 @@ fn user_model_gets_its_own_tab_and_context() {
 #[test]
 fn context_includes_classes_from_other_open_documents() {
     let mut app = app();
-    app.documents
-        .push(Document::new_untitled("model Helper\n  Real x;\nend Helper;"));
+    app.documents.push(Document::new_untitled(
+        "model Helper\n  Real x;\nend Helper;",
+    ));
     app.documents
         .push(Document::new_untitled("model Main\n  Helper h;\nend Main;"));
     app.refresh_outline();
