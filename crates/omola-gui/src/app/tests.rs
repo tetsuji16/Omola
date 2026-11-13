@@ -614,6 +614,23 @@ fn edited_values_override_setup() {
 }
 
 #[test]
+fn an_invalid_edit_does_not_drop_the_setup_override() {
+    let mut edited = BTreeMap::new();
+    edited.insert("L".to_owned(), "-".to_owned());
+    let merged = merge_overrides(
+        &[("L".into(), "1".into()), ("m".into(), "3".into())],
+        &edited,
+    );
+    assert_eq!(
+        merged,
+        vec![
+            ("L".to_owned(), "1".to_owned()),
+            ("m".to_owned(), "3".to_owned())
+        ]
+    );
+}
+
+#[test]
 fn library_class_title_and_history() {
     let mut app = app();
     app.open_class("Modelica");

@@ -191,13 +191,14 @@ impl OmolaApp {
 }
 
 /// Setup overrides plus values edited in the variable browser (edited values win).
+/// A half-typed edit that is not a number keeps the setup value instead of dropping it.
 pub fn merge_overrides(
     setup: &[(String, String)],
     edited: &BTreeMap<String, String>,
 ) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = setup
         .iter()
-        .filter(|(n, _)| !edited.contains_key(n))
+        .filter(|(n, _)| !edited.get(n).is_some_and(|v| v.trim().parse::<f64>().is_ok()))
         .cloned()
         .collect();
     out.extend(
