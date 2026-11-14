@@ -67,6 +67,7 @@ jobs:
           docker run --rm -v "$PWD:/workspaces/Omola" -w /workspaces/Omola omola-dev sh -lc '
             cargo check --workspace &&
             OMOLA_OMC="$(command -v omc)" cargo test -p omola-gui -- --ignored --test-threads=1 simulate_bouncing_ball_with_real_omc &&
+            OMOLA_OMC="$(command -v omc)" cargo test -p omola-gui -- --ignored --test-threads=1 separate_open_documents_with_real_omc &&
             cargo run -p omola -- doctor &&
             cargo run -p omola -- check --model examples/BouncingBall.mo --class BouncingBall &&
             cargo run -p omola -- simulate --model examples/BouncingBall.mo --class BouncingBall --stop-time 3 --output "target/omola smoke spaces/BouncingBall" &&

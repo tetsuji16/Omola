@@ -83,6 +83,7 @@ fn load_parameter_rows_and_current_modifier_with_real_omc() {
         class: "A".into(),
         component: "firstOrder".into(),
         context: ClassContext {
+            other_sources: Vec::new(),
             libraries: vec![LibrarySpec::new("Modelica", Some("4.1.0"))],
             user_source: Some(
                 "model A Modelica.Blocks.Continuous.FirstOrder firstOrder(T=2); end A;".into(),

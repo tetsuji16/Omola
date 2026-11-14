@@ -748,14 +748,37 @@ fn context_includes_classes_from_other_open_documents() {
     app.documents
         .push(Document::new_untitled("model Main\n  Helper h;\nend Main;"));
     app.refresh_outline();
-    let source = app.context_for("Main").user_source.unwrap();
+    let context = app.context_for("Main");
+    let source = context.user_source.unwrap();
     assert!(source.contains("model Main"));
     assert!(
-        source.contains("model Helper"),
+        context.other_sources[0].contains("model Helper"),
         "the dependency's buffer is included"
     );
     assert_eq!(source.matches("model Main").count(), 1);
+    assert!(!source.contains("model Helper"));
     assert!(app.context_for("Modelica.Blocks").user_source.is_none());
+}
+
+#[test]
+fn context_preserves_within_and_unfinished_buffers_separately() {
+    let mut app = app();
+    app.documents.push(Document::new_untitled(
+        "within P; model Main Helper h; end Main;",
+    ));
+    app.documents.push(Document::new_untitled(
+        "within P; model Helper Real x=1; end Helper;",
+    ));
+    app.documents.push(Document::new_untitled("model Draft"));
+    app.refresh_outline();
+    let context = app.context_for("P.Main");
+    assert_eq!(
+        context.user_source.as_deref(),
+        Some("within P; model Main Helper h; end Main;")
+    );
+    assert_eq!(context.other_sources.len(), 2);
+    assert!(context.other_sources[0].starts_with("within P;"));
+    assert!(context.other_sources[1].contains("model Draft"));
 }
 
 // --- G02 persistence tests ---
