@@ -596,6 +596,39 @@ fn a_late_annotation_of_a_class_the_user_left_is_ignored() {
 }
 
 #[test]
+fn cached_experiment_is_applied_when_class_is_reopened() {
+    let mut app = app();
+    app.docs.insert(
+        "Left".into(),
+        Loadable::Ready(DocPage {
+            doc: library::ClassDoc {
+                class: "Left".into(),
+                restriction: "model".into(),
+                comment: String::new(),
+                info_html: String::new(),
+                revisions_html: String::new(),
+                roots: BTreeMap::new(),
+                experiment: Some(experiment()),
+            },
+            info: Vec::new(),
+        }),
+    );
+    app.open_class("Left");
+    assert_eq!(app.setup.stop_time, 5.0);
+    assert_eq!(app.setup_from.as_deref(), Some("Left"));
+}
+
+#[test]
+fn pending_result_copy_holds_window_close() {
+    let mut app = app();
+    app.pending_result_copies = 1;
+    assert!(app.hold_close_for_edit());
+    assert!(app.hold_close_for_edit());
+    app.pending_result_copies = 0;
+    assert!(!app.hold_close_for_edit());
+}
+
+#[test]
 fn edited_values_override_setup() {
     let mut edited = BTreeMap::new();
     edited.insert("L".to_owned(), "2".to_owned());

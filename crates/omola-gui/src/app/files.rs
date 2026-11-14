@@ -399,10 +399,17 @@ impl OmolaApp {
         let Some(source) = self.run(run_id).map(|r| r.outcome.result_file.clone()) else {
             return self.error(LogTab::Simulation, "The result is no longer open.".into());
         };
-        self.worker.submit(Job::CopyResult {
+        if self.worker.try_submit(Job::CopyResult {
             source,
             dest: dest.to_path_buf(),
-        });
+        }) {
+            self.pending_result_copies += 1;
+        } else {
+            self.error(
+                LogTab::Simulation,
+                "Could not queue the result copy: worker stopped.".into(),
+            );
+        }
     }
 
     pub fn refresh_outline(&mut self) {
@@ -452,6 +459,16 @@ impl OmolaApp {
     /// running: closing now would drop the edit without a word. Only the first request
     /// is held back; closing again exits anyway (G53).
     pub fn hold_close_for_edit(&mut self) -> bool {
+        if self.pending_result_copies > 0 {
+            self.warn(
+                LogTab::Simulation,
+                "A result copy is still pending; wait for it to finish before closing.".into(),
+            );
+            self.log_tab = LogTab::Simulation;
+            self.bottom_pane = BottomPane::Logs;
+            self.docks.bottom = true;
+            return true;
+        }
         if self.pending_edit.is_none() || self.exit_confirmed || self.edit_close_warned {
             return false;
         }
