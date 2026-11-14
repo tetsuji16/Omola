@@ -98,7 +98,7 @@ UI の見た目を変える issue では、**変更後のスクリーンショ�
 
 ## 5.5 進捗メモ(2026-11-12 更新)
 
-**現状(2026-11-12 のコード全体見直し):** G01〜G13、G15〜G41 は main に入っており、GitHub の issue も閉じています。**G14 と G42〜G44、G46、G48〜G50 も実装済みです。残っているのは G45 の Cut / Copy / Paste ボタン、G47、G51、G52 だけです。** 下の 2026-11-06 の箇条書きは経緯として残していますが、いずれも解決済みです。
+**現状(2026-11-14):** G01〜G51 は実装済みで main に入っています。**残っているのは G52(動かないリボンボタンの整理)だけです。** G53 は PR #115 のレビュー指摘 13 件の追跡で、#129 と #135 により全項目を修正済みです。下の 2026-11-06 の箇条書きは経緯として残していますが、いずれも解決済みです。
 
 見直しの PR(`gui-audit-skeleton`)で次の骨格を入れました。G42 以降の issue は、これらを作り直さずに使ってください。
 
@@ -173,14 +173,14 @@ Dymola 風レイアウト(タイトル行・リボン・ブラウザ・モデル
 | [G42](G42-unsaved-changes-guard.md) | 【データ保護】未保存の変更の確認を完成させる(保存して終了・ドキュメントを閉じる) | 中 | —(実装済み) |
 | [G43](G43-safe-save.md) | 【データ保護】保存の安全性(上書き確認・ディスク上で変更されたファイルの検出) | 易〜中 | —(実装済み) |
 | [G44](G44-simulation-setup-completion.md) | Simulation Setup の仕上げ(保持する結果数・入力エラーの表示・Interval length) | 易 | —(実装済み) |
-| [G45](G45-text-ribbon-editing.md) | Text リボンの編集ボタン(Cut / Copy / Paste・Go To Line・Replace)を動かす | 中 | —(Go To Line・Replace は実装済み。残りは Cut / Copy / Paste) |
+| [G45](G45-text-ribbon-editing.md) | Text リボンの編集ボタン(Cut / Copy / Paste・Go To Line・Replace)を動かす | 中 | —(実装済み) |
 | [G46](G46-translate-job.md) | Translate を Check から分離する(翻訳だけ行うジョブ) | 中 | —(実装済み) |
-| [G47](G47-diagram-zoom-controls.md) | Diagram の表示操作(100% / Fit ボタン)とリボンの折りたたみ | 易 | — |
+| [G47](G47-diagram-zoom-controls.md) | Diagram の表示操作(100% / Fit ボタン)とリボンの折りたたみ | 易 | —(実装済み) |
 | [G48](G48-save-setup-in-model.md) | Save in Model(Simulation Setup を experiment アノテーションに書き戻す) | 中 | G44(実装済み) |
 | [G49](G49-parameter-sweep.md) | Sweep Parameters(1 つのパラメータを変えて連続シミュレーション) | 難 | G14, G44(実装済み) |
 | [G50](G50-work-directory-cleanup.md) | 一時作業フォルダの掃除(古い session フォルダが残り続ける) | 易 | —(実装済み) |
-| [G51](G51-stale-docs-and-status-text.md) | 古くなった文書と状態表示の更新 | 易 | — |
-| [G52](G52-unimplemented-ribbon-buttons.md) | 動かないリボンボタンの整理(押しても何も起きないボタンを無くす) | 易 | (G45〜G49) |
+| [G51](G51-stale-docs-and-status-text.md) | 古くなった文書と状態表示の更新 | 易 | —(実装済み) |
+| [G52](G52-unimplemented-ribbon-buttons.md) | 動かないリボンボタンの整理(押しても何も起きないボタンを無くす) | 易 | G45〜G49(実装済み) |
 
 並行して進めてよいもの: G02, G03, G09, G10, G11, G13, G14 は互いに独立。
 
@@ -202,7 +202,7 @@ PID_Controller を MSL から開いて Graphics / Documentation / Text / Simulat
 
 ### 2026-11-12 追加(コード全体の見直しから、G42〜G52)
 
-GitHub の issue 番号: G42〜G52 = #116〜#126(順番どおり)、G14 = #42。進める順番のチェックリストは #127。
+GitHub の issue 番号: G42〜G52 = #116〜#126(順番どおり)、G14 = #42。G53(PR #115 のレビュー指摘)は #128。進める順番のチェックリストは #127。
 
 9. **データを失う不具合を先に**: G42(未保存の確認)→ G43(保存の安全性)。どちらも `app.rs` / `dialogs.rs` を触るので順番に。G14 の残り(`Save result as…`)と G50(作業フォルダの掃除)は独立。
 10. **シミュレーション**: G44 → G48、G46 は独立。G49 は G14・G44 の後。

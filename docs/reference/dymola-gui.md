@@ -116,14 +116,15 @@
 | Dymola 側の要素 | Omola の実装場所 | 状態 |
 |---|---|---|
 | クイックアクセス・タイトル・ウィンドウボタン | `ui/chrome.rs` `title_bar()` | あり(OS の枠を使う場合は `OMOLA_NATIVE_TITLEBAR=1`) |
-| リボン(File/Graphics/Documentation/Text/Simulation/Tools) | `ui/chrome.rs` | あり。未実装の機能は無効表示、または押すと「not implemented」をログに出す |
+| リボン(File/Graphics/Documentation/Text/Simulation/Tools) | `ui/chrome.rs` | あり。押せるボタンはすべて動作する。無効なボタンはツールチップで理由を示し、提供しない機能のボタンは置かない(G52) |
 | Package Browser | `ui/browsers.rs` | MSL・ModelicaReference・開いたファイルの木、検索、戻る/進む |
 | Component Browser | 同上 | 選択クラスのみ(部品階層は G06) |
-| Documentation 層 | `ui/doc_view.rs` + `html.rs` | HTML 描画(見出し・太字・リンク・リスト・表・画像 SVG/PNG)、Info Source / Revision Source、検索ハイライト、Package Content 表、`modelica://` リンク移動 |
-| Text 層 | `ui/views.rs` | ユーザーモデルは編集可、ライブラリのクラスは `list()` を読み取り専用表示。ただし現在ユーザーモデルの編集ができない回帰あり(G23) |
+| Documentation 層 | `ui/doc_view.rs` + `html.rs` | HTML 描画(見出し・太字・リンク・リスト・表・画像 SVG/PNG)、Info Source / Revision Source、検索ハイライト、Package Content 表、`modelica://` リンク移動。編集はせず、リボンにも編集ボタンを置かない |
+| Text 層 | `ui/views.rs` | ユーザーモデルは編集可(Undo/Redo、Cut/Copy/Paste、Go To Line、Replace)。ライブラリのクラスは `list()` を読み取り専用表示 |
 | Icon 層 | 同上 + `graphics.rs` | `annotation(Icon(graphics={...}))` を描画(Line/Polygon/Rectangle/Ellipse/Text、origin と rotation、線種、`%name`)。編集は不可 |
-| Diagram 層 | 同上 | getModelInstance の Placement と connect の Line で部品配置と結線を読み取り専用表示。ズーム・パン可。編集は不可(G28〜G33) |
-| Simulation | `backend.rs` | ライブラリのクラス(例: `Modelica.Blocks.Examples.PID_Controller`)とユーザーモデルを OMC で実行。experiment 注釈の StopTime を反映 |
+| Diagram 層 | 同上 | getModelInstance の Placement と connect の Line で部品配置と結線を表示し、部品の追加・移動・回転・削除・名前変更・結線、Undo/Redo、ズーム/パンができる。アイコン図形の直接編集は不可 |
+| Simulation | `backend.rs` | ライブラリのクラス(例: `Modelica.Blocks.Examples.PID_Controller`)とユーザーモデルを OMC で Check / Translate / Simulate する。experiment 注釈の StopTime を反映し、Simulation Setup の値を `-override` で渡す。Save in Model と 1 パラメータの Sweep に対応 |
+| Animation / 3D / Linearize / Continue / New Script / New Table | — | 対象外。リボンにボタンを置かない(押しても何も起きないボタンは残さない) |
 | Variable Browser | `ui/browsers.rs` + `var_tree.rs` | 変数名のドット・配列添字・`der()` で木構造(`CollapsingHeader`、既定は閉、深さ 1 で子が 20 個以下なら開)。Value/Unit/Description、`Time:` の `DragValue` で任意時刻の値を線形補間表示(既定は最終時刻)、フィルタ入力中は一致する葉の平坦リスト。最新結果のパラメータは Value 欄で編集でき、太字 + `x` で取り消し、次の Simulate で `-override` として渡す(`More >>` に Parameters / Time-varying のトグルと Reset overrides) |
 | プロット | `ui/views.rs` | 自前描画(ドラッグでズーム、ダブルクリックで戻す、ホバーで値) |
 | Logs / Commands | `ui/bottom.rs` | ログのタブ分け、Commands 窓から OMC スクリプト実行、Run Script |

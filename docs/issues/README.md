@@ -2,7 +2,7 @@
 
 These issues are tracked in [GitHub](https://github.com/tetsuji16/Omola/issues). Each local brief under this directory is the matching issue body. The repo currently has no project-specific `AGENTS.md`; issue work should follow the shared project instructions and preserve measured compatibility claims.
 
-Native egui GUI work (G01–G14) has its own shared rules, dependency order, and briefs in [`gui/README.md`](gui/README.md).
+Native egui GUI work (G01–G53) has its own shared rules, dependency order, and briefs in [`gui/README.md`](gui/README.md).
 
 Recommended sequence: [01](https://github.com/tetsuji16/Omola/issues/1) -> [02](https://github.com/tetsuji16/Omola/issues/2) -> [03](https://github.com/tetsuji16/Omola/issues/3) -> [04](https://github.com/tetsuji16/Omola/issues/4), [05](https://github.com/tetsuji16/Omola/issues/5), [06](https://github.com/tetsuji16/Omola/issues/6), and [07](https://github.com/tetsuji16/Omola/issues/7) may proceed after the corpus contract is stable -> [08](https://github.com/tetsuji16/Omola/issues/8) -> [09](https://github.com/tetsuji16/Omola/issues/9) -> [10](https://github.com/tetsuji16/Omola/issues/10).
 

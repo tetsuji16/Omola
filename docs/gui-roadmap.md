@@ -1,6 +1,6 @@
 # Omola GUI roadmap
 
-> **Direction changed again: 2026-11-02.** Omola's desktop GUI is now a native Rust application built with egui (`crates/omola-gui`), with computation still delegated to OMC. New GUI work is tracked in [`docs/issues/gui/`](issues/gui/README.md) (G01–G52; see its section 6 for what is still open) and the layout reference is [`docs/reference/dymola-gui.md`](reference/dymola-gui.md). The OMEdit plan below is kept as history; the existing `omola project open` / `omola gui status` OMEdit commands remain available but receive no new GUI features.
+> **Direction changed again: 2026-11-02.** Omola's desktop GUI is now a native Rust application built with egui (`crates/omola-gui`), with computation still delegated to OMC. New GUI work is tracked in [`docs/issues/gui/`](issues/gui/README.md) (G01–G53; section 5.5 and section 6 there are the single source of truth for status) and the layout reference is [`docs/reference/dymola-gui.md`](reference/dymola-gui.md). The OMEdit plan below is kept as history; the existing `omola project open` / `omola gui status` OMEdit commands remain available but receive no new GUI features.
 
 ## Previous plan (2026-10-28): extend upstream OMEdit
 
@@ -30,7 +30,7 @@ No Dymola code, manuals, models, icons, or proprietary UI assets may be copied. 
 | Area | OMEdit/OMC starting point | Omola and Dymola status |
 |---|---|---|
 | Modelica text/diagram editing | Existing OMEdit text and diagram editors | Reuse and test; proprietary Dymola-specific extensions remain unknown |
-| Libraries and project files | OMEdit browser plus Omola schema-1 project manifest | Native manifest integration is in progress; exact library version selected by GUI is unverified until #22 passes |
+| Libraries and project files | OMEdit browser plus Omola schema-1 project manifest | Native workbench has its own package/component browsers and schema-1 manifest loading; Dymola-specific library pinning semantics remain unmeasured |
 | Check and simulation | OMEdit actions and OMC backend | Project stop time and numeric overrides must be visibly applied and verified through the GUI |
 | Results and plotting | OMEdit variable browser and plot windows | Reuse; Dymola MAT/DSRES formats are unsupported unless directly measured |
 | FMI and cross-tool integration | Existing OMC workflows | Version/type/platform-specific coverage only; no inference of Dymola equivalence |
@@ -41,27 +41,33 @@ Keep Modelica language and library coverage, OMC semantics, OMEdit behavior, Omo
 
 ## Measured GUI status command
 
-`omola gui status [--format json|markdown]` reports the current measured state of the GUI/editor dimension against the Dymola compatibility matrix. It probes the installed OMC (presence and version) and OMEdit (presence, resolved path, and version-match status where the host supports it), then prints the eight GUI/editor dimensions with per-row status (`reused`, `partial`, `not-measured`, `unsupported`) and the known blockers. The command degrades gracefully when OMC or OMEdit is absent instead of failing, and it never claims Dymola parity. This advances the scorecard's "GUI/editor" row from "No GUI" toward a reproducible, runnable status check; the underlying integration gaps (#15/#16/#18/#19/#22/#25) remain open until each has measured evidence.
+`omola gui status [--format json|markdown]` reports the current measured state of the GUI/editor dimension against the Dymola compatibility matrix. It probes the installed OMC (presence and version) and OMEdit (presence, resolved path, and version-match status where the host supports it), then prints the eight GUI/editor dimensions with per-row status (`reused`, `partial`, `not-measured`, `unsupported`) and the known blockers. The command degrades gracefully when OMC or OMEdit is absent instead of failing, and it never claims Dymola parity. This advanced the scorecard's "GUI/editor" row from "No GUI" toward a reproducible, runnable status check; the OMEdit-era integration issues (#15/#16/#18/#19/#22/#25) are closed and kept as history. The native egui workbench is the supported GUI; its current status is only in [`docs/issues/gui/README.md`](issues/gui/README.md).
 
-## Staged GitHub work
+## Native GUI status
 
-| Issue | Scope | Completion evidence |
-|---|---|---|
-| [#25](https://github.com/tetsuji16/Omola/issues/25) | Pinned native Windows OMEdit source build and license/dependency record | Fresh source/toolchain setup; isolated OMEdit+OMC build and visible Windows launch; fixture check/simulate |
-| [#15](https://github.com/tetsuji16/Omola/issues/15) | Native OMEdit **Open Omola Project…** and model/library loading | GUI action consumes validated JSON, opens the canonical model, preserves source, reports missing inputs |
-| [#16](https://github.com/tetsuji16/Omola/issues/16) | Manifest simulation settings inside OMEdit | Stop time and parameter values visible and applied to real OMC simulation; GUI diagnostics and results agree |
-| [#17](https://github.com/tetsuji16/Omola/issues/17) | Result browsing and plotting | OMEdit renders fixture variables with the reported result path/backend; no synthetic plot evidence |
-| [#18](https://github.com/tetsuji16/Omola/issues/18) | Diagram annotations and measured Dymola gaps | Lawful fixtures, annotation-preserving saves, explicit supported/unsupported matrix |
-| [#22](https://github.com/tetsuji16/Omola/issues/22) | Verify versions actually selected in OMEdit's own OMC session | Conflicting pins/annotations fail visibly; selected version evidence comes from the GUI session |
-| [#19](https://github.com/tetsuji16/Omola/issues/19) | Native Windows GUI regression gate | Versioned report for source/toolchain, model/manifest, open/check/simulate/plot and explicit unsupported cases |
+The native egui workbench (`crates/omola-gui`) is the current GUI. Its issue index, dependencies, and completion status live only in [`docs/issues/gui/README.md`](issues/gui/README.md) §5.5–§6; this roadmap does not duplicate that list.
 
-Dependencies: #25 → #15 → #16 → #17 → #19. #18 depends on #25/#15/#16 and can proceed independently of plots. #22 depends on #15/#16. Existing closed #13/#14 record the earlier OMEdit reuse/license inventory and Docker launch experiment; they do not satisfy source-patch/build acceptance in #25. An issue remains open until its own acceptance criteria have measured evidence.
+## Staged OMEdit work (historical)
+
+This table records the earlier OMEdit plan and is not a list of open work. All of these issues are closed.
+
+| Issue | Scope | Completion evidence | Status |
+|---|---|---|---|
+| [#25](https://github.com/tetsuji16/Omola/issues/25) | Pinned native Windows OMEdit source build and license/dependency record | Fresh source/toolchain setup; isolated OMEdit+OMC build and visible Windows launch; fixture check/simulate | Closed (historical) |
+| [#15](https://github.com/tetsuji16/Omola/issues/15) | Native OMEdit **Open Omola Project…** and model/library loading | GUI action consumes validated JSON, opens the canonical model, preserves source, reports missing inputs | Closed (historical) |
+| [#16](https://github.com/tetsuji16/Omola/issues/16) | Manifest simulation settings inside OMEdit | Stop time and parameter values visible and applied to real OMC simulation; GUI diagnostics and results agree | Closed (historical) |
+| [#17](https://github.com/tetsuji16/Omola/issues/17) | Result browsing and plotting | OMEdit renders fixture variables with the reported result path/backend; no synthetic plot evidence | Closed (historical) |
+| [#18](https://github.com/tetsuji16/Omola/issues/18) | Diagram annotations and measured Dymola gaps | Lawful fixtures, annotation-preserving saves, explicit supported/unsupported matrix | Closed (historical) |
+| [#22](https://github.com/tetsuji16/Omola/issues/22) | Verify versions actually selected in OMEdit's own OMC session | Conflicting pins/annotations fail visibly; selected version evidence comes from the GUI session | Closed (historical) |
+| [#19](https://github.com/tetsuji16/Omola/issues/19) | Native Windows GUI regression gate | Versioned report for source/toolchain, model/manifest, open/check/simulate/plot and explicit unsupported cases | Closed (historical) |
+
+The earlier dependency chain was #25 → #15 → #16 → #17 → #19, with #18 depending on #25/#15/#16 and #22 on #15/#16. Closed #13/#14 record the OMEdit reuse/license inventory and Docker launch experiment. None of these rows describes current work.
 
 ## Current Windows evidence and blockers
 
-- Stock OpenModelica 1.27.1 is installed at `C:\Program Files\OpenModelica1.27.1-64bit`. A previous native session launched stock OMEdit, opened a temporary BouncingBall project, and completed a GUI check/simulation/plot. Its manifest overrides did **not** propagate into that stock OMEdit simulation; this is the concrete gap #16 is intended to close.
-- The pinned upstream source and submodules have been fetched outside this repository; checkout size is about 1.06 GB. The unmodified installation's bundled MSYS2/UCRT64 is a runtime image with Qt development files stripped. CMake source configuration has not completed and no modified C++ has compiled.
-- The official Windows instructions recommend a fixed-package OMDev/UCRT64 toolchain, but fetching the OMDevUCRT GitLab pack stalled at zero bytes in this session. A clean user-owned MSYS2 development setup remains the next environment attempt. Do not update the existing OpenModelica installation in place.
+- Stock OpenModelica 1.27.1 is installed at `C:\Program Files\OpenModelica1.27.1-64bit`. A previous native session launched stock OMEdit, opened a temporary BouncingBall project, and completed a GUI check/simulation/plot. Its manifest overrides did **not** propagate into that stock OMEdit simulation; this was the concrete gap recorded in closed issue #16.
+- The pinned upstream source and submodules were fetched outside this repository; checkout size is about 1.06 GB. The unmodified installation's bundled MSYS2/UCRT64 is a runtime image with Qt development files stripped. CMake source configuration did not complete and no modified C++ was compiled.
+- The official Windows instructions recommend a fixed-package OMDev/UCRT64 toolchain, but fetching the OMDevUCRT GitLab pack stalled at zero bytes. That attempt is closed with issue #25; a clean user-owned MSYS2 development setup is not part of the current native GUI plan. Do not update the existing OpenModelica installation in place.
 - The exact configure failures, local unshipped SUNDIALS guard experiment, package missing-file evidence, versioned source/license findings, and unmeasured build/download footprint are recorded in [`omedit-upstream.md`](omedit-upstream.md). A configure pass is not a build or GUI verification.
 
 ## Primary sources
