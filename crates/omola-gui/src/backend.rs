@@ -139,6 +139,8 @@ pub struct ClassContext {
     pub libraries: Vec<LibrarySpec>,
     /// Editor buffer that defines (or uses) the class; written to a private copy.
     pub user_source: Option<String>,
+    /// Other open buffers, kept as distinct stored definitions.
+    pub other_sources: Vec<String>,
 }
 
 pub enum Job {
@@ -472,9 +474,10 @@ fn run_job(
             send(Event::LibraryLoaded(spec, result));
         }
         Job::LoadClassDoc { class, context } => {
-            let result = with_user_file(run_dir, &class, &context, |file| {
-                let script = library::class_doc_script(&class, &context.libraries, file)
-                    .map_err(|e| e.to_string())?;
+            let result = with_user_files(run_dir, &class, &context, |file| {
+                let script =
+                    library::class_doc_script_with_user_files(&class, &context.libraries, file)
+                        .map_err(|e| e.to_string())?;
                 let out = omc.run_query_script(&script).map_err(|e| e.to_string())?;
                 library::parse_class_doc(&class, &out.output)
             });
@@ -492,9 +495,10 @@ fn run_job(
             send(Event::ClassText(class, result));
         }
         Job::LoadInstance { class, context } => {
-            let result = with_user_file(run_dir, &class, &context, |file| {
-                let script = library::instance_script(&class, &context.libraries, file)
-                    .map_err(|e| e.to_string())?;
+            let result = with_user_files(run_dir, &class, &context, |file| {
+                let script =
+                    library::instance_script_with_user_files(&class, &context.libraries, file)
+                        .map_err(|e| e.to_string())?;
                 omc.run_query_script(&script)
                     .map(|out| out.output)
                     .map_err(|e| e.to_string())
@@ -516,17 +520,21 @@ fn run_job(
             component,
             context,
         } => {
-            let result = with_user_file(run_dir, &class, &context, |file| {
-                let type_script =
-                    library::instance_script(&component_type, &context.libraries, file)
-                        .map_err(|e| e.to_string())?;
+            let result = with_user_files(run_dir, &class, &context, |file| {
+                let type_script = library::instance_script_with_user_files(
+                    &component_type,
+                    &context.libraries,
+                    file,
+                )
+                .map_err(|e| e.to_string())?;
                 let type_output = omc
                     .run_query_script(&type_script)
                     .map_err(|e| e.to_string())?
                     .output;
                 let type_json = parse_instance_value(&type_output, &component_type)?;
-                let class_script = library::instance_script(&class, &context.libraries, file)
-                    .map_err(|e| e.to_string())?;
+                let class_script =
+                    library::instance_script_with_user_files(&class, &context.libraries, file)
+                        .map_err(|e| e.to_string())?;
                 let class_output = omc
                     .run_query_script(&class_script)
                     .map_err(|e| e.to_string())?
@@ -541,8 +549,8 @@ fn run_job(
             send(Event::Parameters { component, result });
         }
         Job::LoadIcon { class, context } => {
-            let result = with_user_file(run_dir, &class, &context, |file| {
-                let script = library::icon_script(&class, &context.libraries, file)
+            let result = with_user_files(run_dir, &class, &context, |file| {
+                let script = library::icon_script_with_user_files(&class, &context.libraries, file)
                     .map_err(|e| e.to_string())?;
                 omc.run_query_script(&script)
                     .map(|out| out.output)
@@ -581,9 +589,10 @@ fn run_job(
             cached_icons,
         } => {
             // First load the instance JSON to get component placements and connections
-            let instance_result = with_user_file(run_dir, &class, &context, |file| {
-                let script = library::instance_script(&class, &context.libraries, file)
-                    .map_err(|e| e.to_string())?;
+            let instance_result = with_user_files(run_dir, &class, &context, |file| {
+                let script =
+                    library::instance_script_with_user_files(&class, &context.libraries, file)
+                        .map_err(|e| e.to_string())?;
                 omc.run_query_script(&script)
                     .map(|out| out.output)
                     .map_err(|e| e.to_string())
@@ -644,9 +653,10 @@ fn run_job(
                 send(Event::Diagram(class, diagram));
                 return;
             }
-            let loaded = with_user_file(run_dir, &class, &context, |file| {
-                let script = library::icons_script(&types, &context.libraries, file)
-                    .map_err(|e| e.to_string())?;
+            let loaded = with_user_files(run_dir, &class, &context, |file| {
+                let script =
+                    library::icons_script_with_user_files(&types, &context.libraries, file)
+                        .map_err(|e| e.to_string())?;
                 omc.run_query_script(&script).map_err(|e| e.to_string())
             });
             match loaded {
@@ -698,9 +708,10 @@ fn run_job(
                 LogLevel::Info,
                 format!("checkModel(\"{class}\")"),
             ));
-            let result = with_user_file(run_dir, &class, &context, |file| {
-                let script = library::check_script(&class, &context.libraries, file)
-                    .map_err(|e| e.to_string())?;
+            let result = with_user_files(run_dir, &class, &context, |file| {
+                let script =
+                    library::check_script_with_user_files(&class, &context.libraries, file)
+                        .map_err(|e| e.to_string())?;
                 omc.run_query_script(&script)
                     .map(|out| out.output)
                     .map_err(|e| e.to_string())
@@ -909,20 +920,34 @@ fn fail_job(job: Job, message: String, send: &dyn Fn(Event)) {
     }
 }
 
-/// Run `f` with the user's buffer written to a private file (or `None`).
-fn with_user_file<T>(
+/// Write each editor buffer to a separate private file. The target is last.
+fn write_user_files(
     run_dir: &Path,
     class: &str,
     context: &ClassContext,
-    f: impl FnOnce(Option<&Path>) -> Result<T, String>,
-) -> Result<T, String> {
-    match &context.user_source {
-        Some(text) => {
-            let path = write_source(run_dir, class, text)?;
-            f(Some(&path))
+) -> Result<Vec<PathBuf>, String> {
+    let mut files = Vec::new();
+    if let Some(source) = &context.user_source {
+        for (index, text) in context.other_sources.iter().enumerate() {
+            files.push(write_source(
+                &run_dir.join("dependencies"),
+                &format!("dependency_{index}"),
+                text,
+            )?);
         }
-        None => f(None),
+        files.push(write_source(run_dir, class, source)?);
     }
+    Ok(files)
+}
+
+fn with_user_files<T>(
+    run_dir: &Path,
+    class: &str,
+    context: &ClassContext,
+    f: impl FnOnce(&[PathBuf]) -> Result<T, String>,
+) -> Result<T, String> {
+    let files = write_user_files(run_dir, class, context)?;
+    f(&files)
 }
 
 fn simulate(
@@ -933,12 +958,9 @@ fn simulate(
     setup: SimulationSetup,
     send: &dyn Fn(Event),
 ) {
-    let source = match &context.user_source {
-        Some(text) => match write_source(run_dir, &class, text) {
-            Ok(path) => Some(path),
-            Err(message) => return send(Event::Log(LogTab::Translation, LogLevel::Error, message)),
-        },
-        None => None,
+    let sources = match write_user_files(run_dir, &class, &context) {
+        Ok(paths) => paths,
+        Err(message) => return send(Event::Log(LogTab::Translation, LogLevel::Error, message)),
     };
     send(Event::Log(
         LogTab::Translation,
@@ -958,8 +980,8 @@ fn simulate(
     }
     let prefix = run_dir.join(result_stem(&class));
     let libraries = pinned(&context.libraries);
-    let outcome = omc.simulate_class(
-        source.as_deref(),
+    let outcome = omc.simulate_class_with_sources(
+        &sources,
         &class,
         SimulationConfig {
             stop_time: setup.stop_time,
@@ -1046,9 +1068,10 @@ fn translate(omc: &Omc, run_dir: &Path, class: &str, context: &ClassContext, sen
         );
     }
     let cancelled = std::cell::Cell::new(false);
-    let result = with_user_file(run_dir, class, context, |file| {
-        let script = library::translate_script(class, &context.libraries, file, &build_dir)
-            .map_err(|e| e.to_string())?;
+    let result = with_user_files(run_dir, class, context, |file| {
+        let script =
+            library::translate_script_with_user_files(class, &context.libraries, file, &build_dir)
+                .map_err(|e| e.to_string())?;
         omc.run_query_script(&script)
             .map(|out| out.output)
             .map_err(|e| {
