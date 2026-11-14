@@ -628,12 +628,35 @@ fn cached_experiment_is_applied_when_class_is_reopened() {
 }
 
 #[test]
+fn stale_documentation_does_not_replace_a_new_request() {
+    let mut app = app();
+    app.documents
+        .push(Document::new_untitled("model M Real x; end M;"));
+    app.refresh_outline();
+    app.docs.insert("M".into(), Loadable::Loading);
+    app.accept_class_doc(
+        "M".into(),
+        Some("model M end M;".into()),
+        Err("stale".into()),
+    );
+    assert!(matches!(app.docs.get("M"), Some(Loadable::Loading)));
+    app.accept_class_doc(
+        "M".into(),
+        Some("model M Real x; end M;".into()),
+        Err("current".into()),
+    );
+    assert!(matches!(app.docs.get("M"), Some(Loadable::Failed(message)) if message == "current"));
+}
+
+#[test]
 fn pending_result_copy_holds_window_close() {
     let mut app = app();
     app.pending_result_copies = 1;
+    app.pending_edit = Some("M".into());
     assert!(app.hold_close_for_edit());
-    assert!(app.hold_close_for_edit());
+    assert!(!app.hold_close_for_edit());
     app.pending_result_copies = 0;
+    app.pending_edit = None;
     assert!(!app.hold_close_for_edit());
 }
 

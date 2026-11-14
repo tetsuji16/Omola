@@ -374,13 +374,7 @@ impl Omc {
             )
         };
         script.push_str(&user_sources_script(&sources));
-        if !sources.is_empty() {
-            script.push_str(&format!("if omolaSourceLoaded{} then\n", sources.len() - 1));
-        }
         script.push_str(&simulate_call(class, &output_prefix, &config, &simflags)?);
-        if !sources.is_empty() {
-            script.push_str("end if;\n");
-        }
         let (mut result, workspace, _cleanup) = self.run_script_in_temp(&script)?;
         let generated = match find_result_file(&result.output) {
             Some(path) if path.is_absolute() => path,
@@ -888,7 +882,7 @@ fn user_sources_script(sources: &[PathBuf]) -> String {
     script.push_str("end while;\n");
     if let Some(primary) = sources.len().checked_sub(1) {
         script.push_str(&format!(
-            "if not omolaSourceLoaded{primary} then\nclearMessages();\nloaded := loadFile(\"{}\");\nif not loaded then print(getErrorString()); end if;\nend if;\n",
+            "if not omolaSourceLoaded{primary} then\nclearMessages();\nloaded := loadFile(\"{}\");\nif not loaded then print(getErrorString()); exit(1); end if;\nend if;\n",
             modelica_string(&sources[primary].to_string_lossy())
         ));
     }
@@ -1154,7 +1148,8 @@ mod tests {
         assert!(script.contains("if not omolaSourceLoaded0 then"));
         assert!(script.contains("if not omolaSourceLoaded1 then"));
         assert!(script.contains("if not omolaSourceLoaded2 then\nclearMessages();\nloaded := loadFile(\"/tmp/P/Main.mo\")"));
-        assert!(script.ends_with("if not loaded then print(getErrorString()); end if;\nend if;\n"));
+        assert!(script
+            .ends_with("if not loaded then print(getErrorString()); exit(1); end if;\nend if;\n"));
     }
 
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
