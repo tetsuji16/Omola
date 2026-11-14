@@ -198,6 +198,21 @@ fn draw_text_editor_mode<T: egui::TextBuffer>(
                     Sense::hover(),
                 );
 
+                let editor_id = ui.make_persistent_id("model_text_editor");
+                if let Some(command) = pending.filter(|c| editable || *c == EditorCommand::Copy) {
+                    ui.memory_mut(|m| m.request_focus(editor_id));
+                    match command {
+                        EditorCommand::Copy => {
+                            ui.ctx().input_mut(|i| i.events.push(egui::Event::Copy))
+                        }
+                        EditorCommand::Cut => {
+                            ui.ctx().input_mut(|i| i.events.push(egui::Event::Cut))
+                        }
+                        EditorCommand::Paste => ui
+                            .ctx()
+                            .send_viewport_cmd(egui::ViewportCommand::RequestPaste),
+                    }
+                }
                 let output = {
                     // The layouter borrows the cache; keep it in its own scope so that
                     // `editor_state` is usable again once the widget has been drawn.
@@ -214,6 +229,7 @@ fn draw_text_editor_mode<T: egui::TextBuffer>(
                         ui.ctx().fonts_mut(|f| f.layout_job(job))
                     };
                     egui::TextEdit::multiline(text)
+                        .id(editor_id)
                         .code_editor()
                         .font(font.clone())
                         .desired_width(f32::INFINITY)
@@ -224,24 +240,6 @@ fn draw_text_editor_mode<T: egui::TextBuffer>(
                         .show(ui)
                 };
                 changed = output.response.changed();
-                // G45: a ribbon clipboard button acts on the editor. Focus is restored
-                // and the event is delivered on the next frame (Paste asks the OS first).
-                let command = pending.filter(|c| editable || *c == EditorCommand::Copy);
-                if let Some(command) = command {
-                    ui.memory_mut(|m| m.request_focus(output.response.id));
-                    match command {
-                        EditorCommand::Copy => {
-                            ui.ctx().input_mut(|i| i.events.push(egui::Event::Copy));
-                        }
-                        EditorCommand::Cut => {
-                            ui.ctx().input_mut(|i| i.events.push(egui::Event::Cut));
-                        }
-                        EditorCommand::Paste => {
-                            ui.ctx()
-                                .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
-                        }
-                    }
-                }
                 let text_rect = output.response.rect;
 
                 // Only the rows inside the viewport are painted.
@@ -716,5 +714,56 @@ no location here [
             &mut text,
         );
         assert!(text.contains("ab"), "text was {text:?}");
+    }
+
+    #[test]
+    fn ribbon_cut_copies_and_removes_selected_text() {
+        let ctx = egui::Context::default();
+        let mut state = EditorState::new();
+        let mut text = String::from("model A\nend A;\n");
+        frame(&ctx, vec![], &mut state, &mut text);
+        frame(&ctx, click(egui::pos2(120.0, 20.0)), &mut state, &mut text);
+        let modifiers = egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..Default::default()
+        };
+        frame(
+            &ctx,
+            vec![egui::Event::Key {
+                key: egui::Key::A,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers,
+            }],
+            &mut state,
+            &mut text,
+        );
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
+        let mut changed = false;
+        let output = ctx.run_ui(input, |ui| {
+            changed = draw_text_editor(
+                ui,
+                &mut state,
+                &mut text,
+                None,
+                &[],
+                Some(EditorCommand::Cut),
+            );
+        });
+        assert!(changed);
+        assert!(text.is_empty());
+        assert!(output
+            .platform_output
+            .commands
+            .iter()
+            .any(|c| matches!(c, egui::OutputCommand::CopyText(s) if s == "model A\nend A;\n")));
     }
 }
