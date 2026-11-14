@@ -4,7 +4,7 @@ use super::widgets::{
     big_button, column, combo_frame, field_frame, fixed_group, group, icon_button, paint_icon,
     place, small_button,
 };
-use crate::app::{DocView, EditorCommand, Layer, OmolaApp, RibbonTab};
+use crate::app::{DocView, EditorCommand, Layer, Loadable, OmolaApp, RibbonTab};
 use crate::theme;
 use egui::{Align2, Color32, FontId, RichText, Sense, Stroke, Vec2};
 use egui_material_icons::icons::*;
@@ -860,6 +860,10 @@ impl OmolaApp {
 
     fn text_ribbon(&mut self, ui: &mut egui::Ui) {
         let editable = self.active.as_ref().is_some_and(|c| self.is_user_class(c));
+        let copy_enabled = self.active.as_deref().is_some_and(|class| {
+            self.doc_of(class).is_some()
+                || matches!(self.texts.get(class), Some(Loadable::Ready(_)))
+        });
         self.model_group(ui, false);
         group(ui, "History", |ui| {
             column(ui, |ui| {
@@ -871,7 +875,7 @@ impl OmolaApp {
                 }
             });
         });
-        let (command, _) = clipboard_group(ui, true, editable, false);
+        let (command, _) = clipboard_group(ui, copy_enabled, editable, false);
         if let Some(command) = command {
             self.pending_editor_event = Some(command);
         }

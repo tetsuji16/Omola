@@ -124,6 +124,9 @@ impl OmolaApp {
                     self.edit_window(ui);
                 }
             });
+        // A ribbon command belongs to this frame's editor only. If no editor was
+        // drawn (for example while library text is loading), discard it now.
+        self.pending_editor_event = None;
     }
 }
 
@@ -164,4 +167,35 @@ fn resize_edges(ui: &egui::Ui) {
 /// Compact number formatting shared by ribbon fields and the variable browser.
 pub fn browsers_format(v: f64) -> String {
     browsers::format_value(v)
+}
+
+#[cfg(test)]
+mod clipboard_tests {
+    use crate::app::{EditorCommand, Loadable, OmolaApp, RibbonTab};
+    use crate::backend::Worker;
+
+    #[test]
+    fn unavailable_text_never_keeps_a_clipboard_command_for_a_later_frame() {
+        let mut app = OmolaApp::with_worker(Worker::spawn(
+            std::env::temp_dir().join("omola-clipboard-unused"),
+            || {},
+        ));
+        app.tab = RibbonTab::Text;
+        app.active = Some("Library.Model".into());
+        let ctx = egui::Context::default();
+        for state in [Loadable::Loading, Loadable::Failed("unavailable".into())] {
+            app.texts.insert("Library.Model".into(), state);
+            app.pending_editor_event = Some(EditorCommand::Copy);
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200.0, 800.0),
+                )),
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| app.layout(ui));
+            output.textures_delta.clear();
+            assert!(app.pending_editor_event.is_none());
+        }
+    }
 }
