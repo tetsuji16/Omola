@@ -91,6 +91,25 @@ fn button_frame(ui: &Ui, rect: Rect, response: &Response, selected: bool, enable
     }
 }
 
+/// Allocate and draw a ribbon button, reporting the disabled state through
+/// `Response::enabled()`.
+///
+/// The buttons below drop the click sense when they are disabled, but
+/// `Response::enabled()` is taken from the `Ui` that allocates the widget. A
+/// disabled button would therefore still claim to be enabled, and
+/// `on_disabled_hover_text()` (which only opens when `!response.enabled()`) would
+/// silently swallow its explanation. Drawing inside a disabled child `Ui` sets the
+/// flag without changing the geometry or the colours, which the buttons paint
+/// themselves.
+fn respond(ui: &mut Ui, enabled: bool, add: impl FnOnce(&mut Ui) -> Response) -> Response {
+    if enabled {
+        add(ui)
+    } else {
+        ui.scope_builder(egui::UiBuilder::new().disabled(), add)
+            .inner
+    }
+}
+
 /// A large ribbon button: icon on top, one or two label lines below.
 pub fn big_button(
     ui: &mut Ui,
@@ -100,44 +119,46 @@ pub fn big_button(
     enabled: bool,
     selected: bool,
 ) -> Response {
-    let font = FontId::proportional(12.0);
-    let width = label
-        .lines()
-        .map(|l| {
-            ui.ctx().fonts_mut(|f| {
-                f.layout_no_wrap(l.into(), font.clone(), theme::TEXT)
-                    .size()
-                    .x
+    respond(ui, enabled, |ui| {
+        let font = FontId::proportional(12.0);
+        let width = label
+            .lines()
+            .map(|l| {
+                ui.ctx().fonts_mut(|f| {
+                    f.layout_no_wrap(l.into(), font.clone(), theme::TEXT)
+                        .size()
+                        .x
+                })
             })
-        })
-        .fold(30.0f32, f32::max)
-        + 10.0;
-    let (rect, response) =
-        ui.allocate_exact_size(Vec2::new(width, RIBBON_BODY - 8.0), sense(enabled));
-    button_frame(ui, rect, &response, selected, enabled);
-    let fg = if enabled { color } else { theme::DISABLED };
-    paint_icon(
-        ui,
-        egui::pos2(rect.center().x, rect.top() + 22.0),
-        icon,
-        28.0,
-        fg,
-    );
-    let text = if enabled {
-        theme::TEXT
-    } else {
-        theme::DISABLED
-    };
-    for (i, line) in label.lines().enumerate() {
-        ui.painter().text(
-            egui::pos2(rect.center().x, rect.top() + 42.0 + i as f32 * 13.0),
-            Align2::CENTER_TOP,
-            line,
-            font.clone(),
-            text,
+            .fold(30.0f32, f32::max)
+            + 10.0;
+        let (rect, response) =
+            ui.allocate_exact_size(Vec2::new(width, RIBBON_BODY - 8.0), sense(enabled));
+        button_frame(ui, rect, &response, selected, enabled);
+        let fg = if enabled { color } else { theme::DISABLED };
+        paint_icon(
+            ui,
+            egui::pos2(rect.center().x, rect.top() + 22.0),
+            icon,
+            28.0,
+            fg,
         );
-    }
-    response
+        let text = if enabled {
+            theme::TEXT
+        } else {
+            theme::DISABLED
+        };
+        for (i, line) in label.lines().enumerate() {
+            ui.painter().text(
+                egui::pos2(rect.center().x, rect.top() + 42.0 + i as f32 * 13.0),
+                Align2::CENTER_TOP,
+                line,
+                font.clone(),
+                text,
+            );
+        }
+        response
+    })
 }
 
 /// A small ribbon button: 16 px icon and a label on one line.
@@ -149,40 +170,43 @@ pub fn small_button(
     enabled: bool,
     selected: bool,
 ) -> Response {
-    let font = FontId::proportional(12.0);
-    let text_w = if label.is_empty() {
-        0.0
-    } else {
-        ui.ctx().fonts_mut(|f| {
-            f.layout_no_wrap(label.into(), font.clone(), theme::TEXT)
-                .size()
-                .x
-        }) + 6.0
-    };
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(22.0 + text_w, 22.0), sense(enabled));
-    button_frame(ui, rect, &response, selected, enabled);
-    let fg = if enabled { color } else { theme::DISABLED };
-    paint_icon(
-        ui,
-        egui::pos2(rect.left() + 9.0, rect.center().y),
-        icon,
-        16.0,
-        fg,
-    );
-    if !label.is_empty() {
-        ui.painter().text(
-            egui::pos2(rect.left() + 21.0, rect.center().y),
-            Align2::LEFT_CENTER,
-            label,
-            font,
-            if enabled {
-                theme::TEXT
-            } else {
-                theme::DISABLED
-            },
+    respond(ui, enabled, |ui| {
+        let font = FontId::proportional(12.0);
+        let text_w = if label.is_empty() {
+            0.0
+        } else {
+            ui.ctx().fonts_mut(|f| {
+                f.layout_no_wrap(label.into(), font.clone(), theme::TEXT)
+                    .size()
+                    .x
+            }) + 6.0
+        };
+        let (rect, response) =
+            ui.allocate_exact_size(Vec2::new(22.0 + text_w, 22.0), sense(enabled));
+        button_frame(ui, rect, &response, selected, enabled);
+        let fg = if enabled { color } else { theme::DISABLED };
+        paint_icon(
+            ui,
+            egui::pos2(rect.left() + 9.0, rect.center().y),
+            icon,
+            16.0,
+            fg,
         );
-    }
-    response
+        if !label.is_empty() {
+            ui.painter().text(
+                egui::pos2(rect.left() + 21.0, rect.center().y),
+                Align2::LEFT_CENTER,
+                label,
+                font,
+                if enabled {
+                    theme::TEXT
+                } else {
+                    theme::DISABLED
+                },
+            );
+        }
+        response
+    })
 }
 
 /// A square icon-only button (toolbars, browser headers).
@@ -194,16 +218,18 @@ pub fn icon_button(
     enabled: bool,
     selected: bool,
 ) -> Response {
-    let (rect, response) = ui.allocate_exact_size(Vec2::splat(size + 4.0), sense(enabled));
-    button_frame(ui, rect, &response, selected, enabled);
-    paint_icon(
-        ui,
-        rect.center(),
-        icon,
-        size,
-        if enabled { color } else { theme::DISABLED },
-    );
-    response
+    respond(ui, enabled, |ui| {
+        let (rect, response) = ui.allocate_exact_size(Vec2::splat(size + 4.0), sense(enabled));
+        button_frame(ui, rect, &response, selected, enabled);
+        paint_icon(
+            ui,
+            rect.center(),
+            icon,
+            size,
+            if enabled { color } else { theme::DISABLED },
+        );
+        response
+    })
 }
 
 fn sense(enabled: bool) -> Sense {
@@ -421,8 +447,11 @@ pub fn flat_tab(ui: &mut Ui, label: &str, selected: bool) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::{model_tab_close_rect, model_tab_label_rect, model_tab_width_for_text};
-    use egui::{pos2, Rect, Vec2};
+    use super::{
+        big_button, icon_button, model_tab_close_rect, model_tab_label_rect,
+        model_tab_width_for_text, small_button,
+    };
+    use egui::{pos2, Color32, Rect, Vec2};
 
     #[test]
     fn tab_width_includes_the_close_icon_and_margins() {
@@ -438,5 +467,35 @@ mod tests {
         assert!(label.left() >= rect.left());
         assert!(label.right() < close.left());
         assert!(close.right() <= rect.right());
+    }
+
+    /// G52: `on_disabled_hover_text()` only opens when `!response.enabled()`, so a
+    /// disabled ribbon button must not report itself as enabled.
+    #[test]
+    fn disabled_buttons_report_themselves_as_disabled() {
+        use egui_material_icons::icons::ICON_ADD;
+
+        let ctx = egui::Context::default();
+        let mut flags = Vec::new();
+        let mut rects = Vec::new();
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            for enabled in [true, false] {
+                let small = small_button(ui, ICON_ADD, Color32::BLACK, "Same", enabled, false);
+                flags.push(small.enabled());
+                rects.push(small.rect);
+                flags.push(
+                    big_button(ui, ICON_ADD, Color32::BLACK, "Same", enabled, false).enabled(),
+                );
+                flags.push(
+                    icon_button(ui, ICON_ADD, Color32::BLACK, 16.0, enabled, false).enabled(),
+                );
+            }
+        });
+        out.textures_delta.clear();
+
+        assert_eq!(flags, [true, true, true, false, false, false]);
+        // The disabled wrapper must not resize the button: the ribbon places groups
+        // at fixed coordinates.
+        assert_eq!(rects[0].size(), rects[1].size());
     }
 }

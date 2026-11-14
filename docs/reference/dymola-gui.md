@@ -94,7 +94,7 @@
 
 ### 3.1 レイアウトの計測値(Simulation / Plot 画面、クライアント領域 884x705)
 
-参考にした公開スクリーンショット(Dymola 2026 の Pendulum の Plot 画面)から測った値です。`crates/omola-gui/src/ui/` の定数はこれに合わせています。
+参考にした公開スクリーンショット(Dymola 2026 の Pendulum の Plot 画面)から測った値です。`crates/omola-gui/src/ui/` の定数はこれに合わせています(G52 でボタンごと削除したグループを除く)。
 
 | 要素 | 位置・寸法 (px) |
 |---|---|
@@ -102,7 +102,7 @@
 | リボンタブ行 | y 30–56。File は 54x26 の青 (25,121,202)。タブ幅 = 文字幅 + 30 |
 | 文脈タブ「Plot」 | タイトル行に緑 (113,190,89) の 96 px 幅の見出し、下に「Plot Options」 |
 | リボン本体 | y 56–158、背景 (240,240,240)。小ボタン行の上端 6/31/56、高さ 22、ピッチ 25。グループ見出しの中心 y=92 |
-| Simulation リボンのグループ幅 | Scripting 113、Simulation 382、Tools 95、Animation Control 294 |
+| Simulation リボンのグループ幅 | Scripting 113、Simulation 382、Tools 95、Animation Control 294(Dymola の値)。Omola は G52 で Simulation を 316 に詰め、Animation Control を置かない |
 | Variable Browser | x 0–248。見出し 18、列見出し 24、行 19。列幅 Variable 88 / Value 66 / Unit 50。Value 欄は白地+灰枠 (189) で右寄せ |
 | プロット | 凡例は枠の上 (y≈16)。枠は左 53・上 31・右 24・下 29 の余白、枠線は濃灰色。補助グリッド (≈234) と目盛ラベル |
 | 目盛り | ステップは 1/2/2.5/4/5×10^k。x はラベル約 130 px ごと、y は 50 px ごと。補助線は 2.5・5・1 の 1/5、2・4 の 1/2 |

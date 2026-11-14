@@ -14,6 +14,10 @@ const DARK: Color32 = Color32::from_rgb(0x44, 0x44, 0x44);
 const GREEN: Color32 = Color32::from_rgb(0x2E, 0x9E, 0x45);
 const ORANGE: Color32 = Color32::from_rgb(0xE0, 0x8A, 0x00);
 const RED: Color32 = Color32::from_rgb(0xC6, 0x28, 0x28);
+/// Shown on the Graphics ribbon's drawing buttons, which stay disabled because the
+/// graphics editor is not implemented (the Diagram layer is edited through OMC).
+const DRAWING_NOT_AVAILABLE: &str =
+    "Not available: drawing graphics primitives is not implemented yet";
 
 impl OmolaApp {
     pub fn title_bar(&mut self, ui: &mut egui::Ui) {
@@ -56,74 +60,82 @@ impl OmolaApp {
             );
         }
         let right = plot_x.unwrap_or(rect.right() - 160.0);
-        let mut quick_access_right = rect.left();
-        ui.horizontal_centered(|ui| {
-            ui.add_space(1.0);
-            ui.spacing_mut().item_spacing.x = 2.5;
-            if icon_button(ui, ICON_DRAFT, DARK, 16.0, true, false)
-                .on_hover_text("New model")
-                .clicked()
-            {
-                self.new_model();
-            }
-            if icon_button(ui, ICON_FOLDER_OPEN, ORANGE, 16.0, true, false)
-                .on_hover_text("Open...")
-                .clicked()
-            {
-                self.request_open_dialog();
-            }
-            let can_save = self.active_doc().is_some();
-            if icon_button(ui, ICON_SAVE, BLUE, 16.0, can_save, false)
-                .on_hover_text("Save")
-                .clicked()
-            {
-                self.save();
-            }
-            icon_button(ui, ICON_UNDO, DARK, 16.0, false, false);
-            icon_button(ui, ICON_REDO, DARK, 16.0, false, false);
-            if icon_button(ui, ICON_PLAY_CIRCLE, DARK, 17.0, !self.busy, false)
-                .on_hover_text("Simulate (F9)")
-                .clicked()
-            {
-                self.simulate();
-            }
-            if icon_button(ui, ICON_CANCEL, DARK, 17.0, self.busy, false)
-                .on_hover_text("Stop")
-                .clicked()
-            {
-                self.worker.cancel();
-            }
-            quick_access_right = icon_button(ui, ICON_ARROW_DROP_DOWN, DARK, 14.0, false, false)
-                .rect
-                .right();
-            if super::custom_title_bar() {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = 0.0;
-                    if window_button(ui, ICON_CLOSE, true).clicked() {
-                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-                    }
-                    let max = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
-                    if window_button(
-                        ui,
-                        if max {
-                            ICON_FILTER_NONE
-                        } else {
-                            ICON_CROP_SQUARE
-                        },
-                        false,
-                    )
+        let quick_access_right = ui
+            .horizontal_centered(|ui| {
+                ui.add_space(1.0);
+                ui.spacing_mut().item_spacing.x = 2.5;
+                if icon_button(ui, ICON_DRAFT, DARK, 16.0, true, false)
+                    .on_hover_text("New model")
                     .clicked()
-                    {
-                        ui.ctx()
-                            .send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
-                    }
-                    if window_button(ui, ICON_REMOVE, false).clicked() {
-                        ui.ctx()
-                            .send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-                    }
-                });
-            }
-        });
+                {
+                    self.new_model();
+                }
+                if icon_button(ui, ICON_FOLDER_OPEN, ORANGE, 16.0, true, false)
+                    .on_hover_text("Open...")
+                    .clicked()
+                {
+                    self.request_open_dialog();
+                }
+                let can_save = self.active_doc().is_some();
+                if icon_button(ui, ICON_SAVE, BLUE, 16.0, can_save, false)
+                    .on_hover_text("Save")
+                    .clicked()
+                {
+                    self.save();
+                }
+                if icon_button(ui, ICON_UNDO, DARK, 16.0, self.can_undo(), false)
+                    .on_hover_text("Undo")
+                    .clicked()
+                {
+                    self.undo();
+                }
+                if icon_button(ui, ICON_REDO, DARK, 16.0, self.can_redo(), false)
+                    .on_hover_text("Redo")
+                    .clicked()
+                {
+                    self.redo();
+                }
+                if icon_button(ui, ICON_PLAY_CIRCLE, DARK, 17.0, !self.busy, false)
+                    .on_hover_text("Simulate (F9)")
+                    .clicked()
+                {
+                    self.simulate();
+                }
+                let stop = icon_button(ui, ICON_CANCEL, DARK, 17.0, self.busy, false)
+                    .on_hover_text("Stop");
+                if stop.clicked() {
+                    self.worker.cancel();
+                }
+                if super::custom_title_bar() {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        if window_button(ui, ICON_CLOSE, true).clicked() {
+                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                        let max = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
+                        if window_button(
+                            ui,
+                            if max {
+                                ICON_FILTER_NONE
+                            } else {
+                                ICON_CROP_SQUARE
+                            },
+                            false,
+                        )
+                        .clicked()
+                        {
+                            ui.ctx()
+                                .send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
+                        }
+                        if window_button(ui, ICON_REMOVE, false).clicked() {
+                            ui.ctx()
+                                .send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                        }
+                    });
+                }
+                stop.rect.right()
+            })
+            .inner;
         self.paint_window_title(ui, rect, quick_access_right, right);
     }
 
@@ -199,10 +211,6 @@ impl OmolaApp {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 ui.add_space(2.0);
-                for icon in [ICON_CLOSE, ICON_FILTER_NONE, ICON_REMOVE] {
-                    icon_button(ui, icon, DARK, 10.0, false, false);
-                }
-                ui.add_space(4.0);
                 let collapse_tip = if self.ribbon_collapsed {
                     "Expand the ribbon"
                 } else {
@@ -235,14 +243,6 @@ impl OmolaApp {
                 );
             });
         });
-    }
-
-    pub fn not_implemented(&mut self, what: &str) {
-        self.info(
-            crate::backend::LogTab::Simulation,
-            format!("{what}: not implemented yet in Omola."),
-        );
-        self.log_tab = crate::backend::LogTab::Simulation;
     }
 
     pub fn select_tab(&mut self, tab: RibbonTab) {
@@ -564,10 +564,16 @@ impl OmolaApp {
                     false,
                 );
                 self.recent_popup(&recent);
-                if big_button(ui, ICON_ARROW_BACK, BLUE, "Back", back, false).clicked() {
+                if big_button(ui, ICON_ARROW_BACK, BLUE, "Back", back, false)
+                    .on_disabled_hover_text("No earlier class in this session")
+                    .clicked()
+                {
                     self.go_back();
                 }
-                if big_button(ui, ICON_ARROW_FORWARD, BLUE, "Forward", forward, false).clicked() {
+                if big_button(ui, ICON_ARROW_FORWARD, BLUE, "Forward", forward, false)
+                    .on_disabled_hover_text("No later class in this session")
+                    .clicked()
+                {
                     self.go_forward();
                 }
             } else {
@@ -581,10 +587,14 @@ impl OmolaApp {
                         false,
                     );
                     self.recent_popup(&recent);
-                    if small_button(ui, ICON_ARROW_BACK, BLUE, "Back", back, false).clicked() {
+                    if small_button(ui, ICON_ARROW_BACK, BLUE, "Back", back, false)
+                        .on_disabled_hover_text("No earlier class in this session")
+                        .clicked()
+                    {
                         self.go_back();
                     }
                     if small_button(ui, ICON_ARROW_FORWARD, BLUE, "Forward", forward, false)
+                        .on_disabled_hover_text("No later class in this session")
                         .clicked()
                     {
                         self.go_forward();
@@ -659,6 +669,7 @@ impl OmolaApp {
             column(ui, |ui| {
                 if icon_button(ui, ICON_ZOOM_OUT_MAP, DARK, 16.0, diagram, false)
                     .on_hover_text("Fit diagram to window")
+                    .on_disabled_hover_text("Zoom works in the Diagram layer")
                     .clicked()
                 {
                     self.reset_diagram_view();
@@ -685,30 +696,47 @@ impl OmolaApp {
         }
         group(ui, "Draw", |ui| {
             column(ui, |ui| {
-                small_button(ui, ICON_HORIZONTAL_RULE, BLUE, "Line", false, false);
-                small_button(ui, ICON_RECTANGLE, BLUE, "Rectangle", false, false);
-                small_button(ui, ICON_CIRCLE, BLUE, "Ellipse", false, false);
+                for (icon, label) in [
+                    (ICON_HORIZONTAL_RULE, "Line"),
+                    (ICON_RECTANGLE, "Rectangle"),
+                    (ICON_CIRCLE, "Ellipse"),
+                ] {
+                    small_button(ui, icon, BLUE, label, false, false)
+                        .on_disabled_hover_text(DRAWING_NOT_AVAILABLE);
+                }
             });
             column(ui, |ui| {
-                small_button(ui, ICON_PENTAGON, BLUE, "Polygon", false, false);
-                small_button(ui, ICON_TITLE, BLUE, "Text", false, false);
-                small_button(ui, ICON_PHOTO, BLUE, "Bitmap", false, false);
+                for (icon, label) in [
+                    (ICON_PENTAGON, "Polygon"),
+                    (ICON_TITLE, "Text"),
+                    (ICON_PHOTO, "Bitmap"),
+                ] {
+                    small_button(ui, icon, BLUE, label, false, false)
+                        .on_disabled_hover_text(DRAWING_NOT_AVAILABLE);
+                }
             });
             column(ui, |ui| {
-                small_button(ui, ICON_BORDER_COLOR, BLUE, "▾", false, false);
-                small_button(ui, ICON_FORMAT_COLOR_FILL, BLUE, "▾", false, false);
-                small_button(ui, ICON_FORMAT_COLOR_TEXT, BLUE, "▾", false, false);
+                for icon in [
+                    ICON_BORDER_COLOR,
+                    ICON_FORMAT_COLOR_FILL,
+                    ICON_FORMAT_COLOR_TEXT,
+                ] {
+                    small_button(ui, icon, BLUE, "\u{25BE}", false, false)
+                        .on_disabled_hover_text(DRAWING_NOT_AVAILABLE);
+                }
             });
         });
         group(ui, "Tools", |ui| {
             column(ui, |ui| {
-                small_button(ui, ICON_CALL_SPLIT, DARK, "Split Model", false, false);
+                small_button(ui, ICON_CALL_SPLIT, DARK, "Split Model", false, false)
+                    .on_disabled_hover_text("Not available: splitting a class is not implemented");
                 if small_button(ui, ICON_CHECK_CIRCLE, GREEN, "Check  ▾", !self.busy, false)
                     .clicked()
                 {
                     self.check();
                 }
-                small_button(ui, ICON_GRID_ON, BLUE, "", false, true);
+                small_button(ui, ICON_GRID_ON, BLUE, "", false, true)
+                    .on_disabled_hover_text("Not available: the grid is always drawn");
             });
         });
         group(ui, "Find", |ui| {
@@ -723,17 +751,15 @@ impl OmolaApp {
                     "Find Connection",
                     false,
                     false,
-                );
-                small_button(ui, ICON_FILTER_ALT, DARK, "Diagram Filter", false, false);
+                )
+                .on_disabled_hover_text("Not available: searching connections is not implemented");
+                small_button(ui, ICON_FILTER_ALT, DARK, "Diagram Filter", false, false)
+                    .on_disabled_hover_text("Not available: the diagram filter is not implemented");
             });
-        });
-        group(ui, "", |ui| {
-            if big_button(ui, ICON_DATA_TABLE, BLUE, "Variables\n▾", false, false).clicked() {}
         });
     }
 
     fn documentation_ribbon(&mut self, ui: &mut egui::Ui) {
-        let read_only = self.active.as_ref().is_none_or(|c| !self.is_user_class(c));
         self.model_group(ui, true);
         group(ui, "Layer", |ui| {
             if big_button(
@@ -748,8 +774,6 @@ impl OmolaApp {
             {
                 self.doc_view = DocView::Formatted;
             }
-            big_button(ui, ICON_EDIT_DOCUMENT, BLUE, "Info\nEditor", false, false)
-                .on_disabled_hover_text("WYSIWYG documentation editing is not implemented yet");
             if big_button(
                 ui,
                 ICON_CODE,
@@ -762,98 +786,31 @@ impl OmolaApp {
             {
                 self.doc_view = DocView::InfoSource;
             }
-            column(ui, |ui| {
-                small_button(ui, ICON_EDIT_NOTE, BLUE, "Revision Editor", false, false);
-                if small_button(
-                    ui,
-                    ICON_SOURCE_NOTES,
-                    BLUE,
-                    "Revision Source",
-                    true,
-                    self.doc_view == DocView::RevisionSource,
-                )
-                .clicked()
-                {
-                    self.doc_view = DocView::RevisionSource;
-                }
-                small_button(ui, ICON_DATA_OBJECT, DARK, "Meta Data", false, false);
-            });
+            if big_button(
+                ui,
+                ICON_SOURCE_NOTES,
+                BLUE,
+                "Revision\nSource",
+                true,
+                self.doc_view == DocView::RevisionSource,
+            )
+            .clicked()
+            {
+                self.doc_view = DocView::RevisionSource;
+            }
         });
-        group(ui, "Language", |ui| {
-            column(ui, |ui| {
-                small_button(ui, ICON_CODE, BLUE, "HTML", true, true);
-                small_button(ui, ICON_MARKDOWN, DARK, "Markdown", !read_only, false);
-            });
-        });
-        clipboard_group(ui, false, false, false);
         group(ui, "Find", |ui| {
             if big_button(ui, ICON_SEARCH, DARK, "Find", true, self.find_open).clicked() {
                 self.find_open = !self.find_open;
             }
-            big_button(ui, ICON_FIND_REPLACE, DARK, "Replace", false, false);
-            big_button(ui, ICON_ARROW_RIGHT_ALT, DARK, "Go\nTo", false, false);
         });
-        group(ui, "Font", |ui| {
+        group(ui, "Editing", |ui| {
             column(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.add_enabled(
-                        false,
-                        egui::Button::new("Normal              ▾").min_size(Vec2::new(116.0, 18.0)),
-                    );
-                    small_button(ui, ICON_FORMAT_BOLD, DARK, "", false, false);
-                    small_button(ui, ICON_FORMAT_ITALIC, DARK, "", false, false);
-                });
-                ui.horizontal(|ui| {
-                    ui.add_enabled(
-                        false,
-                        egui::Button::new("(Default)           ▾").min_size(Vec2::new(116.0, 18.0)),
-                    );
-                    small_button(ui, ICON_FORMAT_UNDERLINED, DARK, "", false, false);
-                    small_button(ui, ICON_SUPERSCRIPT, DARK, "", false, false);
-                });
-                ui.horizontal(|ui| {
-                    ui.add_enabled(
-                        false,
-                        egui::Button::new("(Auto)              ▾").min_size(Vec2::new(116.0, 18.0)),
-                    );
-                    small_button(ui, ICON_FORMAT_COLOR_TEXT, DARK, "", false, false);
-                    small_button(ui, ICON_SUBSCRIPT, DARK, "", false, false);
-                });
-            });
-        });
-        group(ui, "Paragraph", |ui| {
-            column(ui, |ui| {
-                ui.horizontal(|ui| {
-                    small_button(ui, ICON_FORMAT_ALIGN_LEFT, DARK, "", false, false);
-                    small_button(ui, ICON_FORMAT_ALIGN_CENTER, DARK, "", false, false);
-                    small_button(ui, ICON_FORMAT_ALIGN_RIGHT, DARK, "", false, false);
-                });
-                small_button(
-                    ui,
-                    ICON_FORMAT_LIST_BULLETED,
-                    DARK,
-                    "Bullet List",
-                    false,
-                    false,
+                ui.label(RichText::new("Documentation is read-only").strong());
+                ui.label(
+                    RichText::new("Edit the class in the Text tab to change the annotation.")
+                        .color(theme::TEXT_WEAK),
                 );
-                small_button(
-                    ui,
-                    ICON_FORMAT_LIST_NUMBERED,
-                    DARK,
-                    "Numbered List",
-                    false,
-                    false,
-                );
-            });
-        });
-        group(ui, "Tools", |ui| {
-            column(ui, |ui| {
-                small_button(ui, ICON_LINK, DARK, "Link", false, false);
-                small_button(ui, ICON_IMAGE, DARK, "Image", false, false);
-                small_button(ui, ICON_FUNCTIONS, DARK, "Equation", false, false);
-            });
-            column(ui, |ui| {
-                small_button(ui, ICON_TABLE, DARK, "Table  ▾", false, false);
             });
         });
     }
@@ -904,7 +861,10 @@ impl OmolaApp {
             if big_button(ui, ICON_CHECK_CIRCLE, GREEN, "Check", !self.busy, false).clicked() {
                 self.check();
             }
-            if big_button(ui, ICON_SAVE, BLUE, "Save", editable, false).clicked() {
+            if big_button(ui, ICON_SAVE, BLUE, "Save", editable, false)
+                .on_disabled_hover_text("Open a user model to save it")
+                .clicked()
+            {
                 self.save();
             }
         });
@@ -928,17 +888,7 @@ impl OmolaApp {
             if run_script.clicked() {
                 self.request_run_script_dialog();
             }
-            place(ui, o, (8.0, 31.0, 100.0, 22.0), |ui| {
-                small_button(
-                    ui,
-                    ICON_DESCRIPTION,
-                    BLUE,
-                    "New Script  \u{25BE}",
-                    false,
-                    false,
-                )
-            });
-            let commands = place(ui, o, (8.0, 56.0, 100.0, 22.0), |ui| {
+            let commands = place(ui, o, (8.0, 31.0, 100.0, 22.0), |ui| {
                 small_button(ui, ICON_TERMINAL, BLUE, "Commands  \u{25BE}", true, false)
             });
             if commands.clicked() {
@@ -946,7 +896,7 @@ impl OmolaApp {
                 self.bottom_pane = crate::app::BottomPane::Commands;
             }
         });
-        fixed_group(ui, "Simulation", 382.0, |ui, o| {
+        fixed_group(ui, "Simulation", 316.0, |ui, o| {
             let translate = place(ui, o, (6.0, 6.0, 90.0, 22.0), |ui| {
                 small_button(ui, ICON_BUILD, BLUE, "Translate", !self.busy, false)
                     .on_hover_text("Translate (build the model without simulating)")
@@ -1041,13 +991,7 @@ impl OmolaApp {
                         }
                     })
             });
-            for (y, label) in [(6.0, "Continue  \u{25BE}"), (31.0, "Linearize")] {
-                place(ui, o, (292.0, y, 88.0, 22.0), |ui| {
-                    ui.add_enabled(false, egui::Button::new(label).frame(false))
-                        .on_disabled_hover_text("Not implemented yet in Omola")
-                });
-            }
-            let store = place(ui, o, (292.0, 56.0, 88.0, 22.0), |ui| {
+            let store = place(ui, o, (222.0, 56.0, 88.0, 22.0), |ui| {
                 ui.add_enabled(
                     self.can_store_setup(),
                     egui::Button::new("Save in Model").frame(false),
@@ -1111,28 +1055,19 @@ impl OmolaApp {
             }
         });
         fixed_group(ui, "Tools", 95.0, |ui, o| {
-            let icons = [
-                (7.0, 6.0, ICON_UPLOAD_FILE, BLUE, "Load Result"),
-                (47.0, 6.0, ICON_VIEW_IN_AR, GREEN, "Animation"),
-                (72.0, 6.0, ICON_WARNING, ORANGE, "Messages"),
-                (47.0, 31.0, ICON_MONITORING, DARK, "Visualize 3D"),
-                (7.0, 56.0, ICON_TABLE_CHART, BLUE, "New Table"),
-                (47.0, 56.0, ICON_DEPLOYED_CODE, BLUE, "3D View"),
-            ];
-            for (x, y, icon, color, tip) in icons {
-                let r = place(ui, o, (x, y, 22.0, 22.0), |ui| {
-                    icon_button(ui, icon, color, 17.0, true, false).on_hover_text(tip)
-                });
-                if r.clicked() {
-                    match tip {
-                        "Load Result" => self.request_load_result_dialog(),
-                        "Messages" => {
-                            self.bottom_pane = crate::app::BottomPane::Logs;
-                            self.docks.bottom = true;
-                        }
-                        _ => self.not_implemented(tip),
-                    }
-                }
+            let load_result = place(ui, o, (7.0, 6.0, 22.0, 22.0), |ui| {
+                icon_button(ui, ICON_UPLOAD_FILE, BLUE, 17.0, true, false)
+                    .on_hover_text("Load Result")
+            });
+            if load_result.clicked() {
+                self.request_load_result_dialog();
+            }
+            let messages = place(ui, o, (47.0, 6.0, 22.0, 22.0), |ui| {
+                icon_button(ui, ICON_WARNING, ORANGE, 17.0, true, false).on_hover_text("Messages")
+            });
+            if messages.clicked() {
+                self.bottom_pane = crate::app::BottomPane::Logs;
+                self.docks.bottom = true;
             }
             let new_plot = place(ui, o, (7.0, 31.0, 22.0, 22.0), |ui| {
                 icon_button(ui, ICON_SHOW_CHART, BLUE, 17.0, true, false)
@@ -1141,53 +1076,6 @@ impl OmolaApp {
             if new_plot.clicked() {
                 self.new_diagram();
             }
-            place(ui, o, (31.0, 31.0, 12.0, 22.0), |ui| {
-                icon_button(ui, ICON_ARROW_DROP_DOWN, DARK, 10.0, true, false)
-            });
-        });
-        fixed_group(ui, "Animation Control", 294.0, |ui, o| {
-            let icons = [
-                (8.0, 6.0, ICON_PLAY_ARROW),
-                (33.0, 6.0, ICON_FAST_REWIND),
-                (58.0, 6.0, ICON_SKIP_NEXT),
-                (8.0, 31.0, ICON_PAUSE),
-                (33.0, 31.0, ICON_FAST_FORWARD),
-                (8.0, 56.0, ICON_SKIP_PREVIOUS),
-                (33.0, 56.0, ICON_FIRST_PAGE),
-            ];
-            for (x, y, icon) in icons {
-                let r = place(ui, o, (x, y, 22.0, 22.0), |ui| {
-                    icon_button(ui, icon, BLUE, 17.0, true, false)
-                });
-                if r.clicked() {
-                    self.not_implemented("Animation");
-                }
-            }
-            place(ui, o, (85.0, 4.0, 60.0, 18.0), |ui| ui.label("Time:"));
-            field_frame(
-                ui,
-                egui::Rect::from_min_size(o + Vec2::new(88.0, 23.0), Vec2::new(127.0, 21.0)),
-            );
-            place(ui, o, (92.0, 23.0, 121.0, 21.0), |ui| ui.label("0"));
-            place(ui, o, (224.0, 23.0, 12.0, 21.0), |ui| ui.label("s"));
-            let track = egui::Rect::from_min_size(o + Vec2::new(85.0, 52.0), Vec2::new(153.0, 4.0));
-            ui.painter().rect(
-                track,
-                0.0,
-                Color32::from_rgb(0xE7, 0xEA, 0xEA),
-                egui::Stroke::new(1.0, Color32::from_rgb(0xD6, 0xD6, 0xD6)),
-                egui::StrokeKind::Inside,
-            );
-            let thumb = egui::Rect::from_min_size(o + Vec2::new(85.0, 45.0), Vec2::new(8.0, 18.0));
-            ui.painter().rect_filled(thumb, 0.0, theme::FILE_BLUE);
-            place(ui, o, (240.0, 4.0, 50.0, 18.0), |ui| ui.label("Speed:"));
-            field_frame(
-                ui,
-                egui::Rect::from_min_size(o + Vec2::new(239.0, 23.0), Vec2::new(47.0, 21.0)),
-            );
-            place(ui, o, (243.0, 23.0, 43.0, 21.0), |ui| {
-                ui.label("   1    \u{2304}")
-            });
         });
     }
 
@@ -1295,19 +1183,36 @@ fn clipboard_group(
     let mut command = None;
     let mut delete = false;
     group(ui, "Clipboard", |ui| {
-        if big_button(ui, ICON_CONTENT_CUT, DARK, "Cut", editable, false).clicked() {
+        if big_button(ui, ICON_CONTENT_CUT, DARK, "Cut", editable, false)
+            .on_disabled_hover_text("Cut works in a user model")
+            .clicked()
+        {
             command = Some(EditorCommand::Cut);
         }
-        if big_button(ui, ICON_CONTENT_COPY, DARK, "Copy", copy_enabled, false).clicked() {
+        if big_button(ui, ICON_CONTENT_COPY, DARK, "Copy", copy_enabled, false)
+            .on_disabled_hover_text("Open the Text tab of a class first")
+            .clicked()
+        {
             command = Some(EditorCommand::Copy);
         }
-        if big_button(ui, ICON_CONTENT_PASTE, DARK, "Paste", editable, false).clicked() {
+        if big_button(ui, ICON_CONTENT_PASTE, DARK, "Paste", editable, false)
+            .on_disabled_hover_text("Paste works in a user model")
+            .clicked()
+        {
             command = Some(EditorCommand::Paste);
         }
         column(ui, |ui| {
-            delete = small_button(ui, ICON_CLOSE, RED, "Delete", delete_enabled, false).clicked();
-            small_button(ui, ICON_FILE_COPY, DARK, "Duplicate", false, false);
-            small_button(ui, ICON_SELECT_ALL, DARK, "Select All", false, false);
+            delete = small_button(ui, ICON_CLOSE, RED, "Delete", delete_enabled, false)
+                .on_disabled_hover_text("Select a component of a user model first")
+                .clicked();
+            small_button(ui, ICON_FILE_COPY, DARK, "Duplicate", false, false)
+                .on_disabled_hover_text(
+                    "Not available: duplicating a component is not implemented",
+                );
+            small_button(ui, ICON_SELECT_ALL, DARK, "Select All", false, false)
+                .on_disabled_hover_text(
+                    "Not available: selecting every component is not implemented",
+                );
         });
     });
     (command, delete)
@@ -1440,5 +1345,18 @@ mod tests {
         let layout = title_layout(area(100.0), 140.0);
         assert!(layout.truncated);
         assert!((layout.x - 100.0).abs() < 0.01);
+    }
+
+    /// G52: a button that only logs "not implemented" tells the user nothing.
+    /// The source is checked directly because the ribbon cannot be enumerated
+    /// headless. The needle is split so that this test does not match itself.
+    #[test]
+    fn ribbon_has_no_not_implemented_buttons() {
+        let needle = concat!("not_", "implemented(");
+        assert!(
+            !include_str!("chrome.rs").contains(needle),
+            "the ribbon must not keep buttons that only log `{needle}`; remove the button \
+             or wire it up"
+        );
     }
 }
