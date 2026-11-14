@@ -13,6 +13,8 @@ impl OmolaApp {
     /// Add a result. `sweep` is set for a run of a parameter sweep (G49): the label
     /// suffix, and whether the curves of the previous run stay next to the new ones.
     /// Sweep runs are kept so that the whole family of curves survives `keep_results`.
+    /// A sweep run also plots when no curve of its class is shown yet, even next to
+    /// another model's curves (G53).
     pub fn add_run_tagged(&mut self, outcome: SimulationOutcome, sweep: Option<(String, bool)>) {
         let keep_previous_curves = sweep.as_ref().is_some_and(|(_, keep)| *keep);
         let id = self.next_run_id;
@@ -39,9 +41,17 @@ impl OmolaApp {
             .map(|r| r.id)
             .max();
         let any_curves = self.diagrams.iter().any(|d| !d.signals.is_empty());
+        // A sweep must become visible even next to another model's curves: when no
+        // curve of the same class is plotted, its run plots the first state variable.
+        let same_class_plotted = self.diagrams.iter().flat_map(|d| &d.signals).any(|s| {
+            self.runs
+                .iter()
+                .any(|r| r.id == s.run_id && r.outcome.class == outcome.class)
+        });
+        let sweep_needs_plot = sweep.is_some() && !same_class_plotted;
         // Only the very first result is plotted automatically, and only into the active
         // diagram: the first state variable.
-        let autoplot = if any_curves {
+        let autoplot = if any_curves && !sweep_needs_plot {
             None
         } else {
             outcome
@@ -54,7 +64,10 @@ impl OmolaApp {
                 })
                 .map(|v| v.name.clone())
         };
-        for diagram in &mut self.diagrams {
+        let active = self
+            .active_diagram
+            .min(self.diagrams.len().saturating_sub(1));
+        for (index, diagram) in self.diagrams.iter_mut().enumerate() {
             let mut replot: Vec<PlotSignal> = diagram
                 .signals
                 .iter()
@@ -64,7 +77,9 @@ impl OmolaApp {
                     variable: s.variable.clone(),
                 })
                 .collect();
-            if replot.is_empty() {
+            // Next to another model's curves, only the active diagram receives the
+            // sweep's curve; the other diagrams keep showing their own model.
+            if replot.is_empty() && index == active {
                 if let Some(variable) = &autoplot {
                     replot.push(PlotSignal {
                         run_id: id,

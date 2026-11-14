@@ -233,6 +233,7 @@ pub struct ClassEntry {
 /// Comments and string literals are skipped. `end X;` pops the nesting stack.
 pub fn scan_classes(text: &str) -> Vec<ClassEntry> {
     let tokens = tokenize(text);
+    let within = within_prefix(&tokens);
     let mut stack: Vec<String> = Vec::new();
     let mut out = Vec::new();
     let mut i = 0;
@@ -273,7 +274,8 @@ pub fn scan_classes(text: &str) -> Vec<ClassEntry> {
                 .get(j + 1)
                 .and_then(|t| t.strip_prefix('"'))
                 .map(|t| t.trim_end_matches('"').to_owned());
-            let mut qualified = stack.clone();
+            let mut qualified = within.clone();
+            qualified.extend(stack.iter().cloned());
             qualified.push(name.clone());
             out.push(ClassEntry {
                 kind,
@@ -295,6 +297,8 @@ pub fn scan_classes(text: &str) -> Vec<ClassEntry> {
 /// Byte range of a class definition, including its declaration and matching `end`.
 pub fn class_range(text: &str, qualified: &str) -> Option<std::ops::Range<usize>> {
     let toks = tokenize_spanned(text);
+    let tokens: Vec<String> = toks.iter().map(|t| t.0.clone()).collect();
+    let within = within_prefix(&tokens);
     let mut stack: Vec<(String, usize, String)> = Vec::new();
     let mut found = None;
     let mut i = 0;
@@ -325,13 +329,30 @@ pub fn class_range(text: &str, qualified: &str) -> Option<std::ops::Range<usize>
             }
             if let Some((name, _, _)) = toks.get(j) {
                 if is_identifier(name) {
-                    let q = stack
+                    let q = within
                         .iter()
-                        .map(|x| x.0.as_str())
+                        .map(String::as_str)
+                        .chain(stack.iter().map(|x| x.0.as_str()))
                         .chain(std::iter::once(name.as_str()))
                         .collect::<Vec<_>>()
                         .join(".");
-                    let line_start = text[..toks[i].1].rfind('\n').map_or(0, |x| x + 1);
+                    let mut first = i;
+                    while first > 0
+                        && matches!(
+                            toks[first - 1].0.as_str(),
+                            "partial" | "encapsulated" | "expandable" | "pure" | "impure"
+                        )
+                        && text[toks[first - 1].2..toks[first].1].trim().is_empty()
+                    {
+                        first -= 1;
+                    }
+                    let declaration_start = toks[first].1;
+                    let line_start = text[..declaration_start].rfind('\n').map_or(0, |x| x + 1);
+                    let line_start = if text[line_start..declaration_start].trim().is_empty() {
+                        line_start
+                    } else {
+                        declaration_start
+                    };
                     let short = toks.get(j + 1).is_some_and(|x| x.0 == "=");
                     if short {
                         if q == qualified {
@@ -347,6 +368,57 @@ pub fn class_range(text: &str, qualified: &str) -> Option<std::ops::Range<usize>
         i += 1;
     }
     found
+}
+
+/// Parse the optional leading `within A.B;` of a stored definition.
+fn within_prefix(tokens: &[String]) -> Vec<String> {
+    if tokens.first().map(String::as_str) != Some("within") {
+        return Vec::new();
+    }
+    let mut names = Vec::new();
+    let mut i = 1;
+    while let Some(token) = tokens.get(i) {
+        if token == ";" {
+            return names;
+        }
+        if !is_identifier(token) {
+            return Vec::new();
+        }
+        names.push(token.clone());
+        i += 1;
+        match tokens.get(i).map(String::as_str) {
+            Some(";") => return names,
+            Some(".") => i += 1,
+            _ => return Vec::new(),
+        }
+    }
+    Vec::new()
+}
+
+#[cfg(test)]
+#[test]
+fn within_names_are_used_in_outline_and_edit_ranges() {
+    let text = "within P.Sub;\nmodel M\n Real x;\nend M;\n";
+    let classes = scan_classes(text);
+    assert_eq!(classes[0].qualified_name, "P.Sub.M");
+    let range = class_range(text, "P.Sub.M").unwrap();
+    assert!(text[range].starts_with("model M"));
+    assert_eq!(
+        scan_classes("within; model Top end Top;")[0].qualified_name,
+        "Top"
+    );
+    let same_line = "within P; model M end M;";
+    let range = class_range(same_line, "P.M").unwrap();
+    assert_eq!(&same_line[range], "model M end M;");
+    for text in ["partial model M end M;", "within P; partial model M end M;"] {
+        let name = if text.starts_with("within") {
+            "P.M"
+        } else {
+            "M"
+        };
+        let replaced = replace_class_text(text, name, "partial model M end M;").unwrap();
+        assert_eq!(replaced, text);
+    }
 }
 
 /// Replace exactly one definition returned by OMC `list()`, preserving its original indentation.

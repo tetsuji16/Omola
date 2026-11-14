@@ -3,6 +3,7 @@
 use super::widgets::{dock_header, icon_button, paint_icon};
 use crate::app::{LibraryState, OmolaApp, PlotSignal};
 use crate::instance::ComponentNode;
+use crate::library;
 use crate::theme;
 use egui::{Align2, Color32, FontId, RichText, Sense, Stroke, Vec2};
 use egui_material_icons::icons::*;
@@ -413,7 +414,11 @@ impl OmolaApp {
         let user_roots: Vec<String> = self
             .user_classes
             .iter()
-            .filter(|c| c.depth == 0)
+            .filter(|c| {
+                c.depth == 0
+                    && !library::parent_name(&c.qualified_name)
+                        .is_some_and(|parent| self.is_user_class(parent))
+            })
             .map(|c| c.qualified_name.clone())
             .collect();
         for lib in &self.libraries {

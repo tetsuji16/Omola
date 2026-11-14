@@ -394,20 +394,21 @@ impl OmolaApp {
         }
     }
 
-    /// Copy the result file of run `run_id` to `dest` (G14).
+    /// Copy the result file of run `run_id` to `dest` on the worker thread (G14, G53).
     pub fn save_result_as(&mut self, run_id: u64, dest: &std::path::Path) {
         let Some(source) = self.run(run_id).map(|r| r.outcome.result_file.clone()) else {
             return self.error(LogTab::Simulation, "The result is no longer open.".into());
         };
-        match crate::backend::copy_result_file(&source, dest, true) {
-            Ok(()) => self.info(
+        if self.worker.try_submit(Job::CopyResult {
+            source,
+            dest: dest.to_path_buf(),
+        }) {
+            self.pending_result_copies += 1;
+        } else {
+            self.error(
                 LogTab::Simulation,
-                format!("Saved the result to {}", dest.display()),
-            ),
-            Err(message) => self.error(
-                LogTab::Simulation,
-                format!("Could not save the result: {message}"),
-            ),
+                "Could not queue the result copy: worker stopped.".into(),
+            );
         }
     }
 
@@ -458,6 +459,19 @@ impl OmolaApp {
     /// running: closing now would drop the edit without a word. Only the first request
     /// is held back; closing again exits anyway (G53).
     pub fn hold_close_for_edit(&mut self) -> bool {
+        if self.pending_result_copies > 0 && !self.result_copy_close_warned {
+            self.result_copy_close_warned = true;
+            self.edit_close_warned = true;
+            self.warn(
+                LogTab::Simulation,
+                "A result copy is still pending; close again to exit without waiting for it."
+                    .into(),
+            );
+            self.log_tab = LogTab::Simulation;
+            self.bottom_pane = BottomPane::Logs;
+            self.docks.bottom = true;
+            return true;
+        }
         if self.pending_edit.is_none() || self.exit_confirmed || self.edit_close_warned {
             return false;
         }

@@ -35,6 +35,11 @@ impl OmolaApp {
             }
         }
         self.active = Some(class.to_owned());
+        if let Some(Loadable::Ready(page)) = self.docs.get(class) {
+            let restriction = page.doc.restriction.clone();
+            let experiment = page.doc.experiment;
+            self.apply_experiment(class, &restriction, experiment);
+        }
         // Expand the package browser down to the class.
         let mut prefix = String::new();
         for part in class.split('.') {
@@ -61,7 +66,11 @@ impl OmolaApp {
     pub fn close_tab(&mut self, class: &str) {
         self.model_tabs.retain(|t| t != class);
         if self.active.as_deref() == Some(class) {
-            self.active = self.model_tabs.last().cloned();
+            if let Some(next) = self.model_tabs.last().cloned() {
+                self.navigate(&next);
+            } else {
+                self.active = None;
+            }
         }
     }
 

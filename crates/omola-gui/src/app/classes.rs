@@ -64,6 +64,9 @@ impl OmolaApp {
     }
 
     /// Context for OMC queries about `class`: loaded libraries plus the user buffer if needed.
+    ///
+    /// Other open buffers remain separate Modelica stored definitions, so each retains
+    /// its own `within` clause and an unfinished buffer cannot corrupt the target file.
     pub fn context_for(&self, class: &str) -> ClassContext {
         let top = class.split('.').next().unwrap_or(class);
         let user = self.is_user_class(class);
@@ -76,11 +79,22 @@ impl OmolaApp {
                 libraries.push(LibrarySpec::new(top, None));
             }
         }
+        let own = self.doc_of(class).filter(|_| user);
+        let user_source = own.map(|i| self.documents[i].text.clone());
+        let other_sources = if user {
+            self.documents
+                .iter()
+                .enumerate()
+                .filter(|(i, doc)| Some(*i) != own && !doc.text.trim().is_empty())
+                .map(|(_, doc)| doc.text.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
         ClassContext {
             libraries,
-            user_source: user
-                .then(|| self.doc_of(class).map(|i| self.documents[i].text.clone()))
-                .flatten(),
+            user_source,
+            other_sources,
         }
     }
 

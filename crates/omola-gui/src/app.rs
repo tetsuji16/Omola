@@ -468,6 +468,9 @@ pub struct OmolaApp {
     pub exit_confirmed: bool,
     pub frame_stats: crate::perf::FrameStats,
     pub pending_edit: Option<String>,
+    /// Result copies still queued or running on the worker.
+    pub pending_result_copies: usize,
+    pub result_copy_close_warned: bool,
     /// Text of the document when the running edit was submitted: a result for an
     /// older text is not applied (G53).
     pub pending_edit_text: Option<String>,
@@ -627,6 +630,8 @@ impl OmolaApp {
             exit_confirmed: false,
             frame_stats: crate::perf::FrameStats::disabled(),
             pending_edit: None,
+            pending_result_copies: 0,
+            result_copy_close_warned: false,
             pending_edit_text: None,
             stale_save_as: false,
             edit_close_warned: false,
@@ -702,16 +707,8 @@ impl OmolaApp {
                         }
                     }
                 }
-                Event::ClassDoc(class, result) => {
-                    let page = match result {
-                        Ok(doc) => {
-                            self.apply_experiment(&class, &doc.restriction, doc.experiment);
-                            let info = html::parse(&doc.info_html);
-                            Loadable::Ready(DocPage { doc, info })
-                        }
-                        Err(message) => Loadable::Failed(message),
-                    };
-                    self.docs.insert(class, page);
+                Event::ClassDoc(class, source, result) => {
+                    self.accept_class_doc(class, source, result)
                 }
                 Event::ClassText(class, result) => {
                     self.library_text_layouts.remove(&class);
@@ -795,6 +792,22 @@ impl OmolaApp {
                     self.sweep_run_finished();
                 }
                 Event::SimulationFailed(class) => self.sweep_run_failed(&class),
+                Event::ResultCopied { dest, result } => {
+                    self.pending_result_copies = self.pending_result_copies.saturating_sub(1);
+                    if self.pending_result_copies == 0 {
+                        self.result_copy_close_warned = false;
+                    }
+                    match result {
+                        Ok(()) => self.info(
+                            LogTab::Simulation,
+                            format!("Saved the result to {}", dest.display()),
+                        ),
+                        Err(message) => self.error(
+                            LogTab::Simulation,
+                            format!("Could not save the result: {message}"),
+                        ),
+                    }
+                }
                 Event::LibrariesInstalled(ok) => {
                     if ok {
                         self.docs.clear();
@@ -873,6 +886,31 @@ impl eframe::App for OmolaApp {
 }
 
 impl OmolaApp {
+    fn accept_class_doc(
+        &mut self,
+        class: String,
+        source: Option<String>,
+        result: Result<library::ClassDoc, String>,
+    ) {
+        if !matches!(self.docs.get(&class), Some(Loadable::Loading))
+            || (source.is_none() && self.is_user_class(&class))
+            || source.as_ref().is_some_and(|text| {
+                self.doc_of(&class)
+                    .is_none_or(|i| self.documents[i].text != *text)
+            })
+        {
+            return;
+        }
+        let page = match result {
+            Ok(doc) => {
+                self.apply_experiment(&class, &doc.restriction, doc.experiment);
+                let info = html::parse(&doc.info_html);
+                Loadable::Ready(DocPage { doc, info })
+            }
+            Err(message) => Loadable::Failed(message),
+        };
+        self.docs.insert(class, page);
+    }
     fn handle_shortcuts(&mut self, ui: &egui::Ui) {
         use egui::{Key, KeyboardShortcut, Modifiers};
         let save = KeyboardShortcut::new(Modifiers::COMMAND, Key::S);

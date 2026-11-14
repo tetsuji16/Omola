@@ -229,7 +229,7 @@ pub fn write_trajectory(result: &TrajectoryResult) -> Result<Vec<u8>, MatError> 
         }
     }
     write_header(&mut out, 0, signals.len(), result.time.len(), "data_2");
-    for k in 0..result.time.len() {
+    for (k, _) in result.time.iter().enumerate() {
         for &s in &signals {
             out.extend_from_slice(&result.values[s][k].to_le_bytes());
         }

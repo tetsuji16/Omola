@@ -290,6 +290,24 @@ impl Omc {
         class: &str,
         config: SimulationConfig<'_>,
     ) -> Result<CommandResult, BackendError> {
+        self.simulate_class_with_sources(
+            &source
+                .into_iter()
+                .map(Path::to_path_buf)
+                .collect::<Vec<_>>(),
+            class,
+            config,
+        )
+    }
+
+    /// Simulate a user class after loading auxiliary user files separately. The last
+    /// file must define `class`; earlier files are dependency documents.
+    pub fn simulate_class_with_sources(
+        &self,
+        sources: &[PathBuf],
+        class: &str,
+        config: SimulationConfig<'_>,
+    ) -> Result<CommandResult, BackendError> {
         let SimulationConfig {
             stop_time,
             result,
@@ -300,8 +318,11 @@ impl Omc {
         } = config;
         validate_class(class)?;
         validate_parameter_overrides(parameters)?;
-        let source = source.map(readable_model).transpose()?;
-        if source.is_none() && libraries.is_empty() {
+        let sources = sources
+            .iter()
+            .map(|path| readable_model(path))
+            .collect::<Result<Vec<_>, _>>()?;
+        if sources.is_empty() && libraries.is_empty() {
             return Err(BackendError::InvalidInput(
                 "a model file or at least one library is required to simulate".into(),
             ));
@@ -352,12 +373,7 @@ impl Omc {
                     .join(",")
             )
         };
-        if let Some(source) = &source {
-            script.push_str(&format!(
-                "loaded := loadFile(\"{}\");\nif not loaded then print(getErrorString()); end if;\n",
-                modelica_string(&source.to_string_lossy())
-            ));
-        }
+        script.push_str(&user_sources_script(&sources));
         script.push_str(&simulate_call(class, &output_prefix, &config, &simflags)?);
         let (mut result, workspace, _cleanup) = self.run_script_in_temp(&script)?;
         let generated = match find_result_file(&result.output) {
@@ -850,6 +866,28 @@ fn readable_model(path: &Path) -> Result<PathBuf, BackendError> {
     }
     Ok(canonical)
 }
+
+fn user_sources_script(sources: &[PathBuf]) -> String {
+    let mut script = String::new();
+    for index in 0..sources.len() {
+        script.push_str(&format!("omolaSourceLoaded{index} := false;\n"));
+    }
+    script.push_str("omolaSourceProgress := true;\nwhile omolaSourceProgress loop\nomolaSourceProgress := false;\n");
+    for (index, source) in sources.iter().enumerate() {
+        script.push_str(&format!(
+            "if not omolaSourceLoaded{index} then\nclearMessages();\nomolaSourceLoaded{index} := loadFile(\"{}\");\nif omolaSourceLoaded{index} then omolaSourceProgress := true; else clearMessages(); end if;\nend if;\n",
+            modelica_string(&source.to_string_lossy())
+        ));
+    }
+    script.push_str("end while;\n");
+    if let Some(primary) = sources.len().checked_sub(1) {
+        script.push_str(&format!(
+            "if not omolaSourceLoaded{primary} then\nclearMessages();\nloaded := loadFile(\"{}\");\nif not loaded then print(getErrorString()); exit(1); end if;\nend if;\n",
+            modelica_string(&sources[primary].to_string_lossy())
+        ));
+    }
+    script
+}
 /// Validate a qualified Modelica class name (`A.B.C`) before embedding it in a script.
 pub fn validate_class_name(class: &str) -> Result<(), BackendError> {
     validate_class(class)
@@ -1095,6 +1133,24 @@ fn find_on_path(name: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn source_loading_retries_only_unresolved_files_and_reports_primary_failure() {
+        let script = user_sources_script(&[
+            PathBuf::from("/tmp/P/Helper.mo"),
+            PathBuf::from("/tmp/P.mo"),
+            PathBuf::from("/tmp/P/Main.mo"),
+        ]);
+        assert_eq!(script.matches("loadFile(\"/tmp/P/Helper.mo\")").count(), 1);
+        assert_eq!(script.matches("loadFile(\"/tmp/P.mo\")").count(), 1);
+        assert_eq!(script.matches("loadFile(\"/tmp/P/Main.mo\")").count(), 2);
+        assert!(script.contains("while omolaSourceProgress loop"));
+        assert!(script.contains("if not omolaSourceLoaded0 then"));
+        assert!(script.contains("if not omolaSourceLoaded1 then"));
+        assert!(script.contains("if not omolaSourceLoaded2 then\nclearMessages();\nloaded := loadFile(\"/tmp/P/Main.mo\")"));
+        assert!(script
+            .ends_with("if not loaded then print(getErrorString()); exit(1); end if;\nend if;\n"));
+    }
 
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 

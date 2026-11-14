@@ -366,6 +366,15 @@ fn first_run_autoplots_and_old_runs_are_dropped() {
 }
 
 #[test]
+fn first_run_autoplots_only_in_active_diagram() {
+    let mut app = app();
+    app.new_diagram();
+    app.add_run(outcome("A"));
+    assert!(app.diagrams[0].signals.is_empty());
+    assert_eq!(app.diagrams[1].signals.len(), 1);
+}
+
+#[test]
 fn a_new_diagram_takes_its_own_curves_and_the_last_one_stays() {
     let mut app = app();
     app.add_run(outcome("BouncingBall"));
@@ -416,6 +425,89 @@ fn a_second_run_rebinds_the_curves_of_every_diagram() {
 }
 
 #[test]
+fn the_first_sweep_run_plots_next_to_another_models_curves() {
+    let mut app = app();
+    app.add_run(outcome("Other"));
+    assert_eq!(app.active_signals().len(), 1, "the first result plots");
+    app.add_run_tagged(outcome("A"), Some((" [e=0]".into(), false)));
+    assert_eq!(
+        app.active_signals(),
+        [
+            PlotSignal {
+                run_id: 1,
+                variable: "height".into()
+            },
+            PlotSignal {
+                run_id: 2,
+                variable: "height".into()
+            },
+        ],
+        "the first sweep run joins the other model's curve"
+    );
+    app.add_run_tagged(outcome("A"), Some((" [e=1]".into(), true)));
+    let ids: Vec<u64> = app.active_signals().iter().map(|s| s.run_id).collect();
+    assert_eq!(ids, vec![1, 2, 3]);
+}
+
+#[test]
+fn a_sweep_plots_into_the_active_diagram_only() {
+    let mut app = app();
+    app.add_run(outcome("Other"));
+    app.new_diagram();
+    app.add_run_tagged(outcome("A"), Some((" [e=0]".into(), false)));
+    assert_eq!(
+        app.diagrams[0].signals,
+        [PlotSignal {
+            run_id: 1,
+            variable: "height".into()
+        }],
+        "the other model's diagram is untouched"
+    );
+    assert_eq!(
+        app.diagrams[1].signals,
+        [PlotSignal {
+            run_id: 2,
+            variable: "height".into()
+        }]
+    );
+}
+
+#[test]
+fn a_sweep_plots_when_its_previous_run_is_not_plotted() {
+    let mut app = app();
+    app.add_run(outcome("Other"));
+    app.add_run(outcome("A"));
+    app.add_run_tagged(outcome("A"), Some((" [e=0]".into(), false)));
+    assert_eq!(
+        app.active_signals(),
+        [
+            PlotSignal {
+                run_id: 1,
+                variable: "height".into()
+            },
+            PlotSignal {
+                run_id: 3,
+                variable: "height".into()
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_plain_run_does_not_autoplot_next_to_other_curves() {
+    let mut app = app();
+    app.add_run(outcome("Other"));
+    app.add_run(outcome("A"));
+    assert_eq!(
+        app.active_signals(),
+        [PlotSignal {
+            run_id: 1,
+            variable: "height".into()
+        }]
+    );
+}
+
+#[test]
 fn the_csv_carries_the_curves_of_the_newest_result_only() {
     let mut app = app();
     app.add_run(outcome("BouncingBall"));
@@ -453,6 +545,7 @@ fn experiment() -> library::Experiment {
 #[test]
 fn experiment_annotation_seeds_the_setup_once() {
     let mut app = app();
+    app.active = Some("Annotated".into());
     app.apply_experiment("Annotated", "model", Some(experiment()));
     assert_eq!(app.setup.start_time, 0.5);
     assert_eq!(app.setup.stop_time, 5.0);
@@ -461,6 +554,7 @@ fn experiment_annotation_seeds_the_setup_once() {
     assert_eq!(app.setup_from.as_deref(), Some("Annotated"));
 
     // Another model's annotation replaces the seeded values ...
+    app.active = Some("Other".into());
     app.apply_experiment(
         "Other",
         "model",
@@ -472,8 +566,10 @@ fn experiment_annotation_seeds_the_setup_once() {
     assert_eq!(app.setup.stop_time, 2.0);
 
     // ... but a package never does, and the same class is not applied twice.
+    app.active = Some("Modelica.Blocks".into());
     app.apply_experiment("Modelica.Blocks", "package", Some(experiment()));
     assert_eq!(app.setup.stop_time, 2.0);
+    app.active = Some("Other".into());
     app.apply_experiment("Other", "model", Some(experiment()));
     assert_eq!(app.setup.stop_time, 2.0);
 }
@@ -481,11 +577,87 @@ fn experiment_annotation_seeds_the_setup_once() {
 #[test]
 fn manual_setup_edits_survive_a_later_annotation() {
     let mut app = app();
+    app.active = Some("Annotated".into());
     app.setup.stop_time = 7.0;
     app.setup_edited_by_user = true;
     app.apply_experiment("Annotated", "model", Some(experiment()));
     assert_eq!(app.setup.stop_time, 7.0);
     assert!(app.setup_from.is_none());
+}
+
+#[test]
+fn a_late_annotation_of_a_class_the_user_left_is_ignored() {
+    let mut app = app();
+    app.active = Some("Current".into());
+    app.apply_experiment("Current", "model", Some(experiment()));
+    assert_eq!(app.setup.stop_time, 5.0);
+    app.active = Some("Next".into());
+    app.apply_experiment(
+        "Left",
+        "model",
+        Some(library::Experiment {
+            stop_time: 99.0,
+            ..experiment()
+        }),
+    );
+    assert_eq!(app.setup.stop_time, 5.0);
+    assert_eq!(app.setup_from.as_deref(), Some("Current"));
+}
+
+#[test]
+fn cached_experiment_is_applied_when_class_is_reopened() {
+    let mut app = app();
+    app.docs.insert(
+        "Left".into(),
+        Loadable::Ready(DocPage {
+            doc: library::ClassDoc {
+                class: "Left".into(),
+                restriction: "model".into(),
+                comment: String::new(),
+                info_html: String::new(),
+                revisions_html: String::new(),
+                roots: BTreeMap::new(),
+                experiment: Some(experiment()),
+            },
+            info: Vec::new(),
+        }),
+    );
+    app.open_class("Left");
+    assert_eq!(app.setup.stop_time, 5.0);
+    assert_eq!(app.setup_from.as_deref(), Some("Left"));
+}
+
+#[test]
+fn stale_documentation_does_not_replace_a_new_request() {
+    let mut app = app();
+    app.documents
+        .push(Document::new_untitled("model M Real x; end M;"));
+    app.refresh_outline();
+    app.docs.insert("M".into(), Loadable::Loading);
+    app.accept_class_doc(
+        "M".into(),
+        Some("model M end M;".into()),
+        Err("stale".into()),
+    );
+    assert!(matches!(app.docs.get("M"), Some(Loadable::Loading)));
+    app.accept_class_doc(
+        "M".into(),
+        Some("model M Real x; end M;".into()),
+        Err("current".into()),
+    );
+    assert!(matches!(app.docs.get("M"), Some(Loadable::Failed(message)) if message == "current"));
+}
+
+#[test]
+fn pending_result_copy_holds_window_close() {
+    let mut app = app();
+    app.pending_result_copies = 1;
+    app.pending_edit = Some("M".into());
+    assert!(app.hold_close_for_edit());
+    assert!(!app.hold_close_for_edit());
+    app.pending_result_copies = 0;
+    app.pending_edit = None;
+    assert!(!app.hold_close_for_edit());
 }
 
 #[test]
@@ -502,6 +674,23 @@ fn edited_values_override_setup() {
         vec![
             ("m".to_owned(), "3".to_owned()),
             ("L".to_owned(), "2".to_owned())
+        ]
+    );
+}
+
+#[test]
+fn an_invalid_edit_does_not_drop_the_setup_override() {
+    let mut edited = BTreeMap::new();
+    edited.insert("L".to_owned(), "-".to_owned());
+    let merged = merge_overrides(
+        &[("L".into(), "1".into()), ("m".into(), "3".into())],
+        &edited,
+    );
+    assert_eq!(
+        merged,
+        vec![
+            ("L".to_owned(), "1".to_owned()),
+            ("m".to_owned(), "3".to_owned())
         ]
     );
 }
@@ -571,6 +760,48 @@ fn user_model_gets_its_own_tab_and_context() {
     let lib_ctx = app.context_for("Modelica.Blocks");
     assert!(lib_ctx.user_source.is_none());
     assert_eq!(lib_ctx.libraries[0].name, "Modelica");
+}
+
+#[test]
+fn context_includes_classes_from_other_open_documents() {
+    let mut app = app();
+    app.documents.push(Document::new_untitled(
+        "model Helper\n  Real x;\nend Helper;",
+    ));
+    app.documents
+        .push(Document::new_untitled("model Main\n  Helper h;\nend Main;"));
+    app.refresh_outline();
+    let context = app.context_for("Main");
+    let source = context.user_source.unwrap();
+    assert!(source.contains("model Main"));
+    assert!(
+        context.other_sources[0].contains("model Helper"),
+        "the dependency's buffer is included"
+    );
+    assert_eq!(source.matches("model Main").count(), 1);
+    assert!(!source.contains("model Helper"));
+    assert!(app.context_for("Modelica.Blocks").user_source.is_none());
+}
+
+#[test]
+fn context_preserves_within_and_unfinished_buffers_separately() {
+    let mut app = app();
+    app.documents.push(Document::new_untitled(
+        "within P; model Main Helper h; end Main;",
+    ));
+    app.documents.push(Document::new_untitled(
+        "within P; model Helper Real x=1; end Helper;",
+    ));
+    app.documents.push(Document::new_untitled("model Draft"));
+    app.refresh_outline();
+    let context = app.context_for("P.Main");
+    assert_eq!(
+        context.user_source.as_deref(),
+        Some("within P; model Main Helper h; end Main;")
+    );
+    assert_eq!(context.other_sources.len(), 2);
+    assert!(context.other_sources[0].starts_with("within P;"));
+    assert!(context.other_sources[1].contains("model Draft"));
 }
 
 // --- G02 persistence tests ---
@@ -865,6 +1096,18 @@ fn has_log(app: &OmolaApp, level: LogLevel, needle: &str) -> bool {
         .any(|l| l.level == level && l.text.contains(needle))
 }
 
+/// Drive the event loop until a log line arrives (worker jobs are asynchronous).
+fn wait_for_log(app: &mut OmolaApp, level: LogLevel, needle: &str) {
+    for _ in 0..500 {
+        app.handle_events();
+        if has_log(app, level, needle) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    panic!("log line {needle:?} did not arrive from the worker");
+}
+
 #[test]
 fn closing_a_clean_document_removes_it_without_a_question() {
     let mut app = history_app();
@@ -1060,15 +1303,13 @@ fn save_result_as_copies_the_result_file() {
 
     let dest = dir.join("copy.mat");
     app.save_result_as(id, &dest);
+    // The copy runs on the worker thread: nothing is logged on the UI thread yet (G53).
+    assert!(!has_log(&app, LogLevel::Info, "Saved the result to"));
+    wait_for_log(&mut app, LogLevel::Info, "Saved the result to");
     assert_eq!(std::fs::read(&dest).unwrap(), b"result bytes");
-    assert!(has_log(&app, LogLevel::Info, "Saved the result to"));
 
     app.save_result_as(id, &source);
-    assert!(has_log(
-        &app,
-        LogLevel::Error,
-        "already stored in that file"
-    ));
+    wait_for_log(&mut app, LogLevel::Error, "already stored in that file");
     app.save_result_as(id + 100, &dest);
     assert!(has_log(&app, LogLevel::Error, "no longer open"));
     let _ = std::fs::remove_dir_all(&dir);

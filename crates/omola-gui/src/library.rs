@@ -263,23 +263,17 @@ pub fn parse_experiment(text: &str) -> Option<Experiment> {
 }
 
 /// Script printing restriction, comment, and documentation of `class`.
-/// `libraries` are loaded first; `user_file` (an editor copy) is loaded last.
-pub fn class_doc_script(
+pub fn class_doc_script_with_user_files(
     class: &str,
     libraries: &[LibrarySpec],
-    user_file: Option<&Path>,
+    user_files: &[PathBuf],
 ) -> Result<String, BackendError> {
     validate_class_name(class)?;
     let mut script = String::new();
     for (i, spec) in libraries.iter().enumerate() {
         script.push_str(&load_statement(spec, &format!("omolaLib{i}"))?);
     }
-    if let Some(file) = user_file {
-        script.push_str(&format!(
-            "omolaUser := loadFile(\"{}\");\n",
-            escape_modelica_string(&file.to_string_lossy())
-        ));
-    }
+    append_user_files(&mut script, user_files);
     let top = class.split('.').next().unwrap_or(class);
     script.push_str(&format!(
         r#"print("OMOLA_BEGIN root\n" + getSourceFile({top}) + "\nOMOLA_END root\n");
@@ -342,22 +336,30 @@ pub fn class_text_script(class: &str, libraries: &[LibrarySpec]) -> Result<Strin
 }
 
 /// Script printing `getModelInstance(CLASS)` as JSON (with the user file loaded when given).
+#[cfg(test)]
 pub fn instance_script(
     class: &str,
     libraries: &[LibrarySpec],
     user_file: Option<&Path>,
+) -> Result<String, BackendError> {
+    let files = user_file
+        .into_iter()
+        .map(Path::to_path_buf)
+        .collect::<Vec<_>>();
+    instance_script_with_user_files(class, libraries, &files)
+}
+
+pub fn instance_script_with_user_files(
+    class: &str,
+    libraries: &[LibrarySpec],
+    user_files: &[PathBuf],
 ) -> Result<String, BackendError> {
     validate_class_name(class)?;
     let mut script = String::new();
     for (i, spec) in libraries.iter().enumerate() {
         script.push_str(&load_statement(spec, &format!("omolaLib{i}"))?);
     }
-    if let Some(file) = user_file {
-        script.push_str(&format!(
-            "omolaUser := loadFile(\"{}\");\n",
-            escape_modelica_string(&file.to_string_lossy())
-        ));
-    }
+    append_user_files(&mut script, user_files);
     script.push_str(&format!(
         "print(\"OMOLA_BEGIN instance\\n\" + OpenModelica.Scripting.getModelInstance({class}, prettyPrint=true) + \"\\nOMOLA_END instance\\n\");\n"
     ));
@@ -369,22 +371,30 @@ pub fn instance_script(
 /// Only the Icon annotation is asked for: the answer is a few KB instead of the ~75 KB of
 /// a full `getModelInstance`, and OMC still nests the inherited annotations of the
 /// `extends` chain into it (see `docs/omc-model-instance-json.md`).
+#[cfg(test)]
 pub fn icon_script(
     class: &str,
     libraries: &[LibrarySpec],
     user_file: Option<&Path>,
+) -> Result<String, BackendError> {
+    let files = user_file
+        .into_iter()
+        .map(Path::to_path_buf)
+        .collect::<Vec<_>>();
+    icon_script_with_user_files(class, libraries, &files)
+}
+
+pub fn icon_script_with_user_files(
+    class: &str,
+    libraries: &[LibrarySpec],
+    user_files: &[PathBuf],
 ) -> Result<String, BackendError> {
     validate_class_name(class)?;
     let mut script = String::new();
     for (i, spec) in libraries.iter().enumerate() {
         script.push_str(&load_statement(spec, &format!("omolaLib{i}"))?);
     }
-    if let Some(file) = user_file {
-        script.push_str(&format!(
-            "omolaUser := loadFile(\"{}\");\n",
-            escape_modelica_string(&file.to_string_lossy())
-        ));
-    }
+    append_user_files(&mut script, user_files);
     script.push_str(&format!(
         "print(\"OMOLA_BEGIN icon\\n\" + OpenModelica.Scripting.getModelInstanceAnnotation({class}, {{\"Icon\"}}) + \"\\nOMOLA_END icon\\n\");\n"
     ));
@@ -392,21 +402,29 @@ pub fn icon_script(
 }
 
 /// Fetch several component icons from one OMC process after loading libraries once.
+#[cfg(test)]
 pub fn icons_script(
     types: &[String],
     libraries: &[LibrarySpec],
     user_file: Option<&Path>,
 ) -> Result<String, BackendError> {
+    let files = user_file
+        .into_iter()
+        .map(Path::to_path_buf)
+        .collect::<Vec<_>>();
+    icons_script_with_user_files(types, libraries, &files)
+}
+
+pub fn icons_script_with_user_files(
+    types: &[String],
+    libraries: &[LibrarySpec],
+    user_files: &[PathBuf],
+) -> Result<String, BackendError> {
     let mut script = String::new();
     for (i, spec) in libraries.iter().enumerate() {
         script.push_str(&load_statement(spec, &format!("omolaLib{i}"))?);
     }
-    if let Some(file) = user_file {
-        script.push_str(&format!(
-            "omolaUser := loadFile(\"{}\");\n",
-            escape_modelica_string(&file.to_string_lossy())
-        ));
-    }
+    append_user_files(&mut script, user_files);
     for class in types {
         validate_class_name(class)?;
         let key = format!("icon:{class}");
@@ -418,22 +436,30 @@ pub fn icons_script(
 }
 
 /// Script running `checkModel` on a class from loaded libraries and/or a user file.
+#[cfg(test)]
 pub fn check_script(
     class: &str,
     libraries: &[LibrarySpec],
     user_file: Option<&Path>,
+) -> Result<String, BackendError> {
+    let files = user_file
+        .into_iter()
+        .map(Path::to_path_buf)
+        .collect::<Vec<_>>();
+    check_script_with_user_files(class, libraries, &files)
+}
+
+pub fn check_script_with_user_files(
+    class: &str,
+    libraries: &[LibrarySpec],
+    user_files: &[PathBuf],
 ) -> Result<String, BackendError> {
     validate_class_name(class)?;
     let mut script = String::new();
     for (i, spec) in libraries.iter().enumerate() {
         script.push_str(&load_statement(spec, &format!("omolaLib{i}"))?);
     }
-    if let Some(file) = user_file {
-        script.push_str(&format!(
-            "omolaUser := loadFile(\"{}\");\n",
-            escape_modelica_string(&file.to_string_lossy())
-        ));
-    }
+    append_user_files(&mut script, user_files);
     script.push_str(&format!(
         "print(\"OMOLA_BEGIN check\\n\" + checkModel({class}) + \"\\nOMOLA_END check\\n\");\nprint(\"OMOLA_BEGIN errors\\n\" + getErrorString() + \"\\nOMOLA_END errors\\n\");\n"
     ));
@@ -444,10 +470,24 @@ pub fn check_script(
 ///
 /// `buildModel` returns `{"<executable>", "<init file>"}`; both are empty when the
 /// translation or the C compilation failed, so the `build` section is empty on failure.
+#[cfg(test)]
 pub fn translate_script(
     class: &str,
     libraries: &[LibrarySpec],
     user_file: Option<&Path>,
+    work_dir: &Path,
+) -> Result<String, BackendError> {
+    let files = user_file
+        .into_iter()
+        .map(Path::to_path_buf)
+        .collect::<Vec<_>>();
+    translate_script_with_user_files(class, libraries, &files, work_dir)
+}
+
+pub fn translate_script_with_user_files(
+    class: &str,
+    libraries: &[LibrarySpec],
+    user_files: &[PathBuf],
     work_dir: &Path,
 ) -> Result<String, BackendError> {
     validate_class_name(class)?;
@@ -458,16 +498,38 @@ pub fn translate_script(
     for (i, spec) in libraries.iter().enumerate() {
         script.push_str(&load_statement(spec, &format!("omolaLib{i}"))?);
     }
-    if let Some(file) = user_file {
-        script.push_str(&format!(
-            "omolaUser := loadFile(\"{}\");\n",
-            escape_modelica_string(&file.to_string_lossy())
-        ));
-    }
+    append_user_files(&mut script, user_files);
     script.push_str(&format!(
         "omolaBuild := buildModel({class});\nprint(\"OMOLA_BEGIN build\\n\" + omolaBuild[1] + \"\\nOMOLA_END build\\n\");\nprint(\"OMOLA_BEGIN errors\\n\" + getErrorString() + \"\\nOMOLA_END errors\\n\");\n"
     ));
     Ok(script)
+}
+
+/// Load user documents as separate stored definitions. The final path is the queried
+/// document and remains strict; earlier paths are best-effort dependencies so an
+/// unrelated incomplete editor buffer cannot poison the query's diagnostics.
+fn append_user_files(script: &mut String, files: &[PathBuf]) {
+    if files.is_empty() {
+        return;
+    }
+    for index in 0..files.len() {
+        script.push_str(&format!("omolaSourceLoaded{index} := false;\n"));
+    }
+    // Dependencies can be presented in any order. Retry failures while a pass loads
+    // something; successful files are skipped on later passes.
+    script.push_str("omolaSourceProgress := true;\nwhile omolaSourceProgress loop\nomolaSourceProgress := false;\n");
+    for (index, file) in files.iter().enumerate() {
+        script.push_str(&format!(
+            "if not omolaSourceLoaded{index} then\nclearMessages();\nomolaSourceLoaded{index} := loadFile(\"{}\");\nif omolaSourceLoaded{index} then omolaSourceProgress := true; else clearMessages(); end if;\nend if;\n",
+            escape_modelica_string(&file.to_string_lossy())
+        ));
+    }
+    script.push_str("end while;\n");
+    let last = files.len() - 1;
+    script.push_str(&format!(
+        "if not omolaSourceLoaded{last} then\nclearMessages();\nomolaUser := loadFile(\"{}\");\nif not omolaUser then print(getErrorString()); exit(1); end if;\nend if;\n",
+        escape_modelica_string(&files[last].to_string_lossy())
+    ));
 }
 
 /// Collect `OMOLA_BEGIN key` ... `OMOLA_END key` blocks (first occurrence of each key).
@@ -703,6 +765,28 @@ mod tests {
         let with_file = icon_script("M", &[], Some(Path::new("/tmp/M.mo"))).unwrap();
         assert!(with_file.contains("loadFile(\"/tmp/M.mo\")"));
         assert!(icon_script("A\"); system(\"x", &[], None).is_err());
+    }
+
+    #[test]
+    fn user_documents_are_loaded_separately_and_primary_is_last() {
+        let script = check_script_with_user_files(
+            "P.Main",
+            &[],
+            &[
+                PathBuf::from("/tmp/P/Helper.mo"),
+                PathBuf::from("/tmp/P/Main.mo"),
+            ],
+        )
+        .unwrap();
+        let helper = script.find("loadFile(\"/tmp/P/Helper.mo\")").unwrap();
+        let main = script.find("loadFile(\"/tmp/P/Main.mo\")").unwrap();
+        let query = script.find("checkModel(P.Main)").unwrap();
+        assert!(helper < main && main < query);
+        assert!(script[helper..main].contains("clearMessages();"));
+        assert!(script[main..query].contains("if not omolaSourceLoaded1 then"));
+        assert_eq!(script.matches("loadFile(\"/tmp/P/Helper.mo\")").count(), 1);
+        assert_eq!(script.matches("loadFile(\"/tmp/P/Main.mo\")").count(), 2);
+        assert!(script.contains("while omolaSourceProgress loop"));
     }
 
     #[test]

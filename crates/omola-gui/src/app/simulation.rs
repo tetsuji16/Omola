@@ -157,6 +157,8 @@ impl OmolaApp {
     /// The annotation only provides the initial values: once the user has changed the
     /// general fields by hand (`setup_edited_by_user`) their numbers are kept, and the
     /// annotation of the class already applied (`setup_from`) is not applied twice.
+    /// A late answer for a class the user has already left is ignored: only the
+    /// annotation of the class that is open now seeds the setup (G53).
     pub fn apply_experiment(
         &mut self,
         class: &str,
@@ -167,6 +169,7 @@ impl OmolaApp {
             return;
         };
         if restriction == "package"
+            || self.active.as_deref() != Some(class)
             || self.setup_edited_by_user
             || self.setup_from.as_deref() == Some(class)
         {
@@ -188,13 +191,18 @@ impl OmolaApp {
 }
 
 /// Setup overrides plus values edited in the variable browser (edited values win).
+/// A half-typed edit that is not a number keeps the setup value instead of dropping it.
 pub fn merge_overrides(
     setup: &[(String, String)],
     edited: &BTreeMap<String, String>,
 ) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = setup
         .iter()
-        .filter(|(n, _)| !edited.contains_key(n))
+        .filter(|(n, _)| {
+            !edited
+                .get(n)
+                .is_some_and(|v| v.trim().parse::<f64>().is_ok())
+        })
         .cloned()
         .collect();
     out.extend(

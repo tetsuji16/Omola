@@ -30,6 +30,7 @@ fn translate_job_reports_success_through_fake_omc() {
     worker.submit(Job::Translate {
         class: "M".into(),
         context: ClassContext {
+            other_sources: Vec::new(),
             libraries: vec![],
             user_source: Some("model M Real x = 1; end M;".into()),
         },
@@ -112,6 +113,7 @@ fn translate_bouncing_ball_with_real_omc() {
     worker.submit(Job::Translate {
         class: "BouncingBall".into(),
         context: ClassContext {
+            other_sources: Vec::new(),
             libraries: vec![],
             user_source: Some(include_str!("../../../../examples/BouncingBall.mo").into()),
         },
@@ -144,6 +146,7 @@ fn sweep_bouncing_ball_e_with_real_omc() {
         worker.submit(Job::Simulate {
             class: "BouncingBall".into(),
             context: ClassContext {
+                other_sources: Vec::new(),
                 libraries: vec![],
                 user_source: Some(include_str!("../../../../examples/BouncingBall.mo").into()),
             },
@@ -233,6 +236,7 @@ fn simulate_job_reads_result_through_fake_omc() {
     worker.submit(Job::Simulate {
         class: "M".into(),
         context: ClassContext {
+            other_sources: Vec::new(),
             libraries: vec![],
             user_source: Some("model M Real x(start=1); equation der(x) = -x; end M;".into()),
         },
@@ -272,6 +276,7 @@ fn simulate_bouncing_ball_with_real_omc() {
     worker.submit(Job::Simulate {
         class: "BouncingBall".into(),
         context: ClassContext {
+            other_sources: Vec::new(),
             libraries: vec![],
             user_source: Some(include_str!("../../../../examples/BouncingBall.mo").into()),
         },
@@ -349,6 +354,80 @@ fn simulate_bouncing_ball_with_real_omc() {
 
 #[test]
 #[ignore = "needs OpenModelica; run with --ignored and OMOLA_OMC set"]
+fn separate_open_documents_with_real_omc() {
+    let omc = Omc::discover().expect("OpenModelica is required");
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "omola-multiple-docs-{}-{nonce}",
+        std::process::id()
+    ));
+    std::fs::create_dir(&root).unwrap();
+    let _cleanup = Cleanup(root.clone());
+    let context = ClassContext {
+        libraries: vec![],
+        user_source: Some("within P; model Main Helper h; end Main;".into()),
+        // Reverse order deliberately; the invalid unrelated buffer must be isolated.
+        other_sources: vec![
+            "within P; model Helper Real x = 1; end Helper;".into(),
+            "model Draft".into(),
+            "within; package P end P;".into(),
+        ],
+    };
+    let files = write_user_files(&root, "P.Main", &context).unwrap();
+    let script = library::check_script_with_user_files("P.Main", &[], &files).unwrap();
+    let output = omc.run_query_script(&script).unwrap().output;
+    assert!(output.contains("completed successfully"), "{output}");
+    let result = omc
+        .simulate_class_with_sources(
+            &files,
+            "P.Main",
+            SimulationConfig {
+                stop_time: 0.1,
+                start_time: None,
+                number_of_intervals: None,
+                tolerance: None,
+                method: None,
+                result: Some(&root.join("result")),
+                libraries: &[],
+                package_roots: &[],
+                parameters: &[],
+            },
+        )
+        .unwrap();
+    assert!(result.result_file.unwrap().is_file());
+
+    // A parent package can itself be the target and still load its child afterwards.
+    let parent = ClassContext {
+        libraries: vec![],
+        user_source: Some("within; package P end P;".into()),
+        other_sources: vec!["within P; model Helper Real x=1; end Helper;".into()],
+    };
+    let files = write_user_files(&root.join("parent"), "P", &parent).unwrap();
+    let script = library::check_script_with_user_files("P.Helper", &[], &files).unwrap();
+    let output = omc.run_query_script(&script).unwrap().output;
+    assert!(output.contains("completed successfully"), "{output}");
+    let broken_target = ClassContext {
+        libraries: vec![],
+        user_source: Some("model Main".into()),
+        other_sources: vec!["model Main Real x = 1; end Main;".into()],
+    };
+    let files = write_user_files(&root.join("broken"), "Main", &broken_target).unwrap();
+    let script = library::check_script_with_user_files("Main", &[], &files).unwrap();
+    let error = omc.run_query_script(&script).unwrap_err().to_string();
+    assert!(error.contains("Error"), "{error}");
+}
+
+#[test]
+#[ignore = "needs OpenModelica; run with --ignored and OMOLA_OMC set"]
 fn edit_model_adds_component_with_real_omc() {
     if std::env::var_os("OMOLA_OMC").is_none() {
         eprintln!("OMOLA_OMC is not set; skipping real-OMC edit test");
@@ -395,6 +474,7 @@ fn icon_annotations_with_real_omc() {
     let root = std::env::temp_dir().join(format!("omola-gui-icons-{}", std::process::id()));
     let worker = Worker::spawn(root.join("work"), || {});
     let context = ClassContext {
+        other_sources: Vec::new(),
         libraries: vec![LibrarySpec::new("Modelica", Some("4.1.0"))],
         user_source: None,
     };
@@ -425,6 +505,7 @@ fn icon_annotations_with_real_omc() {
     worker.submit(Job::LoadIcon {
         class: "InheritsBlockIcon".into(),
         context: ClassContext {
+            other_sources: Vec::new(),
             libraries: context.libraries.clone(),
             user_source: Some(include_str!("../../tests/fixtures/icon_InheritedBlock.mo").into()),
         },
@@ -448,6 +529,7 @@ fn diagram_reuses_cached_icons_with_real_omc() {
     let worker = Worker::spawn(root.join("work"), || {});
     let class = "Modelica.Blocks.Examples.PID_Controller";
     let context = ClassContext {
+        other_sources: Vec::new(),
         libraries: vec![LibrarySpec::new("Modelica", Some("4.1.0"))],
         user_source: None,
     };
@@ -497,6 +579,7 @@ fn diagram_loads_user_component_icon_with_real_omc() {
     worker.submit(Job::LoadDiagram {
         class: "A".into(),
         context: ClassContext {
+            other_sources: Vec::new(),
             libraries: vec![],
             user_source: Some(
                 r#"model A
@@ -541,6 +624,7 @@ fn diagram_edit_flow_with_real_omc() {
     let worker = Worker::spawn(root.join("work"), || {});
     let libraries = vec![LibrarySpec::new("Modelica", Some("4.1.0"))];
     let context_for = |source: &str| ClassContext {
+        other_sources: Vec::new(),
         libraries: libraries.clone(),
         user_source: Some(source.to_owned()),
     };
@@ -753,6 +837,7 @@ fn msl_browse_document_and_simulate_with_real_omc() {
     );
 
     let context = ClassContext {
+        other_sources: Vec::new(),
         libraries: vec![msl.clone()],
         user_source: None,
     };
@@ -761,7 +846,7 @@ fn msl_browse_document_and_simulate_with_real_omc() {
         context: context.clone(),
     });
     let doc = wait_for(&worker, 300, |e| match e {
-        Event::ClassDoc(_, result) => Some(result.expect("Modelica documentation")),
+        Event::ClassDoc(_, _, result) => Some(result.expect("Modelica documentation")),
         _ => None,
     });
     assert_eq!(doc.restriction, "package");
@@ -786,7 +871,7 @@ fn msl_browse_document_and_simulate_with_real_omc() {
         context: context.clone(),
     });
     let example = wait_for(&worker, 300, |e| match e {
-        Event::ClassDoc(_, result) => Some(result.expect("example documentation")),
+        Event::ClassDoc(_, _, result) => Some(result.expect("example documentation")),
         _ => None,
     });
     let experiment = example.experiment.expect("experiment annotation");
