@@ -207,7 +207,7 @@ Status is `Not measured` until a versioned test corpus and reports exist. Do not
 | Automation API | Curated scripts with observable operation/result equivalence; percentage pass by named function, unsupported functions explicit | No compatibility API |
 | Results | Import/export format, variable/time coverage, units/metadata preservation and numerical tolerance tested separately | No Omola result reader |
 | Numerical behavior | Fixed benchmark set, tolerances and solver settings; report pass rate and error, never infer exact equivalence from format compatibility | No benchmark |
-| GUI/editor | Workflow checklist for package browsing, text/diagram edits, parameter editing, plotting and project reopen | Native egui skeleton: text edit, check/simulate via OMC, variable browser, plot; diagram/library/component views not implemented (see `docs/issues/gui`) |
+| GUI/editor | Workflow checklist for package browsing, text/diagram edits, parameter editing, plotting and project reopen | Native egui workbench: package/component/documentation browsing, text and diagram editing, OMC check/translate/simulate, Simulation Setup with Save in Model, single-parameter sweeps, results and plots; animation, 3D, linearisation and continuing a simulation are not implemented (see `docs/issues/gui`) |
 | Vendor ecosystem | Per-library license/access/redistribution review and lawful replacement status | Out of scope for initial backend |
 
 Release gates progress from a reproducible OMC-backed CLI, through a published open-library corpus, through measured interoperability subsets, then GUI and expanded workflows. “Full compatibility” is a long-term aspiration and remains unclaimed until every declared target has a published, reproducible result and lawful delivery path.
@@ -231,7 +231,9 @@ cargo run -p omola-gui --example demo_mat -- target/demo_res.mat
 OMOLA_FAKE_MAT="$PWD/target/demo_res.mat" OMOLA_OMC="$PWD/scripts/fake-omc.sh" cargo run -p omola-gui -- examples/BouncingBall.mo
 ```
 
-Not implemented yet: animation, linearization, continuing a simulation from its final state, and multi-parameter sweeps (a sweep varies one parameter). The open items are listed in [`docs/issues/gui`](docs/issues/gui/README.md).
+Implemented: package/component/documentation browsing, text and diagram editing (including Undo/Redo, clipboard commands, Go To Line and Replace), check/translate/simulate through OMC, Simulation Setup with Save in Model, single-parameter sweeps, result keep/close/load/export, plotting, diagram zoom/Fit and a collapsible ribbon.
+
+Not provided: animation and 3D visualisation, linearisation, continuing a simulation from its final state, and multi-parameter sweeps (Sweep Parameters varies one parameter). These are out of scope or unimplemented, not hidden behind disabled ribbon buttons. The issue index and completion status are in [`docs/issues/gui`](docs/issues/gui/README.md).
 
 Results are written to a work folder under the system temporary directory. Work folders older than seven days are removed when the GUI starts, so use `Save result as...` (right-click a result) to keep a `.mat` file. Screenshots: [`docs/images/omola-gui`](docs/images/omola-gui).
 
