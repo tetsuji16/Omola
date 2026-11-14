@@ -4,7 +4,7 @@ use super::widgets::{
     big_button, column, combo_frame, field_frame, fixed_group, group, icon_button, paint_icon,
     place, small_button,
 };
-use crate::app::{DocView, Layer, OmolaApp, RibbonTab};
+use crate::app::{DocView, EditorCommand, Layer, OmolaApp, RibbonTab};
 use crate::theme;
 use egui::{Align2, Color32, FontId, RichText, Sense, Stroke, Vec2};
 use egui_material_icons::icons::*;
@@ -648,7 +648,7 @@ impl OmolaApp {
             .as_deref()
             .is_some_and(|c| self.is_user_class(c))
             && self.selected_component.is_some();
-        if clipboard_group(ui, delete_enabled) {
+        if clipboard_group(ui, false, false, delete_enabled).1 {
             self.delete_selected_component();
         }
         group(ui, "Draw", |ui| {
@@ -753,7 +753,7 @@ impl OmolaApp {
                 small_button(ui, ICON_MARKDOWN, DARK, "Markdown", !read_only, false);
             });
         });
-        clipboard_group(ui, false);
+        clipboard_group(ui, false, false, false);
         group(ui, "Find", |ui| {
             if big_button(ui, ICON_SEARCH, DARK, "Find", true, self.find_open).clicked() {
                 self.find_open = !self.find_open;
@@ -839,7 +839,10 @@ impl OmolaApp {
                 }
             });
         });
-        clipboard_group(ui, false);
+        let (command, _) = clipboard_group(ui, true, editable, false);
+        if let Some(command) = command {
+            self.pending_editor_event = Some(command);
+        }
         group(ui, "Find", |ui| {
             column(ui, |ui| {
                 if small_button(ui, ICON_SEARCH, DARK, "Find", true, false).clicked() {
@@ -1244,19 +1247,34 @@ fn title_layout(area: egui::Rect, text_width: f32) -> TitleLayout {
     }
 }
 
-fn clipboard_group(ui: &mut egui::Ui, delete_enabled: bool) -> bool {
+/// The Clipboard group. `copy_enabled` lights Copy (any shown text), `editable` lights
+/// Cut and Paste (a user model). Returns the clipboard button pressed, if any, and whether
+/// Delete was pressed (G45).
+fn clipboard_group(
+    ui: &mut egui::Ui,
+    copy_enabled: bool,
+    editable: bool,
+    delete_enabled: bool,
+) -> (Option<EditorCommand>, bool) {
+    let mut command = None;
     let mut delete = false;
     group(ui, "Clipboard", |ui| {
-        big_button(ui, ICON_CONTENT_CUT, DARK, "Cut", false, false);
-        big_button(ui, ICON_CONTENT_COPY, DARK, "Copy", false, false);
-        big_button(ui, ICON_CONTENT_PASTE, DARK, "Paste", false, false);
+        if big_button(ui, ICON_CONTENT_CUT, DARK, "Cut", editable, false).clicked() {
+            command = Some(EditorCommand::Cut);
+        }
+        if big_button(ui, ICON_CONTENT_COPY, DARK, "Copy", copy_enabled, false).clicked() {
+            command = Some(EditorCommand::Copy);
+        }
+        if big_button(ui, ICON_CONTENT_PASTE, DARK, "Paste", editable, false).clicked() {
+            command = Some(EditorCommand::Paste);
+        }
         column(ui, |ui| {
             delete = small_button(ui, ICON_CLOSE, RED, "Delete", delete_enabled, false).clicked();
             small_button(ui, ICON_FILE_COPY, DARK, "Duplicate", false, false);
             small_button(ui, ICON_SELECT_ALL, DARK, "Select All", false, false);
         });
     });
-    delete
+    (command, delete)
 }
 
 fn display_method(m: &str) -> String {

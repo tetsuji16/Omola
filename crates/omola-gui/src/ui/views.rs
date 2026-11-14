@@ -177,6 +177,7 @@ impl OmolaApp {
                 &mut doc.text,
                 doc.path.as_ref(),
                 &error_lines,
+                self.pending_editor_event.take(),
             );
             if changed {
                 doc.dirty = true;
@@ -205,7 +206,14 @@ impl OmolaApp {
                     .entry(class.to_owned())
                     .or_default();
                 editor.show_line_numbers = true;
-                draw_readonly_text_editor(ui, editor, text, None, &[]);
+                draw_readonly_text_editor(
+                    ui,
+                    editor,
+                    text,
+                    None,
+                    &[],
+                    self.pending_editor_event.take(),
+                );
             }
         }
     }
