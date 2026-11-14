@@ -1,6 +1,7 @@
-//! Measured status of the OMEdit-based GUI integration toward Dymola-compatible
-//! graphical workflows. This command reports where the GUI/editor dimension
-//! stands today; it never claims Dymola parity.
+//! Measured status of the GUI/editor dimension toward Dymola-compatible
+//! graphical workflows. The native egui workbench is the supported GUI; this
+//! command reports the legacy OMEdit handoff and the measured boundary. It
+//! never claims Dymola parity.
 
 use crate::omedit;
 use omola_core::{BackendError, Omc};
@@ -23,37 +24,37 @@ const DIMENSIONS: &[Dimension] = &[
     Dimension {
         area: "Text and diagram editing",
         status: "reused",
-        detail: "OMEdit's existing Modelica text and diagram editors are reused; Dymola-specific extensions are unknown and unmeasured.",
+        detail: "OMEdit's existing Modelica text and diagram editors are reused by 'omola project open'; the native egui workbench also edits both layers. Dymola-specific extensions are unknown and unmeasured.",
     },
     Dimension {
         area: "Package and project browsing",
         status: "partial",
-        detail: "OMEdit library/model browser plus the Omola schema-1 project manifest; native 'Open Omola Project...' action is in progress (#15) and the library version the GUI session selects is unverified (#22).",
+        detail: "OMEdit library/model browser plus the Omola schema-1 project manifest; the native workbench has its own package and component browsers. See docs/issues/gui/README.md.",
     },
     Dimension {
         area: "Check and simulation",
         status: "partial",
-        detail: "OMEdit actions delegate to the OMC backend; the source-built OMEdit simulation was not verified to produce a runnable model, and manifest settings are not yet propagated into the GUI session (#16).",
+        detail: "OMEdit actions delegate to the OMC backend. The native workbench runs check, translate and simulate as OMC jobs and applies the manifest settings. See docs/issues/gui/README.md.",
     },
     Dimension {
         area: "Simulation settings handoff",
-        status: "not-measured",
-        detail: "Manifest stop time and numeric parameter overrides must appear in the GUI and apply to the real OMC run (#16); stock OMEdit does not receive them, so this requires the patched OMEdit build.",
+        status: "partial",
+        detail: "The native Simulation Setup applies stop time, interval, tolerance and numeric overrides to the OMC run. The OMEdit handoff is historical and no longer the supported path.",
     },
     Dimension {
         area: "Results and plotting",
         status: "reused",
-        detail: "OMEdit variable browser and plot windows are reused; Dymola MAT/DSRES result formats are unsupported unless directly measured.",
+        detail: "The native plot window reads OpenModelica .mat results and keeps, closes, loads and exports them. Dymola MAT/DSRES result formats are unsupported unless directly measured.",
     },
     Dimension {
         area: "Diagram annotations and connections",
-        status: "not-measured",
-        detail: "OMEdit icon/diagram annotation and connection round-tripping needs a lawful fixture matrix distinguishing Modelica, OMEdit, and Dymola semantics (#18).",
+        status: "partial",
+        detail: "The native Diagram layer edits placements and connections and preserves unrelated annotations. Dymola-specific annotation semantics need a lawful measured matrix.",
     },
     Dimension {
         area: "Native GUI regression gate",
-        status: "not-measured",
-        detail: "A versioned open/check/simulate/plot regression report for the source/toolchain build is not yet produced (#19).",
+        status: "partial",
+        detail: "cargo test --workspace and CI cover the native GUI; the issue index and current status are in docs/issues/gui/README.md.",
     },
     Dimension {
         area: "Dymola-specific GUI semantics",
@@ -63,8 +64,8 @@ const DIMENSIONS: &[Dimension] = &[
 ];
 
 const BLOCKERS: &[&str] = &[
-    "Native OMEdit source build (#25) is not completed: CMake source configuration has not finished and the OMDev/UCRT64 toolchain download stalled, so no modified OMEdit C++ has compiled.",
-    "Stock OMEdit does not receive manifest simulation settings on launch (#16); 'omola project open' validates and launches but the simulation dialog keeps its own defaults.",
+    "Dymola-specific graphical features have no lawful, measured mapping and remain out of scope.",
+    "This command reports the legacy OMEdit handoff; the native egui workbench status is in docs/issues/gui/README.md.",
 ];
 
 #[derive(Serialize)]
@@ -281,7 +282,7 @@ mod tests {
         assert!(report.contains("| Area | Status | Detail |"));
         assert!(report.contains("Simulation settings handoff"));
         assert!(report.contains("## Known blockers"));
-        assert!(report.contains("source build (#25)"));
+        assert!(report.contains("docs/issues/gui/README.md"));
     }
 
     #[test]
