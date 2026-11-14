@@ -366,6 +366,15 @@ fn first_run_autoplots_and_old_runs_are_dropped() {
 }
 
 #[test]
+fn first_run_autoplots_only_in_active_diagram() {
+    let mut app = app();
+    app.new_diagram();
+    app.add_run(outcome("A"));
+    assert!(app.diagrams[0].signals.is_empty());
+    assert_eq!(app.diagrams[1].signals.len(), 1);
+}
+
+#[test]
 fn a_new_diagram_takes_its_own_curves_and_the_last_one_stays() {
     let mut app = app();
     app.add_run(outcome("BouncingBall"));
