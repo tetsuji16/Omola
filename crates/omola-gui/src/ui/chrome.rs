@@ -991,7 +991,7 @@ impl OmolaApp {
                         }
                     })
             });
-            let store = place(ui, o, (222.0, 31.0, 88.0, 22.0), |ui| {
+            let store = place(ui, o, (222.0, 56.0, 88.0, 22.0), |ui| {
                 ui.add_enabled(
                     self.can_store_setup(),
                     egui::Button::new("Save in Model").frame(false),
