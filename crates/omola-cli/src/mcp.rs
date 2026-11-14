@@ -214,7 +214,7 @@ impl Server {
                 "Invalid params: _meta.io.modelcontextprotocol/clientCapabilities is required",
             ));
         }
-        let result = match method {
+        let mut result = match method {
             "server/discover" => json!({
                 "resultType": "complete",
                 "supportedVersions": supported_versions(),
@@ -232,6 +232,14 @@ impl Server {
                 ))
             }
         };
+        // 2026-07-28 asks servers to identify themselves on every result, not only
+        // in `server/discover`.
+        if let Some(object) = result.as_object_mut() {
+            object.insert(
+                "_meta".into(),
+                json!({"io.modelcontextprotocol/serverInfo": server_info()}),
+            );
+        }
         Ok(result)
     }
 
@@ -317,10 +325,12 @@ fn dispatch_tool(params: &Value) -> Result<Value, RpcError> {
             format!("Unknown tool: {name}"),
         ));
     };
-    let arguments = params
-        .get("arguments")
-        .cloned()
-        .unwrap_or_else(|| json!({}));
+    // Some clients serialise "no arguments" as `null`; a tool that needs none
+    // should still run instead of failing the call.
+    let arguments = match params.get("arguments") {
+        None | Some(Value::Null) => json!({}),
+        Some(value) => value.clone(),
+    };
     let Some(object) = arguments.as_object() else {
         return Err(RpcError::new(
             INVALID_PARAMS,
@@ -669,6 +679,36 @@ mod tests {
         assert!(reply["error"]["message"]
             .as_str()
             .is_some_and(|text| text.contains("Unknown tool")));
+    }
+
+    #[test]
+    fn null_arguments_mean_no_arguments() {
+        let mut server = Server;
+        let reply = send(
+            &mut server,
+            &request(
+                1,
+                "tools/call",
+                json!({"name": "omola_doctor", "arguments": null}),
+            ),
+        );
+        // The compiler may or may not be installed here; either way the call is
+        // a result, not a protocol error about `arguments`.
+        assert!(reply["result"].is_object(), "{reply}");
+        assert!(reply.get("error").is_none());
+    }
+
+    #[test]
+    fn modern_results_identify_the_server() {
+        let mut server = Server;
+        let reply = send(&mut server, &request(1, "tools/list", modern_params()));
+        assert_eq!(
+            reply["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["name"],
+            SERVER_NAME
+        );
+        let reply = send(&mut server, &request(2, "tools/list", json!({})));
+        // Legacy results keep their pre-2026 shape.
+        assert!(reply["result"].get("_meta").is_none());
     }
 
     #[test]

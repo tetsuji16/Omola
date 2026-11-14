@@ -78,8 +78,9 @@ The list is returned in a fixed order so clients and prompt caches see the same 
 | `omola_inspect_result` | `file` | Format, row count, variables, metadata sidecar |
 | `omola_export_csv` | `file`, `variables`, `output` | Destination path and row count |
 
-Common argument rules. Each tool declares `additionalProperties: false`, so an argument it does not
-list below is rejected with `-32602` rather than ignored:
+A missing or `null` `arguments` is treated as an empty object, so a tool that needs none can be called
+without one. Otherwise each tool declares `additionalProperties: false`, so an argument it does not
+list in the bullets below is rejected with `-32602` rather than ignored:
 
 - `model` is a path to a `.mo` file on the machine running the server. It must exist.
 - `class` is a fully qualified Modelica name, for example `Modelica.Blocks.Examples.PID_Controller`.
