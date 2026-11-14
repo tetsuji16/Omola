@@ -812,9 +812,9 @@ fn closing_active_tab_resets_the_next_diagram_view() {
 
 #[test]
 fn persisted_state_roundtrips_ribbon_collapsed() {
-    let mut app = app();
-    app.ribbon_collapsed = true;
-    let state = app.to_persisted();
+    let mut original = app();
+    original.ribbon_collapsed = true;
+    let state = original.to_persisted();
     let json = serde_json::to_string(&state).unwrap();
     let restored: PersistedState = serde_json::from_str(&json).unwrap();
     let mut app2 = OmolaApp::with_worker(Worker::spawn(
