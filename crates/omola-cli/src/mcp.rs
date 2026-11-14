@@ -38,13 +38,27 @@ const METHOD_NOT_FOUND: i64 = -32601;
 const INVALID_PARAMS: i64 = -32602;
 const UNSUPPORTED_PROTOCOL_VERSION: i64 = -32022;
 
-const TOOL_NAMES: &[&str] = &[
-    "omola_doctor",
-    "omola_check",
-    "omola_simulate",
-    "omola_inspect_result",
-    "omola_export_csv",
+/// Arguments each tool accepts, in tool order. This mirrors the
+/// `additionalProperties: false` promise in the published schemas: an unknown
+/// key is a client bug, so it is rejected as a protocol error rather than being
+/// silently ignored.
+const TOOL_ARGUMENTS: &[(&str, &[&str])] = &[
+    ("omola_doctor", &[]),
+    ("omola_check", &["model", "class"]),
+    (
+        "omola_simulate",
+        &["model", "class", "stop_time", "parameters", "output"],
+    ),
+    ("omola_inspect_result", &["file"]),
+    ("omola_export_csv", &["file", "variables", "output"]),
 ];
+
+fn tool_arguments(name: &str) -> Option<&'static [&'static str]> {
+    TOOL_ARGUMENTS
+        .iter()
+        .find(|(tool, _)| *tool == name)
+        .map(|(_, arguments)| *arguments)
+}
 
 pub fn run(args: &[String]) -> Result<String, BackendError> {
     match args {
@@ -297,20 +311,26 @@ fn dispatch_tool(params: &Value) -> Result<Value, RpcError> {
         .get("name")
         .and_then(Value::as_str)
         .ok_or_else(|| RpcError::new(INVALID_PARAMS, "Invalid params: `name` is required"))?;
-    if !TOOL_NAMES.contains(&name) {
+    let Some(allowed) = tool_arguments(name) else {
         return Err(RpcError::new(
             INVALID_PARAMS,
             format!("Unknown tool: {name}"),
         ));
-    }
+    };
     let arguments = params
         .get("arguments")
         .cloned()
         .unwrap_or_else(|| json!({}));
-    if !arguments.is_object() {
+    let Some(object) = arguments.as_object() else {
         return Err(RpcError::new(
             INVALID_PARAMS,
             "Invalid params: `arguments` must be an object",
+        ));
+    };
+    if let Some(unknown) = object.keys().find(|key| !allowed.contains(&key.as_str())) {
+        return Err(RpcError::new(
+            INVALID_PARAMS,
+            format!("Invalid params: `{name}` does not take `{unknown}`"),
         ));
     }
     Ok(match call_tool(name, &arguments) {
@@ -383,10 +403,20 @@ fn simulate(arguments: &Value) -> Result<String, String> {
                         ))
                     }
                 };
-                pairs.push(format!("{name}={number}"));
+                pairs.push((name.clone(), number));
             }
+            // Validate the pairs as given before they are serialised: a value
+            // that contains `,` or `=` would otherwise split into a second
+            // override once joined.
+            omola_core::validate_parameter_overrides(&pairs).map_err(|error| error.to_string())?;
             cli.push("--parameters".into());
-            cli.push(pairs.join(","));
+            cli.push(
+                pairs
+                    .iter()
+                    .map(|(name, value)| format!("{name}={value}"))
+                    .collect::<Vec<_>>()
+                    .join(","),
+            );
         }
     }
     if let Some(output) = arguments.get("output") {
@@ -612,7 +642,8 @@ mod tests {
             .iter()
             .map(|tool| tool["name"].as_str().expect("name"))
             .collect();
-        assert_eq!(names, TOOL_NAMES);
+        let expected: Vec<_> = TOOL_ARGUMENTS.iter().map(|(name, _)| *name).collect();
+        assert_eq!(names, expected);
         for tool in tools {
             assert_eq!(tool["inputSchema"]["type"], "object");
             assert!(tool["description"]
@@ -638,6 +669,64 @@ mod tests {
         assert!(reply["error"]["message"]
             .as_str()
             .is_some_and(|text| text.contains("Unknown tool")));
+    }
+
+    #[test]
+    fn unknown_arguments_are_rejected_against_the_published_schema() {
+        let mut server = Server;
+        let reply = send(
+            &mut server,
+            &request(
+                1,
+                "tools/call",
+                json!({"name": "omola_check", "arguments": {"model": "a.mo", "class": "A", "verbose": true}}),
+            ),
+        );
+        assert_eq!(reply["error"]["code"], INVALID_PARAMS);
+        assert!(reply["error"]["message"]
+            .as_str()
+            .is_some_and(|text| text.contains("does not take `verbose`")));
+
+        // `omola_doctor` takes no arguments at all.
+        let reply = send(
+            &mut server,
+            &request(
+                2,
+                "tools/call",
+                json!({"name": "omola_doctor", "arguments": {"model": "a.mo"}}),
+            ),
+        );
+        assert_eq!(reply["error"]["code"], INVALID_PARAMS);
+    }
+
+    #[test]
+    fn a_parameter_value_cannot_smuggle_in_a_second_override() {
+        let dir = std::env::temp_dir().join(format!("omola-mcp-params-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let model = dir.join("Empty.mo");
+        std::fs::write(&model, "model Empty\nend Empty;\n").expect("write model");
+
+        let mut server = Server;
+        let reply = send(
+            &mut server,
+            &request(
+                1,
+                "tools/call",
+                json!({
+                    "name": "omola_simulate",
+                    "arguments": {
+                        "model": model.to_string_lossy(),
+                        "class": "Empty",
+                        "parameters": {"gravity": "9.81,other=1"}
+                    }
+                }),
+            ),
+        );
+        assert_eq!(reply["result"]["isError"], true);
+        assert!(reply["result"]["content"][0]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("finite numeric value")));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

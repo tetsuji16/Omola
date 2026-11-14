@@ -78,7 +78,8 @@ The list is returned in a fixed order so clients and prompt caches see the same 
 | `omola_inspect_result` | `file` | Format, row count, variables, metadata sidecar |
 | `omola_export_csv` | `file`, `variables`, `output` | Destination path and row count |
 
-Common argument rules:
+Common argument rules. Each tool declares `additionalProperties: false`, so an argument it does not
+list below is rejected with `-32602` rather than ignored:
 
 - `model` is a path to a `.mo` file on the machine running the server. It must exist.
 - `class` is a fully qualified Modelica name, for example `Modelica.Blocks.Examples.PID_Controller`.
@@ -98,7 +99,7 @@ Two mechanisms, as the specification requires:
 | Situation | Reply |
 | --- | --- |
 | Unknown method | JSON-RPC error `-32601` |
-| Unknown tool, missing `name`, malformed `arguments` | JSON-RPC error `-32602` |
+| Unknown tool, missing `name`, malformed `arguments`, or an argument name the tool does not declare | JSON-RPC error `-32602` |
 | Unparseable line | JSON-RPC error `-32700`, `id: null` |
 | Tool ran but failed (missing compiler, Modelica error, bad path, refused overwrite) | result with `"isError": true` and the diagnostic as text |
 
@@ -107,11 +108,12 @@ request — for example by fixing a path after `result file does not exist`.
 
 ## 5. Example session
 
-Modern client (`2026-07-28`), abbreviated:
+Modern client (`2026-07-28`). Every request repeats the same `_meta` block, which is what makes the
+era detection work — a `tools/call` without it would be served as a legacy request. Abbreviated:
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}
-{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"omola_simulate","arguments":{"model":"examples/BouncingBall.mo","class":"BouncingBall","stop_time":1,"parameters":{"gravity":9.81}}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}},"name":"omola_simulate","arguments":{"model":"examples/BouncingBall.mo","class":"BouncingBall","stop_time":1,"parameters":{"gravity":9.81}}}}
 ```
 
 ```json
