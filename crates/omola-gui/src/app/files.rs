@@ -514,6 +514,7 @@ impl OmolaApp {
             setup: Some(self.setup.clone()),
             keep_results: Some(self.keep_results),
             recent_files: self.recent_files.clone(),
+            ribbon_collapsed: Some(self.ribbon_collapsed),
         }
     }
 
@@ -528,6 +529,7 @@ impl OmolaApp {
         if let Some(tab) = state.tab.and_then(|s| RibbonTab::from_label(&s)) {
             self.tab = tab;
         }
+        self.ribbon_collapsed = state.ribbon_collapsed.unwrap_or(false);
         // Restore recent files, keeping only those that still exist.
         self.recent_files = state
             .recent_files

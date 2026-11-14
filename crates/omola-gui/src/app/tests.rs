@@ -831,6 +831,52 @@ fn persisted_state_roundtrips_setup_keep_results_and_tab() {
 }
 
 #[test]
+fn zoom_diagram_is_clamped_and_reset_restores_defaults() {
+    let mut app = app();
+    app.zoom_diagram(1000.0);
+    assert_eq!(app.diagram_zoom, DIAGRAM_ZOOM_MAX);
+    app.zoom_diagram(0.0001);
+    assert_eq!(app.diagram_zoom, DIAGRAM_ZOOM_MIN);
+    app.diagram_pan = egui::Vec2::new(5.0, 5.0);
+    app.reset_diagram_view();
+    assert_eq!(app.diagram_zoom, 1.0);
+    assert_eq!(app.diagram_pan, egui::Vec2::ZERO);
+}
+
+#[test]
+fn closing_active_tab_resets_the_next_diagram_view() {
+    let mut app = app();
+    app.open_in_new_tab("First");
+    app.open_in_new_tab("Second");
+    app.diagram_zoom = 2.0;
+    app.diagram_pan = egui::Vec2::new(5.0, 5.0);
+    app.close_tab("Second");
+    assert_eq!(app.active.as_deref(), Some("First"));
+    assert_eq!(app.diagram_zoom, 1.0);
+    assert_eq!(app.diagram_pan, egui::Vec2::ZERO);
+}
+
+#[test]
+fn persisted_state_roundtrips_ribbon_collapsed() {
+    let mut original = app();
+    original.ribbon_collapsed = true;
+    let state = original.to_persisted();
+    let json = serde_json::to_string(&state).unwrap();
+    let restored: PersistedState = serde_json::from_str(&json).unwrap();
+    let mut app2 = OmolaApp::with_worker(Worker::spawn(
+        std::env::temp_dir().join("omola-gui-unused"),
+        || {},
+    ));
+    app2.apply_persisted(restored, None);
+    assert!(app2.ribbon_collapsed);
+    let old: PersistedState = serde_json::from_str("{}").unwrap();
+    assert_eq!(old.ribbon_collapsed, None);
+    let mut app3 = app();
+    app3.apply_persisted(old, None);
+    assert!(!app3.ribbon_collapsed);
+}
+
+#[test]
 fn missing_last_file_does_not_panic() {
     let state = PersistedState {
         last_file: Some(PathBuf::from("/nonexistent/path/file.mo")),
@@ -838,6 +884,7 @@ fn missing_last_file_does_not_panic() {
         setup: Some(SimulationSetup::default()),
         keep_results: Some(3),
         recent_files: Vec::new(),
+        ribbon_collapsed: None,
     };
     let mut app = app();
     app.apply_persisted(state, None);
@@ -868,6 +915,7 @@ fn cli_file_takes_priority_over_saved_last_file() {
         }),
         keep_results: Some(3),
         recent_files: Vec::new(),
+        ribbon_collapsed: None,
     };
     let mut app = app();
     app.apply_persisted(state, Some(cli_file.clone()));

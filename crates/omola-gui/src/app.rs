@@ -332,6 +332,10 @@ pub struct LogEntry {
     pub text: String,
 }
 
+/// Diagram zoom limits, shared by the ribbon buttons and the wheel handler (G47).
+pub const DIAGRAM_ZOOM_MIN: f32 = 0.1;
+pub const DIAGRAM_ZOOM_MAX: f32 = 20.0;
+
 /// Serializable subset of [`OmolaApp`] persisted across restarts via eframe storage.
 ///
 /// `OmolaApp` itself is not serialized (it contains a worker thread, channels, etc.).
@@ -343,6 +347,7 @@ pub struct PersistedState {
     pub setup: Option<SimulationSetup>,
     pub keep_results: Option<usize>,
     pub recent_files: Vec<PathBuf>,
+    pub ribbon_collapsed: Option<bool>,
 }
 
 /// Storage key for [`PersistedState`] in eframe's `Storage`.
@@ -403,6 +408,8 @@ pub struct OmolaApp {
     pub diagram_zoom: f32,
     /// Viewport pan for the Diagram layer (in diagram coordinates).
     pub diagram_pan: egui::Vec2,
+    /// Whether the ribbon body is folded away, leaving only the tab row (G47).
+    pub ribbon_collapsed: bool,
     /// Selected component in the Diagram layer (for tooltip and component browser sync).
     pub selected_component: Option<String>,
     pub doc_view: DocView,
@@ -593,6 +600,7 @@ impl OmolaApp {
             model_diagrams: BTreeMap::new(),
             diagram_zoom: 1.0,
             diagram_pan: egui::Vec2::ZERO,
+            ribbon_collapsed: false,
             selected_component: None,
             doc_view: DocView::Formatted,
             find_open: false,
@@ -974,6 +982,24 @@ impl OmolaApp {
         if ui.input_mut(|i| i.consume_shortcut(&find)) {
             self.find_open = true;
         }
+    }
+}
+
+impl OmolaApp {
+    /// Restore the Diagram view to "whole model fits" (zoom 1, no pan) (G47).
+    pub fn reset_diagram_view(&mut self) {
+        self.diagram_zoom = 1.0;
+        self.diagram_pan = egui::Vec2::ZERO;
+    }
+
+    /// Multiply the Diagram zoom by `factor`, clamped to the wheel handler's range (G47).
+    pub fn zoom_diagram(&mut self, factor: f32) {
+        self.diagram_zoom = (self.diagram_zoom * factor).clamp(DIAGRAM_ZOOM_MIN, DIAGRAM_ZOOM_MAX);
+    }
+
+    /// Set an absolute Diagram zoom, clamped (G47).
+    pub fn set_diagram_zoom(&mut self, zoom: f32) {
+        self.diagram_zoom = zoom.clamp(DIAGRAM_ZOOM_MIN, DIAGRAM_ZOOM_MAX);
     }
 }
 

@@ -34,7 +34,11 @@ impl OmolaApp {
                 _ => self.model_tabs.push(class.to_owned()),
             }
         }
+        let changed = self.active.as_deref() != Some(class);
         self.active = Some(class.to_owned());
+        if changed {
+            self.reset_diagram_view();
+        }
         if let Some(Loadable::Ready(page)) = self.docs.get(class) {
             let restriction = page.doc.restriction.clone();
             let experiment = page.doc.experiment;

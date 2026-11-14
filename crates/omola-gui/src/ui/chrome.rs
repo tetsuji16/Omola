@@ -203,8 +203,17 @@ impl OmolaApp {
                     icon_button(ui, icon, DARK, 10.0, false, false);
                 }
                 ui.add_space(4.0);
-                icon_button(ui, ICON_VERTICAL_ALIGN_TOP, DARK, 14.0, false, false)
-                    .on_disabled_hover_text("Collapse the ribbon");
+                let collapse_tip = if self.ribbon_collapsed {
+                    "Expand the ribbon"
+                } else {
+                    "Collapse the ribbon"
+                };
+                if icon_button(ui, ICON_VERTICAL_ALIGN_TOP, DARK, 14.0, true, false)
+                    .on_hover_text(collapse_tip)
+                    .clicked()
+                {
+                    self.ribbon_collapsed = !self.ribbon_collapsed;
+                }
                 ui.add_space(4.0);
                 ui.menu_button(
                     RichText::new(format!("{} Windows  \u{25BE}", ICON_FILTER_NONE.codepoint))
@@ -239,6 +248,7 @@ impl OmolaApp {
     pub fn select_tab(&mut self, tab: RibbonTab) {
         self.tab = tab;
         self.plot_options = false;
+        self.ribbon_collapsed = false;
         if tab == RibbonTab::Text {
             if let Some(active) = self.active.clone() {
                 self.request_text(&active);
@@ -325,6 +335,9 @@ impl OmolaApp {
     }
 
     pub fn ribbon(&mut self, ui: &mut egui::Ui) {
+        if self.ribbon_collapsed {
+            return;
+        }
         egui::ScrollArea::horizontal()
             .id_salt("ribbon_scroll")
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
@@ -599,6 +612,7 @@ impl OmolaApp {
     fn graphics_ribbon(&mut self, ui: &mut egui::Ui) {
         self.model_group(ui, false);
         group(ui, "Layer", |ui| {
+            let diagram = self.graphics_layer == Layer::Diagram;
             column(ui, |ui| {
                 if small_button(
                     ui,
@@ -624,13 +638,31 @@ impl OmolaApp {
                 {
                     self.set_layer(Layer::Diagram);
                 }
-                ui.add_enabled(
-                    false,
-                    egui::Button::new("100%  ▾").min_size(Vec2::new(70.0, 18.0)),
-                );
+                ui.add_enabled_ui(diagram, |ui| {
+                    let label = format!("{:.0}%  ▾", self.diagram_zoom * 100.0);
+                    ui.menu_button(RichText::new(label).size(12.0), |ui| {
+                        if ui.button("50%").clicked() {
+                            self.set_diagram_zoom(0.5);
+                        }
+                        if ui.button("100%").clicked() {
+                            self.reset_diagram_view();
+                        }
+                        if ui.button("200%").clicked() {
+                            self.set_diagram_zoom(2.0);
+                        }
+                        if ui.button("Fit to window").clicked() {
+                            self.reset_diagram_view();
+                        }
+                    });
+                });
             });
             column(ui, |ui| {
-                icon_button(ui, ICON_ZOOM_OUT_MAP, DARK, 16.0, false, false);
+                if icon_button(ui, ICON_ZOOM_OUT_MAP, DARK, 16.0, diagram, false)
+                    .on_hover_text("Fit diagram to window")
+                    .clicked()
+                {
+                    self.reset_diagram_view();
+                }
             });
         });
         group(ui, "History", |ui| {

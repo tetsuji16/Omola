@@ -42,7 +42,7 @@ impl OmolaApp {
             .frame(Frame::new().fill(theme::TITLE_BAR))
             .show(ui, |ui| self.ribbon_tabs(ui));
         Panel::top("ribbon")
-            .exact_size(102.0)
+            .exact_size(if self.ribbon_collapsed { 0.0 } else { 102.0 })
             .show_separator_line(false)
             .frame(Frame::new().fill(theme::BG))
             .show(ui, |ui| self.ribbon(ui));
