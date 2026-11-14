@@ -237,6 +237,16 @@ Results are written to a work folder under the system temporary directory. Work 
 
 性能を調べるときは `OMOLA_FRAME_STATS=1` を付けて起動すると、1 秒ごとの描画時間が標準エラーに出ます。
 
+## MCP server
+
+`omola mcp` serves the same workflow to Model Context Protocol clients over stdio, so an agent can check, simulate and read results without shelling out per command. It speaks both protocol eras: the stateless `2026-07-28` revision (`server/discover`, per-request `_meta`) and the earlier `initialize` handshake down to `2024-11-05`.
+
+```json
+{"command": "omola", "args": ["mcp"]}
+```
+
+Tools: `omola_doctor`, `omola_check`, `omola_simulate`, `omola_inspect_result`, `omola_export_csv`. The protocol support, tool schemas, error model and security notes are in [the MCP reference](docs/reference/mcp.md). Only `tools` is advertised — there are no resources or prompts — and nothing is written to stdout except JSON-RPC messages.
+
 ## Plan and issue queue
 
 Issues are ordered by dependency. Start with issue 01 before expanding command semantics; issue 02 supplies the sample used in README. Compatibility and feature issues require their corpus and version reporting first. The concrete implementation briefs are in [`docs/issues`](docs/issues/README.md).
