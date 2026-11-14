@@ -366,6 +366,15 @@ fn first_run_autoplots_and_old_runs_are_dropped() {
 }
 
 #[test]
+fn first_run_autoplots_only_in_active_diagram() {
+    let mut app = app();
+    app.new_diagram();
+    app.add_run(outcome("A"));
+    assert!(app.diagrams[0].signals.is_empty());
+    assert_eq!(app.diagrams[1].signals.len(), 1);
+}
+
+#[test]
 fn a_new_diagram_takes_its_own_curves_and_the_last_one_stays() {
     let mut app = app();
     app.add_run(outcome("BouncingBall"));
@@ -593,6 +602,39 @@ fn a_late_annotation_of_a_class_the_user_left_is_ignored() {
     );
     assert_eq!(app.setup.stop_time, 5.0);
     assert_eq!(app.setup_from.as_deref(), Some("Current"));
+}
+
+#[test]
+fn cached_experiment_is_applied_when_class_is_reopened() {
+    let mut app = app();
+    app.docs.insert(
+        "Left".into(),
+        Loadable::Ready(DocPage {
+            doc: library::ClassDoc {
+                class: "Left".into(),
+                restriction: "model".into(),
+                comment: String::new(),
+                info_html: String::new(),
+                revisions_html: String::new(),
+                roots: BTreeMap::new(),
+                experiment: Some(experiment()),
+            },
+            info: Vec::new(),
+        }),
+    );
+    app.open_class("Left");
+    assert_eq!(app.setup.stop_time, 5.0);
+    assert_eq!(app.setup_from.as_deref(), Some("Left"));
+}
+
+#[test]
+fn pending_result_copy_holds_window_close() {
+    let mut app = app();
+    app.pending_result_copies = 1;
+    assert!(app.hold_close_for_edit());
+    assert!(app.hold_close_for_edit());
+    app.pending_result_copies = 0;
+    assert!(!app.hold_close_for_edit());
 }
 
 #[test]

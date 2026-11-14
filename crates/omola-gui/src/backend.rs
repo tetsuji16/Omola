@@ -360,6 +360,10 @@ impl Worker {
         let _ = self.jobs.send(job);
     }
 
+    pub fn try_submit(&self, job: Job) -> bool {
+        self.jobs.send(job).is_ok()
+    }
+
     pub fn cancel(&self) {
         self.cancel
             .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -745,6 +749,7 @@ fn run_job(
         Job::Translate { class, context } => translate(&omc, run_dir, &class, &context, send),
         // Handled before OMC discovery above.
         Job::LoadResult { path } => load_result(&path, send),
+        Job::CopyResult { .. } => unreachable!("copy handled before OMC discovery"),
         Job::InstallLibraries => {
             send(Event::Log(
                 LogTab::Version,
