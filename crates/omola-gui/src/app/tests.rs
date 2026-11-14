@@ -366,6 +366,15 @@ fn first_run_autoplots_and_old_runs_are_dropped() {
 }
 
 #[test]
+fn first_run_autoplots_only_in_active_diagram() {
+    let mut app = app();
+    app.new_diagram();
+    app.add_run(outcome("A"));
+    assert!(app.diagrams[0].signals.is_empty());
+    assert_eq!(app.diagrams[1].signals.len(), 1);
+}
+
+#[test]
 fn a_new_diagram_takes_its_own_curves_and_the_last_one_stays() {
     let mut app = app();
     app.add_run(outcome("BouncingBall"));
@@ -596,6 +605,39 @@ fn a_late_annotation_of_a_class_the_user_left_is_ignored() {
 }
 
 #[test]
+fn cached_experiment_is_applied_when_class_is_reopened() {
+    let mut app = app();
+    app.docs.insert(
+        "Left".into(),
+        Loadable::Ready(DocPage {
+            doc: library::ClassDoc {
+                class: "Left".into(),
+                restriction: "model".into(),
+                comment: String::new(),
+                info_html: String::new(),
+                revisions_html: String::new(),
+                roots: BTreeMap::new(),
+                experiment: Some(experiment()),
+            },
+            info: Vec::new(),
+        }),
+    );
+    app.open_class("Left");
+    assert_eq!(app.setup.stop_time, 5.0);
+    assert_eq!(app.setup_from.as_deref(), Some("Left"));
+}
+
+#[test]
+fn pending_result_copy_holds_window_close() {
+    let mut app = app();
+    app.pending_result_copies = 1;
+    assert!(app.hold_close_for_edit());
+    assert!(app.hold_close_for_edit());
+    app.pending_result_copies = 0;
+    assert!(!app.hold_close_for_edit());
+}
+
+#[test]
 fn edited_values_override_setup() {
     let mut edited = BTreeMap::new();
     edited.insert("L".to_owned(), "2".to_owned());
@@ -751,6 +793,19 @@ fn zoom_diagram_is_clamped_and_reset_restores_defaults() {
     assert_eq!(app.diagram_zoom, DIAGRAM_ZOOM_MIN);
     app.diagram_pan = egui::Vec2::new(5.0, 5.0);
     app.reset_diagram_view();
+    assert_eq!(app.diagram_zoom, 1.0);
+    assert_eq!(app.diagram_pan, egui::Vec2::ZERO);
+}
+
+#[test]
+fn closing_active_tab_resets_the_next_diagram_view() {
+    let mut app = app();
+    app.open_in_new_tab("First");
+    app.open_in_new_tab("Second");
+    app.diagram_zoom = 2.0;
+    app.diagram_pan = egui::Vec2::new(5.0, 5.0);
+    app.close_tab("Second");
+    assert_eq!(app.active.as_deref(), Some("First"));
     assert_eq!(app.diagram_zoom, 1.0);
     assert_eq!(app.diagram_pan, egui::Vec2::ZERO);
 }

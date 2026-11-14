@@ -79,7 +79,7 @@ impl OmolaApp {
                 .collect();
             // Next to another model's curves, only the active diagram receives the
             // sweep's curve; the other diagrams keep showing their own model.
-            if replot.is_empty() && (!any_curves || index == active) {
+            if replot.is_empty() && index == active {
                 if let Some(variable) = &autoplot {
                     replot.push(PlotSignal {
                         run_id: id,

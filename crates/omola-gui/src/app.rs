@@ -485,6 +485,8 @@ pub struct OmolaApp {
     pub exit_confirmed: bool,
     pub frame_stats: crate::perf::FrameStats,
     pub pending_edit: Option<String>,
+    /// Result copies still queued or running on the worker.
+    pub pending_result_copies: usize,
     /// Text of the document when the running edit was submitted: a result for an
     /// older text is not applied (G53).
     pub pending_edit_text: Option<String>,
@@ -646,6 +648,7 @@ impl OmolaApp {
             exit_confirmed: false,
             frame_stats: crate::perf::FrameStats::disabled(),
             pending_edit: None,
+            pending_result_copies: 0,
             pending_edit_text: None,
             stale_save_as: false,
             edit_close_warned: false,
@@ -814,16 +817,19 @@ impl OmolaApp {
                     self.sweep_run_finished();
                 }
                 Event::SimulationFailed(class) => self.sweep_run_failed(&class),
-                Event::ResultCopied { dest, result } => match result {
-                    Ok(()) => self.info(
-                        LogTab::Simulation,
-                        format!("Saved the result to {}", dest.display()),
-                    ),
-                    Err(message) => self.error(
-                        LogTab::Simulation,
-                        format!("Could not save the result: {message}"),
-                    ),
-                },
+                Event::ResultCopied { dest, result } => {
+                    self.pending_result_copies = self.pending_result_copies.saturating_sub(1);
+                    match result {
+                        Ok(()) => self.info(
+                            LogTab::Simulation,
+                            format!("Saved the result to {}", dest.display()),
+                        ),
+                        Err(message) => self.error(
+                            LogTab::Simulation,
+                            format!("Could not save the result: {message}"),
+                        ),
+                    }
+                }
                 Event::LibrariesInstalled(ok) => {
                     if ok {
                         self.docs.clear();
