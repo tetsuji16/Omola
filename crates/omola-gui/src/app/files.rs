@@ -459,10 +459,13 @@ impl OmolaApp {
     /// running: closing now would drop the edit without a word. Only the first request
     /// is held back; closing again exits anyway (G53).
     pub fn hold_close_for_edit(&mut self) -> bool {
-        if self.pending_result_copies > 0 {
+        if self.pending_result_copies > 0 && !self.result_copy_close_warned {
+            self.result_copy_close_warned = true;
+            self.edit_close_warned = true;
             self.warn(
                 LogTab::Simulation,
-                "A result copy is still pending; wait for it to finish before closing.".into(),
+                "A result copy is still pending; close again to exit without waiting for it."
+                    .into(),
             );
             self.log_tab = LogTab::Simulation;
             self.bottom_pane = BottomPane::Logs;

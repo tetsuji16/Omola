@@ -356,8 +356,22 @@ fn simulate_bouncing_ball_with_real_omc() {
 #[ignore = "needs OpenModelica; run with --ignored and OMOLA_OMC set"]
 fn separate_open_documents_with_real_omc() {
     let omc = Omc::discover().expect("OpenModelica is required");
-    let root = std::env::temp_dir().join(format!("omola-multiple-docs-{}", std::process::id()));
-    std::fs::create_dir_all(&root).unwrap();
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "omola-multiple-docs-{}-{nonce}",
+        std::process::id()
+    ));
+    std::fs::create_dir(&root).unwrap();
+    let _cleanup = Cleanup(root.clone());
     let context = ClassContext {
         libraries: vec![],
         user_source: Some("within P; model Main Helper h; end Main;".into()),
@@ -408,10 +422,8 @@ fn separate_open_documents_with_real_omc() {
     };
     let files = write_user_files(&root.join("broken"), "Main", &broken_target).unwrap();
     let script = library::check_script_with_user_files("Main", &[], &files).unwrap();
-    let output = omc.run_query_script(&script).unwrap().output;
-    assert!(!output.contains("completed successfully"), "{output}");
-    assert!(output.contains("Error"), "{output}");
-    let _ = std::fs::remove_dir_all(&root);
+    let error = omc.run_query_script(&script).unwrap_err().to_string();
+    assert!(error.contains("Error"), "{error}");
 }
 
 #[test]
@@ -834,7 +846,7 @@ fn msl_browse_document_and_simulate_with_real_omc() {
         context: context.clone(),
     });
     let doc = wait_for(&worker, 300, |e| match e {
-        Event::ClassDoc(_, result) => Some(result.expect("Modelica documentation")),
+        Event::ClassDoc(_, _, result) => Some(result.expect("Modelica documentation")),
         _ => None,
     });
     assert_eq!(doc.restriction, "package");
@@ -859,7 +871,7 @@ fn msl_browse_document_and_simulate_with_real_omc() {
         context: context.clone(),
     });
     let example = wait_for(&worker, 300, |e| match e {
-        Event::ClassDoc(_, result) => Some(result.expect("example documentation")),
+        Event::ClassDoc(_, _, result) => Some(result.expect("example documentation")),
         _ => None,
     });
     let experiment = example.experiment.expect("experiment annotation");

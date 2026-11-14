@@ -336,11 +336,22 @@ pub fn class_range(text: &str, qualified: &str) -> Option<std::ops::Range<usize>
                         .chain(std::iter::once(name.as_str()))
                         .collect::<Vec<_>>()
                         .join(".");
-                    let line_start = text[..toks[i].1].rfind('\n').map_or(0, |x| x + 1);
-                    let line_start = if text[line_start..toks[i].1].trim().is_empty() {
+                    let mut first = i;
+                    while first > 0
+                        && matches!(
+                            toks[first - 1].0.as_str(),
+                            "partial" | "encapsulated" | "expandable" | "pure" | "impure"
+                        )
+                        && text[toks[first - 1].2..toks[first].1].trim().is_empty()
+                    {
+                        first -= 1;
+                    }
+                    let declaration_start = toks[first].1;
+                    let line_start = text[..declaration_start].rfind('\n').map_or(0, |x| x + 1);
+                    let line_start = if text[line_start..declaration_start].trim().is_empty() {
                         line_start
                     } else {
-                        toks[i].1
+                        declaration_start
                     };
                     let short = toks.get(j + 1).is_some_and(|x| x.0 == "=");
                     if short {
@@ -399,6 +410,15 @@ fn within_names_are_used_in_outline_and_edit_ranges() {
     let same_line = "within P; model M end M;";
     let range = class_range(same_line, "P.M").unwrap();
     assert_eq!(&same_line[range], "model M end M;");
+    for text in ["partial model M end M;", "within P; partial model M end M;"] {
+        let name = if text.starts_with("within") {
+            "P.M"
+        } else {
+            "M"
+        };
+        let replaced = replace_class_text(text, name, "partial model M end M;").unwrap();
+        assert_eq!(replaced, text);
+    }
 }
 
 /// Replace exactly one definition returned by OMC `list()`, preserving its original indentation.

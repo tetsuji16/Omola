@@ -267,7 +267,7 @@ pub enum Event {
     /// A job started (`true`) or finished (`false`); drives the busy indicator.
     Busy(bool),
     LibraryLoaded(LibrarySpec, Result<LoadedLibrary, String>),
-    ClassDoc(String, Result<ClassDoc, String>),
+    ClassDoc(String, Option<String>, Result<ClassDoc, String>),
     ClassText(String, Result<String, String>),
     /// Component tree of a class (empty when the class declares no components).
     Instance(String, Result<Vec<crate::instance::ComponentNode>, String>),
@@ -474,6 +474,7 @@ fn run_job(
             send(Event::LibraryLoaded(spec, result));
         }
         Job::LoadClassDoc { class, context } => {
+            let source = context.user_source.clone();
             let result = with_user_files(run_dir, &class, &context, |file| {
                 let script =
                     library::class_doc_script_with_user_files(&class, &context.libraries, file)
@@ -481,7 +482,7 @@ fn run_job(
                 let out = omc.run_query_script(&script).map_err(|e| e.to_string())?;
                 library::parse_class_doc(&class, &out.output)
             });
-            send(Event::ClassDoc(class, result));
+            send(Event::ClassDoc(class, source, result));
         }
         Job::LoadClassText { class, context } => {
             let result = library::class_text_script(&class, &context.libraries)
@@ -896,7 +897,9 @@ fn clean_command_output(output: &str, loads: usize) -> String {
 fn fail_job(job: Job, message: String, send: &dyn Fn(Event)) {
     match job {
         Job::LoadLibrary(spec) => send(Event::LibraryLoaded(spec, Err(message))),
-        Job::LoadClassDoc { class, .. } => send(Event::ClassDoc(class, Err(message))),
+        Job::LoadClassDoc { class, context } => {
+            send(Event::ClassDoc(class, context.user_source, Err(message)))
+        }
         Job::LoadClassText { class, .. } => send(Event::ClassText(class, Err(message))),
         Job::LoadInstance { class, .. } => send(Event::Instance(class, Err(message))),
         Job::LoadParameters { component, .. } => send(Event::Parameters {

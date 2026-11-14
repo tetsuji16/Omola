@@ -286,9 +286,6 @@ print("OMOLA_BEGIN info\n" + omolaDocs[1] + "\nOMOLA_END info\n");
 print("OMOLA_BEGIN revisions\n" + omolaDocs[2] + "\nOMOLA_END revisions\n");
 "#
     ));
-    if !user_files.is_empty() {
-        script.push_str("end if;\n");
-    }
     Ok(script)
 }
 
@@ -366,9 +363,6 @@ pub fn instance_script_with_user_files(
     script.push_str(&format!(
         "print(\"OMOLA_BEGIN instance\\n\" + OpenModelica.Scripting.getModelInstance({class}, prettyPrint=true) + \"\\nOMOLA_END instance\\n\");\n"
     ));
-    if !user_files.is_empty() {
-        script.push_str("end if;\n");
-    }
     Ok(script)
 }
 
@@ -404,9 +398,6 @@ pub fn icon_script_with_user_files(
     script.push_str(&format!(
         "print(\"OMOLA_BEGIN icon\\n\" + OpenModelica.Scripting.getModelInstanceAnnotation({class}, {{\"Icon\"}}) + \"\\nOMOLA_END icon\\n\");\n"
     ));
-    if !user_files.is_empty() {
-        script.push_str("end if;\n");
-    }
     Ok(script)
 }
 
@@ -441,9 +432,6 @@ pub fn icons_script_with_user_files(
             "print(\"OMOLA_BEGIN {key}\\n\" + OpenModelica.Scripting.getModelInstanceAnnotation({class}, {{\"Icon\"}}) + \"\\nOMOLA_END {key}\\n\");\n"
         ));
     }
-    if !user_files.is_empty() {
-        script.push_str("end if;\n");
-    }
     Ok(script)
 }
 
@@ -475,9 +463,6 @@ pub fn check_script_with_user_files(
     script.push_str(&format!(
         "print(\"OMOLA_BEGIN check\\n\" + checkModel({class}) + \"\\nOMOLA_END check\\n\");\nprint(\"OMOLA_BEGIN errors\\n\" + getErrorString() + \"\\nOMOLA_END errors\\n\");\n"
     ));
-    if !user_files.is_empty() {
-        script.push_str("end if;\n");
-    }
     Ok(script)
 }
 
@@ -517,9 +502,6 @@ pub fn translate_script_with_user_files(
     script.push_str(&format!(
         "omolaBuild := buildModel({class});\nprint(\"OMOLA_BEGIN build\\n\" + omolaBuild[1] + \"\\nOMOLA_END build\\n\");\nprint(\"OMOLA_BEGIN errors\\n\" + getErrorString() + \"\\nOMOLA_END errors\\n\");\n"
     ));
-    if !user_files.is_empty() {
-        script.push_str("end if;\n");
-    }
     Ok(script)
 }
 
@@ -545,10 +527,9 @@ fn append_user_files(script: &mut String, files: &[PathBuf]) {
     script.push_str("end while;\n");
     let last = files.len() - 1;
     script.push_str(&format!(
-        "if not omolaSourceLoaded{last} then\nclearMessages();\nomolaUser := loadFile(\"{}\");\nif not omolaUser then print(getErrorString()); end if;\nend if;\n",
+        "if not omolaSourceLoaded{last} then\nclearMessages();\nomolaUser := loadFile(\"{}\");\nif not omolaUser then print(getErrorString()); exit(1); end if;\nend if;\n",
         escape_modelica_string(&files[last].to_string_lossy())
     ));
-    script.push_str(&format!("if omolaSourceLoaded{last} then\n"));
 }
 
 /// Collect `OMOLA_BEGIN key` ... `OMOLA_END key` blocks (first occurrence of each key).
