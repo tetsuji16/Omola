@@ -6,6 +6,7 @@ mod compat;
 mod fmi;
 mod gui;
 mod licenses;
+mod mcp;
 mod omedit;
 mod omedit_evidence;
 mod project;
@@ -114,6 +115,18 @@ fn main() -> ExitCode {
             }
         };
     }
+    if args.first().map(String::as_str) == Some("mcp") {
+        return match mcp::run(&args[1..]) {
+            Ok(text) => {
+                print!("{text}");
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("omola: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     if args.first().map(String::as_str) == Some("release") {
         return match release::run(&args[1..]) {
             Ok(text) => {
@@ -147,7 +160,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn doctor() -> Result<String, BackendError> {
+pub(crate) fn doctor() -> Result<String, BackendError> {
     let omc = Omc::discover()?;
     Ok(format!(
         "OpenModelica: {}\nBackend: external `omc` process\n",
@@ -155,7 +168,7 @@ fn doctor() -> Result<String, BackendError> {
     ))
 }
 
-fn check(args: &[String]) -> Result<String, BackendError> {
+pub(crate) fn check(args: &[String]) -> Result<String, BackendError> {
     let (model, class) = required(args, false)?;
     let result = Omc::discover()?.check_model(&model, &class)?;
     Ok(format!("{}\n{}", result.omc_version, result.output))
@@ -264,7 +277,7 @@ fn required_with_values(
 }
 
 fn usage() {
-    eprintln!("Omola 0.1 — OpenModelica-backed Modelica workflow\n\nUsage:\n  omola doctor\n  omola check --model FILE.mo --class Modelica.Class\n  omola simulate --model FILE.mo --class Modelica.Class [--stop-time SECONDS] [--parameters name=value,name=value] [--output PREFIX]\n  omola project inspect MANIFEST.toml --format json\n  omola project validate MANIFEST.toml\n  omola project simulate MANIFEST.toml [--output PREFIX]\n  omola project open MANIFEST.toml [--omedit PATH]\n  omola gui status [--format json|markdown]\n  omola omedit evidence verify --evidence FILE.json --manifest FILE.toml [--require-verified]\n  omola licenses check [--output REPORT.md]\n  omola results inspect FILE.csv|FILE.mat\n  omola results export-csv FILE.mat --variables x,y --output FILE.csv\n  omola compat run --manifest FILE.toml --format json|markdown\n  omola release verify --scorecard FILE.json --manifest FILE.toml --gates FILE.toml\n  omola bridge inventory [--format json|markdown]\n  omola bridge call --function Dymola.function [--model FILE.mo --class Modelica.Class --stop-time SECONDS]\n\nRequires OpenModelica `omc` on PATH or OMOLA_OMC set to its executable path.");
+    eprintln!("Omola 0.1 — OpenModelica-backed Modelica workflow\n\nUsage:\n  omola doctor\n  omola check --model FILE.mo --class Modelica.Class\n  omola simulate --model FILE.mo --class Modelica.Class [--stop-time SECONDS] [--parameters name=value,name=value] [--output PREFIX]\n  omola project inspect MANIFEST.toml --format json\n  omola project validate MANIFEST.toml\n  omola project simulate MANIFEST.toml [--output PREFIX]\n  omola project open MANIFEST.toml [--omedit PATH]\n  omola gui status [--format json|markdown]\n  omola omedit evidence verify --evidence FILE.json --manifest FILE.toml [--require-verified]\n  omola licenses check [--output REPORT.md]\n  omola results inspect FILE.csv|FILE.mat\n  omola results export-csv FILE.mat --variables x,y --output FILE.csv\n  omola compat run --manifest FILE.toml --format json|markdown\n  omola release verify --scorecard FILE.json --manifest FILE.toml --gates FILE.toml\n  omola bridge inventory [--format json|markdown]\n  omola bridge call --function Dymola.function [--model FILE.mo --class Modelica.Class --stop-time SECONDS]\n  omola mcp                                (Model Context Protocol server on stdin/stdout)\n\nRequires OpenModelica `omc` on PATH or OMOLA_OMC set to its executable path.");
 }
 
 fn parse_parameter_overrides(
