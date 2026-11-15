@@ -95,7 +95,7 @@ pub fn run(args: &[String]) -> Result<String, BackendError> {
     }
 }
 
-fn inspect(path: &Path) -> Result<String, BackendError> {
+pub(crate) fn inspect(path: &Path) -> Result<String, BackendError> {
     if !path.is_file() {
         return Err(BackendError::InvalidInput(format!(
             "result file does not exist or is not a file: {}",
