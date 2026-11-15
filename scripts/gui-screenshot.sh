@@ -5,7 +5,7 @@
 # Usage:
 #   scripts/gui-screenshot.sh OUT.png [xdrive actions...]
 # Example (click the "Simulation" ribbon tab, wait, then capture):
-#   scripts/gui-screenshot.sh target/sim.png click:283,37 sleep:1
+#   scripts/gui-screenshot.sh target/sim.png click:337,42 sleep:1
 #
 # The GUI runs with scripts/fake-omc.sh unless OMOLA_OMC is already set.
 set -eu

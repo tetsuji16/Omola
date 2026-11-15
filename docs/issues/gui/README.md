@@ -68,10 +68,10 @@ Windows PowerShell では fake-omc.sh は動きません。WSL か Docker の開
 
 ```sh
 pip install python-xlib
-scripts/gui-screenshot.sh target/shot.png click:283,37 sleep:1
+scripts/gui-screenshot.sh target/shot.png click:337,42 sleep:1
 ```
 
-座標は 1280x800 の画面上のピクセル。既定レイアウトでの目安: リボンのタブ Graphics(41,37) Documentation(135,37) Text(217,37) Simulation(283,37) Tools(354,37)。
+座標は 1280x800 の画面上のピクセル。既定レイアウトでの実測値: リボンのタブ Graphics(93,42) Documentation(187,42) Text(268,42) Simulation(337,42) Tools(408,42)(File は 0〜54 を占めます)。タブの幅はラベルの文字幅で決まるので、ラベルを変えたら測り直してください。Windows しか無い環境では Docker の Linux コンテナ(`rust:1-bookworm` + `xvfb` + `imagemagick` + `python3-xlib`)で同じスクリプトを実行できます。
 UI の見た目を変える issue では、**変更後のスクリーンショットを PR に添付**してください(画像はリポジトリにコミットしない。`docs/images/omola-gui/` の既存画像を更新する場合のみコミット可)。
 
 ## 4. egui 0.37 の書き方メモ(古い記事のコードは動きません)
