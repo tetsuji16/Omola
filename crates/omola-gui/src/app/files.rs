@@ -245,13 +245,7 @@ impl OmolaApp {
             self.model_diagrams.remove(class);
             self.texts.remove(class);
         }
-        if self
-            .components
-            .as_ref()
-            .is_some_and(|(name, _)| classes.contains(name))
-        {
-            self.components = None;
-        }
+        self.instances.retain(|name, _| !classes.contains(name));
         self.history.retain(|c| !classes.contains(c));
         self.history_pos = self.history_pos.min(self.history.len());
         self.documents.remove(doc);

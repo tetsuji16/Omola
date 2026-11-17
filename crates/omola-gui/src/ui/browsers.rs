@@ -607,11 +607,7 @@ impl OmolaApp {
                 );
                 return;
             };
-            let Some((_, nodes)) = self
-                .components
-                .as_ref()
-                .filter(|(class, _)| class == active)
-            else {
+            let Some(data) = self.instances.get(active) else {
                 ui.label(
                     RichText::new(if loading {
                         "Loading components ..."
@@ -623,7 +619,7 @@ impl OmolaApp {
                 );
                 return;
             };
-            if nodes.is_empty() {
+            if data.components.is_empty() {
                 ui.label(
                     RichText::new("This class declares no components.")
                         .small()
@@ -631,7 +627,7 @@ impl OmolaApp {
                 );
                 return;
             }
-            for node in nodes {
+            for node in &data.components {
                 component_rows(
                     ui,
                     node,

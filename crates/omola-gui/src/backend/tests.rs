@@ -520,7 +520,7 @@ fn icon_annotations_with_real_omc() {
 
 #[test]
 #[ignore = "needs OpenModelica with MSL 4.1.0; run with --ignored and OMOLA_OMC set"]
-fn diagram_reuses_cached_icons_with_real_omc() {
+fn one_instance_query_supplies_components_and_diagram_with_real_omc() {
     if std::env::var_os("OMOLA_OMC").is_none() {
         eprintln!("OMOLA_OMC is not set; skipping");
         return;
@@ -533,36 +533,21 @@ fn diagram_reuses_cached_icons_with_real_omc() {
         libraries: vec![LibrarySpec::new("Modelica", Some("4.1.0"))],
         user_source: None,
     };
-    let load = |cached_icons| {
-        worker.submit(Job::LoadDiagram {
-            class: class.into(),
-            context: context.clone(),
-            cached_icons,
-        });
-        wait_for(&worker, 180, |event| match event {
-            Event::Diagram(_, result) => Some(result.expect("diagram")),
-            _ => None,
-        })
-    };
-    let first = load(Default::default());
-    let component = first
-        .components
-        .iter()
-        .find(|c| c.icon.is_some())
-        .expect("component icon");
-    let mut cached = component.icon.clone().unwrap();
-    cached.skipped.push("cache verification marker".into());
-    let type_name = component.type_name.clone();
-    let second = load([(type_name.clone(), cached.clone())].into_iter().collect());
-    assert_eq!(
-        second
-            .components
-            .iter()
-            .find(|c| c.type_name == type_name)
-            .unwrap()
-            .icon
-            .as_ref(),
-        Some(&cached)
+    worker.submit(Job::LoadInstance {
+        class: class.into(),
+        context: context.clone(),
+    });
+    let data = wait_for(&worker, 180, |event| match event {
+        Event::Instance(_, result) => Some(result.expect("instance")),
+        _ => None,
+    });
+    // The Component Browser and the Diagram layer are fed by this single answer, so the
+    // diagram must be complete without a second OMC query.
+    assert!(!data.components.is_empty());
+    assert!(!data.diagram.components.is_empty());
+    assert!(
+        data.diagram.components.iter().any(|c| c.icon.is_some()),
+        "component icons come from the instance JSON"
     );
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -576,7 +561,7 @@ fn diagram_loads_user_component_icon_with_real_omc() {
     }
     let root = std::env::temp_dir().join(format!("omola-gui-user-icon-{}", std::process::id()));
     let worker = Worker::spawn(root.join("work"), || {});
-    worker.submit(Job::LoadDiagram {
+    worker.submit(Job::LoadInstance {
         class: "A".into(),
         context: ClassContext {
             other_sources: Vec::new(),
@@ -591,10 +576,9 @@ end A;"#
                     .into(),
             ),
         },
-        cached_icons: Default::default(),
     });
     let diagram = wait_for(&worker, 120, |event| match event {
-        Event::Diagram(_, result) => Some(result.expect("diagram")),
+        Event::Instance(_, result) => Some(result.expect("instance").diagram),
         _ => None,
     });
     let part = diagram

@@ -128,11 +128,10 @@ impl OmolaApp {
     /// Ask the worker for the component tree of `class` (once per class).
     ///
     /// This starts an OMC process, so it is only sent when the active class changes or
-    /// after a successful Check - never per keystroke.
+    /// after a successful Check - never per keystroke. The Diagram layer is built from the
+    /// same answer, which is why [`Self::request_diagram`] only asks for this.
     pub fn request_components(&mut self, class: &str) {
-        if self.components.as_ref().map(|(c, _)| c.as_str()) == Some(class)
-            || self.components_pending.as_deref() == Some(class)
-        {
+        if self.instances.contains_key(class) || self.components_pending.as_deref() == Some(class) {
             return;
         }
         self.components_pending = Some(class.to_owned());
@@ -177,29 +176,45 @@ impl OmolaApp {
         });
     }
 
-    /// Ask the worker for the Diagram graphics of `class` (once per class).
+    /// Make the Diagram graphics of `class` available (once per class).
     ///
-    /// The Diagram layer calls this on every frame it is visible, so an entry is added to
-    /// [`Self::model_diagrams`] before the job is sent; a failed load is remembered as well and is
-    /// only retried after the next Check.
+    /// The Diagram layer calls this on every frame it is visible. Placements, connections
+    /// and component icons all come from the same `getModelInstance` answer the Component
+    /// Browser uses, so this only requests that answer: a second OMC query would pay the
+    /// several seconds `loadModel(Modelica)` costs all over again. The diagram is filled in
+    /// by [`Self::instance_loaded`] when the answer arrives.
     pub fn request_diagram(&mut self, class: &str) {
         if self.model_diagrams.contains_key(class) {
             return;
         }
         self.model_diagrams
             .insert(class.to_owned(), Loadable::Loading);
-        self.worker.submit(Job::LoadDiagram {
-            class: class.to_owned(),
-            context: self.context_for(class),
-            cached_icons: self
-                .icons
-                .iter()
-                .filter_map(|(name, icon)| match icon {
-                    Loadable::Ready(icon) => Some((name.clone(), icon.clone())),
-                    _ => None,
-                })
-                .collect(),
-        });
+        if let Some(data) = self.instances.get(class) {
+            let data = data.clone();
+            self.instance_loaded(class.to_owned(), data);
+            return;
+        }
+        self.request_components(class);
+    }
+
+    /// Store the `getModelInstance` answer of `class` for the browser and the Diagram layer.
+    pub fn instance_loaded(&mut self, class: String, data: crate::instance::InstanceData) {
+        let diagram = data.diagram.clone();
+        for component in &diagram.components {
+            if let Some(icon) = &component.icon {
+                self.icons
+                    .insert(component.type_name.clone(), Loadable::Ready(icon.clone()));
+            }
+            for pin in &component.connectors {
+                if let Some(icon) = &pin.icon {
+                    self.icons
+                        .insert(pin.type_name.clone(), Loadable::Ready(icon.clone()));
+                }
+            }
+        }
+        self.model_diagrams
+            .insert(class.clone(), Loadable::Ready(diagram));
+        self.instances.insert(class, data);
     }
 
     pub fn request_text(&mut self, class: &str) {

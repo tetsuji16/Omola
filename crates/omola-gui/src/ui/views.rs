@@ -294,10 +294,8 @@ impl OmolaApp {
                 if let Some(Loadable::Ready(d)) = self.model_diagrams.get(class) {
                     existing.extend(d.components.iter().map(|c| c.name.clone()));
                 }
-                if let Some((c, nodes)) = &self.components {
-                    if c == class {
-                        collect_component_names(nodes, &mut existing);
-                    }
+                if let Some(data) = self.instances.get(class) {
+                    collect_component_names(&data.components, &mut existing);
                 }
                 let short = payload
                     .qualified
@@ -337,7 +335,9 @@ impl OmolaApp {
                 painter.text(
                     rect.center(),
                     Align2::CENTER_CENTER,
-                    "Loading Diagram ...",
+                    // OpenModelica reloads the Modelica library for every query, and that
+                    // takes several seconds; say so instead of looking hung.
+                    "Loading Diagram ...\nOpenModelica loads the Modelica library first, this can take a few seconds.",
                     FontId::proportional(13.0),
                     theme::TEXT_WEAK,
                 );
@@ -357,7 +357,7 @@ impl OmolaApp {
                 painter.text(
                     rect.center(),
                     Align2::CENTER_CENTER,
-                    "Loading Diagram ...",
+                    "Loading Diagram ...\nOpenModelica loads the Modelica library first, this can take a few seconds.",
                     FontId::proportional(13.0),
                     theme::TEXT_WEAK,
                 );
@@ -592,6 +592,18 @@ impl OmolaApp {
             self.diagram_zoom,
             self.diagram_pan,
         );
+        // A class whose parts carry no Placement annotation (or that declares none at all,
+        // like `examples/BouncingBall.mo`) has nothing to draw. Say so instead of leaving a
+        // blank white canvas that looks like a rendering bug.
+        if diagram.components.is_empty() && diagram.own_graphics.is_empty() {
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                "Nothing to draw in the Diagram layer.\nNo component of this class has a Placement annotation, and the class has no Diagram graphics.",
+                FontId::proportional(13.0),
+                theme::TEXT_WEAK,
+            );
+        }
         let scale = diagram_scale(&diagram, rect, self.diagram_zoom);
         let hovered_diagram = response.hover_pos().map(|pos| {
             crate::diagram_view::to_diagram(

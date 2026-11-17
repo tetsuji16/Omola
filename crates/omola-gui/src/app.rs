@@ -394,8 +394,10 @@ pub struct OmolaApp {
     pub texts: BTreeMap<String, Loadable<String>>,
     /// Tokenized layout jobs for read-only library source text, keyed by class.
     pub library_text_layouts: BTreeMap<String, crate::text_editor::EditorState>,
-    /// Component tree of the active class (`getModelInstance`, G06).
-    pub components: Option<(String, Vec<crate::instance::ComponentNode>)>,
+    /// Component tree and diagram of every class loaded so far (`getModelInstance`, G06).
+    /// One OMC answer feeds the Component Browser and the Diagram layer, and keeping it per
+    /// class makes switching tabs and classes free instead of another several-second query.
+    pub instances: BTreeMap<String, crate::instance::InstanceData>,
     /// Component nodes the user expanded, as dotted paths from the active class.
     pub component_expanded: BTreeSet<String>,
     /// Class whose component tree has been requested but not received yet.
@@ -593,7 +595,7 @@ impl OmolaApp {
             docs: BTreeMap::new(),
             texts: BTreeMap::new(),
             library_text_layouts: BTreeMap::new(),
-            components: None,
+            instances: BTreeMap::new(),
             component_expanded: BTreeSet::new(),
             components_pending: None,
             icons: BTreeMap::new(),
@@ -744,11 +746,19 @@ impl OmolaApp {
                         self.components_pending = None;
                     }
                     match result {
-                        Ok(nodes) => self.components = Some((class, nodes)),
-                        Err(message) => self.info(
-                            LogTab::Translation,
-                            format!("Component tree of {class} is not available: {message}"),
-                        ),
+                        Ok(data) => self.instance_loaded(class, data),
+                        Err(message) => {
+                            // The Diagram layer waits for this answer too; do not leave it
+                            // spinning forever when the query failed.
+                            if matches!(self.model_diagrams.get(&class), Some(Loadable::Loading)) {
+                                self.model_diagrams
+                                    .insert(class.clone(), Loadable::Failed(message.clone()));
+                            }
+                            self.info(
+                                LogTab::Translation,
+                                format!("Component tree of {class} is not available: {message}"),
+                            )
+                        }
                     }
                 }
                 Event::Parameters { component, result } => {
@@ -774,33 +784,6 @@ impl OmolaApp {
                         class,
                         match result {
                             Ok(icon) => Loadable::Ready(icon),
-                            Err(message) => Loadable::Failed(message),
-                        },
-                    );
-                }
-                Event::Diagram(class, result) => {
-                    if let Ok(diagram) = &result {
-                        for component in &diagram.components {
-                            if let Some(icon) = &component.icon {
-                                self.icons.insert(
-                                    component.type_name.clone(),
-                                    Loadable::Ready(icon.clone()),
-                                );
-                            }
-                            for pin in &component.connectors {
-                                if let Some(icon) = &pin.icon {
-                                    self.icons.insert(
-                                        pin.type_name.clone(),
-                                        Loadable::Ready(icon.clone()),
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    self.model_diagrams.insert(
-                        class,
-                        match result {
-                            Ok(diagram) => Loadable::Ready(diagram),
                             Err(message) => Loadable::Failed(message),
                         },
                     );

@@ -1,7 +1,9 @@
 //! Read-only rendering of Modelica `annotation(Diagram(graphics={...}))` and component placement (G12).
 //!
-//! The diagram data comes from `getModelInstance` (instance JSON) and
-//! `getModelInstanceAnnotation(..., {"Icon"})` for each component type.
+//! The diagram data comes from one `getModelInstance` (instance JSON) query. That JSON
+//! already carries the `Icon` annotation of every component type (inherited ones
+//! included), so the Diagram layer does not need the separate
+//! `getModelInstanceAnnotation(..., {"Icon"})` query the Icon layer uses.
 //!
 //! Placement coordinate transform follows Modelica 3.6 section 18.6.1:
 //! `p' = origin + center(placement.extent) + R(rotation) * scale *
@@ -222,131 +224,159 @@ pub fn parse_diagram(
         }
     }
 
-    // Parse components and their placements
-    if let Some(elements) = instance_json.get("elements").and_then(|e| e.as_array()) {
-        for element in elements {
-            if element.get("$kind").and_then(|k| k.as_str()) != Some("component") {
-                continue;
-            }
-            // Instance JSON also includes parameters and other scalar components. Only
-            // elements with a Diagram Placement annotation belong in this view.
-            if !has_placement_annotation(element) {
-                continue;
-            }
-            let name = element
-                .get("name")
-                .and_then(|n| n.as_str())
-                .unwrap_or("")
-                .to_owned();
-            let type_name = element
-                .get("typeName")
-                .and_then(|n| n.as_str())
-                .or_else(|| {
-                    element
-                        .get("type")
-                        .and_then(|t| t.get("name"))
-                        .and_then(|n| n.as_str())
-                })
-                .unwrap_or("")
-                .to_owned();
+    // Parse components and their placements, including the ones inherited through `extends`
+    for element in placed_elements(instance_json) {
+        let name = element
+            .get("name")
+            .and_then(|n| n.as_str())
+            .unwrap_or("")
+            .to_owned();
+        let type_name = element
+            .get("typeName")
+            .and_then(|n| n.as_str())
+            .or_else(|| {
+                element
+                    .get("type")
+                    .and_then(|t| t.get("name"))
+                    .and_then(|n| n.as_str())
+            })
+            .unwrap_or("")
+            .to_owned();
 
-            // Parse placement annotation
-            let placement = if let Some(ann) = element.get("annotation") {
-                parse_placement(ann)
-            } else {
-                Placement::default()
-            };
+        // Parse placement annotation
+        let placement = if let Some(ann) = element.get("annotation") {
+            parse_placement(ann)
+        } else {
+            Placement::default()
+        };
 
-            let icon = icons.get(&type_name).cloned();
-            let mut connectors = Vec::new();
-            collect_connector_pins(element.get("type").unwrap_or(&Value::Null), &mut connectors);
-            for pin in &mut connectors {
-                if pin.icon.is_none() {
-                    pin.icon = icons.get(&pin.type_name).cloned();
-                }
+        // The instance JSON already carries the Icon annotation of every component type
+        // (inherited ones included), so no second OMC query is needed. `icons` holds the
+        // icons the app has cached from earlier loads and wins over the parsed copy.
+        let icon = icons.get(&type_name).cloned().or_else(|| {
+            element
+                .get("type")
+                .and_then(|t| crate::graphics::parse_icon(t).ok())
+        });
+        let mut connectors = Vec::new();
+        collect_connector_pins(element.get("type").unwrap_or(&Value::Null), &mut connectors);
+        for pin in &mut connectors {
+            if pin.icon.is_none() {
+                pin.icon = icons.get(&pin.type_name).cloned();
             }
-
-            diagram.components.push(PlacedComponent {
-                name,
-                type_name,
-                placement,
-                icon,
-                connectors,
-                parameters: parameter_values(element.get("type").unwrap_or(&Value::Null)),
-            });
         }
+
+        diagram.components.push(PlacedComponent {
+            name,
+            type_name,
+            placement,
+            icon,
+            connectors,
+            parameters: parameter_values(element.get("type").unwrap_or(&Value::Null)),
+        });
     }
 
-    // Parse connections
-    if let Some(connections) = instance_json.get("connections").and_then(|c| c.as_array()) {
-        for conn in connections {
-            // Real OMC format: {lhs: {parts: [...]}, rhs: {...}, annotation: {Line: {points, color}}}
-            let cref = |v: &Value| -> Option<String> {
-                v.get("parts")?.as_array().map(|parts| {
-                    parts
-                        .iter()
-                        .filter_map(|part| part.get("name").and_then(|n| n.as_str()))
-                        .collect::<Vec<_>>()
-                        .join(".")
-                })
-            };
-            let from_owned = conn
-                .get("from")
-                .and_then(|v| v.as_str())
-                .map(|v| v.to_owned())
-                .or_else(|| conn.get("lhs").and_then(cref));
-            let to_owned = conn
-                .get("to")
-                .and_then(|v| v.as_str())
-                .map(|v| v.to_owned())
-                .or_else(|| conn.get("rhs").and_then(cref));
-            if let (Some(from), Some(to)) = (from_owned, to_owned) {
-                {
-                    let line = conn.get("annotation").and_then(|a| a.get("Line"));
-                    let points = line
-                        .and_then(|l| l.get("points"))
-                        .or_else(|| conn.get("points"))
-                        .and_then(|p| p.as_array())
-                        .and_then(|arr| {
-                            let pts: Vec<[f64; 2]> =
-                                arr.iter().filter_map(point_from_value).collect();
-                            if pts.len() == arr.len() && !pts.is_empty() {
-                                Some(pts)
-                            } else {
-                                None
-                            }
-                        })
-                        .unwrap_or_default();
+    // Parse connections, inherited ones included: OpenModelica keeps the `connect(...)`
+    // statements of a base class in that class's node, so a model that only extends its
+    // parent has no top-level `connections` array at all.
+    for conn in connections_of_class(instance_json) {
+        // Real OMC format: {lhs: {parts: [...]}, rhs: {...}, annotation: {Line: {points, color}}}
+        let cref = |v: &Value| -> Option<String> {
+            v.get("parts")?.as_array().map(|parts| {
+                parts
+                    .iter()
+                    .filter_map(|part| part.get("name").and_then(|n| n.as_str()))
+                    .collect::<Vec<_>>()
+                    .join(".")
+            })
+        };
+        let from_owned = conn
+            .get("from")
+            .and_then(|v| v.as_str())
+            .map(|v| v.to_owned())
+            .or_else(|| conn.get("lhs").and_then(cref));
+        let to_owned = conn
+            .get("to")
+            .and_then(|v| v.as_str())
+            .map(|v| v.to_owned())
+            .or_else(|| conn.get("rhs").and_then(cref));
+        if let (Some(from), Some(to)) = (from_owned, to_owned) {
+            {
+                let line = conn.get("annotation").and_then(|a| a.get("Line"));
+                let points = line
+                    .and_then(|l| l.get("points"))
+                    .or_else(|| conn.get("points"))
+                    .and_then(|p| p.as_array())
+                    .and_then(|arr| {
+                        let pts: Vec<[f64; 2]> = arr.iter().filter_map(point_from_value).collect();
+                        if pts.len() == arr.len() && !pts.is_empty() {
+                            Some(pts)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default();
 
-                    let color = line
-                        .and_then(|l| l.get("color"))
-                        .or_else(|| conn.get("color"))
-                        .and_then(|c| c.as_array())
-                        .and_then(|arr| {
-                            if arr.len() >= 3 {
-                                Some([
-                                    arr[0].as_f64().unwrap_or(0.0) as u8,
-                                    arr[1].as_f64().unwrap_or(0.0) as u8,
-                                    arr[2].as_f64().unwrap_or(0.0) as u8,
-                                ])
-                            } else {
-                                None
-                            }
-                        })
-                        .unwrap_or([0, 0, 0]);
+                let color = line
+                    .and_then(|l| l.get("color"))
+                    .or_else(|| conn.get("color"))
+                    .and_then(|c| c.as_array())
+                    .and_then(|arr| {
+                        if arr.len() >= 3 {
+                            Some([
+                                arr[0].as_f64().unwrap_or(0.0) as u8,
+                                arr[1].as_f64().unwrap_or(0.0) as u8,
+                                arr[2].as_f64().unwrap_or(0.0) as u8,
+                            ])
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or([0, 0, 0]);
 
-                    diagram.connections.push(Connection {
-                        from: from.to_owned(),
-                        to: to.to_owned(),
-                        points,
-                        color,
-                    });
-                }
+                diagram.connections.push(Connection {
+                    from: from.to_owned(),
+                    to: to.to_owned(),
+                    points,
+                    color,
+                });
             }
         }
     }
 
     Ok(diagram)
+}
+
+/// `connect(...)` statements of a class and of the base classes it extends.
+///
+/// A connection declared twice (derived and base) is returned once.
+fn connections_of_class(instance: &Value) -> Vec<&Value> {
+    fn collect<'a>(node: &'a Value, out: &mut Vec<&'a Value>) {
+        if let Some(connections) = node.get("connections").and_then(Value::as_array) {
+            out.extend(connections);
+        }
+        for element in node
+            .get("elements")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|e| e.get("$kind").and_then(Value::as_str) == Some("extends"))
+        {
+            collect(element.get("baseClass").unwrap_or(&Value::Null), out);
+        }
+    }
+    let mut all = Vec::new();
+    collect(instance, &mut all);
+    let mut seen = std::collections::BTreeSet::new();
+    all.into_iter()
+        .filter(|connection| {
+            let key = (
+                connection.get("lhs").map(|v| v.to_string()),
+                connection.get("rhs").map(|v| v.to_string()),
+            );
+            seen.insert(key)
+        })
+        .collect()
 }
 
 /// Use OMC's evaluated values when available; never mistake an expression for its value.
@@ -451,45 +481,50 @@ pub fn has_placement_annotation(element: &Value) -> bool {
         .is_some()
 }
 
-/// Collect the class names needed for icon queries from placed model components.
-/// OpenModelica 1.27.1 reports the class under `type.name`; older instance JSON may
-/// provide the same name through `typeName` instead.
-pub fn placed_component_types(instance: &Value) -> std::collections::BTreeSet<String> {
-    let elements: Vec<_> = instance
-        .get("elements")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter(|element| {
-            element.get("$kind").and_then(Value::as_str) == Some("component")
-                && has_placement_annotation(element)
-        })
-        .collect();
-    let mut types: std::collections::BTreeSet<String> = elements
-        .iter()
-        .filter_map(|element| {
-            element
-                .get("typeName")
-                .and_then(Value::as_str)
-                .or_else(|| {
-                    element
-                        .get("type")
-                        .and_then(|t| t.get("name"))
-                        .and_then(Value::as_str)
-                })
-                .map(str::to_owned)
-        })
-        .collect();
-    for element in elements {
-        let mut pins = Vec::new();
-        collect_connector_pins(element.get("type").unwrap_or(&Value::Null), &mut pins);
-        types.extend(
-            pins.into_iter()
-                .filter(|pin| pin.icon.is_none() && !pin.type_name.is_empty())
-                .map(|pin| pin.type_name),
-        );
+/// Components that belong on the diagram, inherited ones included.
+///
+/// OpenModelica nests a base class under `elements[].baseClass`, so a model that only
+/// inherits its parts (`model M extends Base; end M;`) has no top-level `component`
+/// element at all. Walking `extends` is what the Component Browser already does
+/// (`instance::parse_components`); without it the Diagram layer stayed empty for such a
+/// model while the browser listed every part.
+///
+/// Derived components come first and the first occurrence of a name wins, so a redeclared
+/// part is taken from the class that declares it last in the inheritance chain.
+pub fn placed_elements(instance: &Value) -> Vec<&Value> {
+    let mut elements = Vec::new();
+    let mut names = std::collections::BTreeSet::new();
+    collect_placed_elements(instance, &mut elements, &mut names);
+    elements
+}
+
+fn collect_placed_elements<'a>(
+    node: &'a Value,
+    elements: &mut Vec<&'a Value>,
+    names: &mut std::collections::BTreeSet<String>,
+) {
+    let Some(children) = node.get("elements").and_then(Value::as_array) else {
+        return;
+    };
+    for element in children {
+        match element.get("$kind").and_then(Value::as_str) {
+            Some("component") if has_placement_annotation(element) => {
+                let name = element
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if names.insert(name.to_owned()) {
+                    elements.push(element);
+                }
+            }
+            Some("extends") => collect_placed_elements(
+                element.get("baseClass").unwrap_or(&Value::Null),
+                elements,
+                names,
+            ),
+            _ => {}
+        }
     }
-    types
 }
 
 fn collect_connector_pins(class: &Value, pins: &mut Vec<ConnectorPin>) {
@@ -915,24 +950,54 @@ mod tests {
     use super::*;
 
     #[test]
-    fn placed_component_types_support_openmodelica_type_name_shape() {
+    fn placed_elements_flatten_extends_and_skip_unplaced_parameters() {
         let value = serde_json::json!({
             "elements": [
-                {"$kind":"component", "name":"newOmc", "type":{"name":"Modelica.Blocks.Sources.Sine"}, "annotation":{"Placement":{}}},
-                {"$kind":"component", "name":"legacy", "typeName":"Modelica.Blocks.Math.Gain", "annotation":{"Placement":{}}},
-                {"$kind":"component", "name":"parameter", "type":{"name":"Modelica.Units.SI.Time"}},
-                {"$kind":"extends", "name":"base", "type":{"name":"Modelica.Blocks.Icons.Block"}, "annotation":{"Placement":{}}}
+                {"$kind":"component", "name":"own", "type":{"name":"Modelica.Blocks.Sources.Sine"}, "annotation":{"Placement":{}}},
+                {"$kind":"extends", "baseClass":{"elements":[
+                    {"$kind":"component", "name":"inherited", "typeName":"Modelica.Blocks.Math.Gain", "annotation":{"Placement":{}}},
+                    {"$kind":"component", "name":"own", "type":{"name":"Modelica.Blocks.Math.Gain"}, "annotation":{"Placement":{}}},
+                    {"$kind":"extends", "baseClass":{"elements":[
+                        {"$kind":"component", "name":"deep", "type":{"name":"Modelica.Blocks.Math.Add"}, "annotation":{"Placement":{}}}
+                    ]}},
+                    {"$kind":"component", "name":"parameter", "type":{"name":"Modelica.Units.SI.Time"}}
+                ]}}
             ]
         });
 
-        assert_eq!(
-            placed_component_types(&value),
-            [
-                "Modelica.Blocks.Math.Gain".to_owned(),
-                "Modelica.Blocks.Sources.Sine".to_owned()
+        let names: Vec<_> = placed_elements(&value)
+            .iter()
+            .map(|element| element.get("name").and_then(Value::as_str).unwrap())
+            .collect();
+        // Derived components first, then the base class depth first; a redeclared name is
+        // taken once, from the derived class.
+        assert_eq!(names, ["own", "inherited", "deep"]);
+    }
+
+    #[test]
+    fn diagram_parses_inherited_components_with_icons_from_the_instance_json() {
+        let value = serde_json::json!({
+            "elements": [
+                {"$kind":"extends", "baseClass":{"elements":[
+                    {"$kind":"component", "name":"r1",
+                     "type":{"name":"Modelica.Electrical.Analog.Basic.Resistor",
+                             "annotation":{"Icon":{"graphics":[
+                                 {"$kind":"record","name":"Rectangle","elements":[]}
+                             ]}}},
+                     "annotation":{"Placement":{"transformation":{"extent":[[-80,-10],[-60,10]]}}}}
+                ]}}
             ]
-            .into_iter()
-            .collect()
+        });
+
+        let diagram = parse_diagram(&value, &BTreeMap::new()).expect("diagram");
+        assert_eq!(diagram.components.len(), 1);
+        let component = &diagram.components[0];
+        assert_eq!(component.name, "r1");
+        assert_eq!(component.placement.extent.x1, -80.0);
+        assert!(
+            component.icon.is_some(),
+            "icon should come from the instance JSON: {:?}",
+            component.icon
         );
     }
 

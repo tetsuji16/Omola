@@ -304,16 +304,49 @@ pub fn extract_json(output: &str) -> Option<&str> {
     (end > start).then(|| &output[start..=end])
 }
 
+/// Everything one `getModelInstance` answer provides: the component tree and the diagram.
+///
+/// The Component Browser and the Diagram layer need the same JSON, and asking OMC for it
+/// costs several seconds (it loads the Modelica library every time it starts), so the one
+/// query is parsed once and handed to both. The raw JSON is not kept: it can be megabytes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InstanceData {
+    pub components: Vec<ComponentNode>,
+    pub diagram: crate::diagram::Diagram,
+}
+
+impl InstanceData {
+    pub fn parse(json: &str, max_depth: usize) -> Result<Self, String> {
+        let value: Value = serde_json::from_str(json)
+            .map_err(|error| format!("could not read the model instance JSON: {error}"))?;
+        let components = parse_components_value(&value, max_depth)?;
+        let diagram = crate::diagram::parse_diagram(&value, &Default::default())?;
+        Ok(Self {
+            components,
+            diagram,
+        })
+    }
+}
+
 /// Parse the components declared by a class, recursing at most `max_depth` levels into
 /// the classes of the components themselves.
+#[cfg(test)]
 pub fn parse_components(json: &str, max_depth: usize) -> Result<Vec<ComponentNode>, String> {
     let root: Value = serde_json::from_str(json)
         .map_err(|error| format!("could not read the model instance JSON: {error}"))?;
+    parse_components_value(&root, max_depth)
+}
+
+/// Same as [`parse_components`] for an already parsed JSON value.
+pub fn parse_components_value(
+    root: &Value,
+    max_depth: usize,
+) -> Result<Vec<ComponentNode>, String> {
     if !root.is_object() {
         return Err("the model instance JSON is not an object".into());
     }
     let mut components = Vec::new();
-    collect(&root, max_depth, &mut components);
+    collect(root, max_depth, &mut components);
     Ok(components)
 }
 
