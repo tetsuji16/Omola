@@ -168,3 +168,40 @@ G07 で取得した実データ(`crates/omola-gui/tests/fixtures/`):
   `lhs`/`rhs` は `{"$kind": "cref", "parts": [{"name": ...}]}` で、ドット連結して `from`/`to` とする
 - クラス自身の Diagram: `annotation.Diagram.coordinateSystem.extent` と `annotation.Diagram.graphics`
   (例: CauerLowPassAnalog は extent `[[-120,-100],[120,100]]`、own graphics 6)
+
+## 継承した部品と結線(G54, 2026-11-17 実測)
+
+`getModelInstance` は **そのクラス自身の宣言** しか `elements` と `connections` に置きません。
+`model Derived extends Placed; end Derived;` のように部品を継承だけしたクラスでは、
+
+- `elements` は `[{"$kind": "extends", "baseClass": {...}}]` の 1 件だけで、`component` は 0 件
+- トップレベルに `connections` キーが **存在しない**(基底クラスのノードの中にだけある)
+
+つまり Diagram 層が `elements` / `connections` を素直に読むと、Component Browser が部品を
+並べているのに Diagram は真っ白になる。Omola は `extends` → `baseClass` を深さ優先で
+平坦化して両方を集める(`diagram::placed_elements` と `diagram::connections_of_class`)。
+
+- 派生クラス自身の宣言が先、継承したものが後。同じ名前は最初のもの(=派生側)を採用する
+- 配置も結線も基底クラスのものをそのまま使う(座標は親の Diagram 座標系のまま)
+
+## Diagram 層の OMC 呼び出しは 1 回(G54, 2026-11-17 実測)
+
+`getModelInstance` の応答には、各部品の型の `annotation.Icon` も `type` オブジェクトの中に
+入っている(継承した Icon は `type.elements[].baseClass.annotation.Icon` に入れ子)。
+そのため Diagram 層は `getModelInstanceAnnotation` を別に呼ぶ必要がない。
+
+実測(OMC 1.27.1 / Windows / MSL 4.1.0、部品 3 個の小さなモデル):
+
+| 処理 | 時間 |
+|---|---|
+| `omc` の起動のみ | 0.13 s |
+| `loadModel(Modelica, {"4.1.0"})` | 5.9 s |
+| インスタンス JSON の取得(`loadModel` + `getModelInstance`) | 6.5 s |
+| アイコンだけの別クエリ(`loadModel` + `getModelInstanceAnnotation` ×N) | 6.6 s |
+
+`loadModel(Modelica)` がほぼすべてで、これは **OMC プロセスごとに払う**。だから
+クエリを 1 回にまとめることがそのまま待ち時間の半減になる(13 s → 6.5 s)。
+さらに Component Browser と Diagram 層は同じ JSON を使うので、1 クラスにつき 1 回だけ
+問い合わせて両方に配る(`instance::InstanceData`)。
+
+これ以上速くするには OMC を常駐させる(`omc --interactive=zmq`)しかない。未実装。

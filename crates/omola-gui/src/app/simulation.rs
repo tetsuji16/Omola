@@ -14,7 +14,7 @@ impl OmolaApp {
             class: class.clone(),
         });
         // The buffer may have been edited since the last tree was fetched.
-        self.components = None;
+        self.instances.remove(&class);
         self.components_pending = None;
         self.request_components(&class);
         self.icons.remove(&class);

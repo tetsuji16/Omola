@@ -116,13 +116,7 @@ impl OmolaApp {
         self.user_text_changed(doc);
         self.model_diagrams.remove(&class);
         self.icons.remove(&class);
-        if self
-            .components
-            .as_ref()
-            .is_some_and(|(name, _)| name == &class)
-        {
-            self.components = None;
-        }
+        self.instances.remove(&class);
         self.components_pending = None;
         self.request_diagram(&class);
         self.request_icon(&class);
@@ -158,9 +152,7 @@ impl OmolaApp {
                         self.user_text_changed(doc);
                         self.model_diagrams.remove(&class);
                         self.icons.remove(&class);
-                        if self.components.as_ref().is_some_and(|(c, _)| c == &class) {
-                            self.components = None;
-                        }
+                        self.instances.remove(&class);
                         self.components_pending = None;
                         self.request_diagram(&class);
                         self.request_icon(&class);

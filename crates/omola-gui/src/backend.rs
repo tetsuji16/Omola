@@ -171,12 +171,6 @@ pub enum Job {
         class: String,
         context: ClassContext,
     },
-    /// Diagram graphics + component placement + connections, from instance JSON + icon annotations (G12).
-    LoadDiagram {
-        class: String,
-        context: ClassContext,
-        cached_icons: std::collections::BTreeMap<String, crate::graphics::Icon>,
-    },
     Check {
         class: String,
         context: ClassContext,
@@ -269,16 +263,15 @@ pub enum Event {
     LibraryLoaded(LibrarySpec, Result<LoadedLibrary, String>),
     ClassDoc(String, Option<String>, Result<ClassDoc, String>),
     ClassText(String, Result<String, String>),
-    /// Component tree of a class (empty when the class declares no components).
-    Instance(String, Result<Vec<crate::instance::ComponentNode>, String>),
+    /// Instance JSON and component tree of a class (empty when the class declares no
+    /// components). The Diagram layer reuses the same JSON.
+    Instance(String, Result<crate::instance::InstanceData, String>),
     Parameters {
         component: String,
         result: Result<Vec<crate::instance::ParamRow>, String>,
     },
     /// Icon graphics of a class; `Err` when the class has no usable Icon annotation.
     Icon(String, Result<crate::graphics::Icon, String>),
-    /// Diagram graphics + component placement + connections (G12).
-    Diagram(String, Result<crate::diagram::Diagram, String>),
     SimulationFinished(Box<SimulationOutcome>),
     /// A `Simulate` job of this class ended without a result (error or Stop). Every
     /// `Simulate` job ends in exactly one of `SimulationFinished` / `SimulationFailed`,
@@ -511,7 +504,7 @@ fn run_job(
                     .ok_or_else(|| format!("OMC returned no instance JSON for {class}"))?;
                 let json = crate::instance::extract_json(body)
                     .ok_or_else(|| format!("OMC returned no instance JSON for {class}"))?;
-                crate::instance::parse_components(json, INSTANCE_DEPTH)
+                crate::instance::InstanceData::parse(json, INSTANCE_DEPTH)
             });
             send(Event::Instance(class, result));
         }
@@ -583,125 +576,6 @@ fn run_job(
                 }
             }
             send(Event::Icon(class, result));
-        }
-        Job::LoadDiagram {
-            class,
-            context,
-            cached_icons,
-        } => {
-            // First load the instance JSON to get component placements and connections
-            let instance_result = with_user_files(run_dir, &class, &context, |file| {
-                let script =
-                    library::instance_script_with_user_files(&class, &context.libraries, file)
-                        .map_err(|e| e.to_string())?;
-                omc.run_query_script(&script)
-                    .map(|out| out.output)
-                    .map_err(|e| e.to_string())
-            });
-
-            let instance_json = match instance_result {
-                Ok(output) => {
-                    let sections = library::parse_sections(&output);
-                    let body = match sections
-                        .get("instance")
-                        .ok_or_else(|| format!("OMC returned no instance JSON for {class}"))
-                    {
-                        Ok(b) => b,
-                        Err(e) => {
-                            send(Event::Diagram(class.clone(), Err(e)));
-                            return;
-                        }
-                    };
-                    match crate::instance::extract_json(body)
-                        .ok_or_else(|| format!("OMC returned no instance JSON for {class}"))
-                    {
-                        Ok(j) => j.to_owned(),
-                        Err(e) => {
-                            send(Event::Diagram(class.clone(), Err(e)));
-                            return;
-                        }
-                    }
-                }
-                Err(e) => {
-                    send(Event::Diagram(class.clone(), Err(e)));
-                    return;
-                }
-            };
-
-            // Parse the instance JSON to get component types
-            let instance_value: serde_json::Value = match serde_json::from_str(&instance_json) {
-                Ok(v) => v,
-                Err(e) => {
-                    send(Event::Diagram(
-                        class.clone(),
-                        Err(format!("could not parse instance JSON: {e}")),
-                    ));
-                    return;
-                }
-            };
-
-            // Collect all component types that need icons
-            let component_types = crate::diagram::placed_component_types(&instance_value);
-
-            // Load icons for all component types
-            let mut icons = cached_icons;
-            let types: Vec<String> = component_types
-                .into_iter()
-                .filter(|name| !icons.contains_key(name))
-                .collect();
-            if types.is_empty() {
-                let diagram = crate::diagram::parse_diagram(&instance_value, &icons);
-                send(Event::Diagram(class, diagram));
-                return;
-            }
-            let loaded = with_user_files(run_dir, &class, &context, |file| {
-                let script =
-                    library::icons_script_with_user_files(&types, &context.libraries, file)
-                        .map_err(|e| e.to_string())?;
-                omc.run_query_script(&script).map_err(|e| e.to_string())
-            });
-            match loaded {
-                Ok(out) => {
-                    let sections = library::parse_sections(&out.output);
-                    for type_name in types {
-                        let key = format!("icon:{type_name}");
-                        let parsed = sections
-                            .get(&key)
-                            .and_then(|body| crate::instance::extract_json(body))
-                            .ok_or_else(|| "OMC returned no icon JSON section".to_owned())
-                            .and_then(|json| {
-                                serde_json::from_str::<serde_json::Value>(json)
-                                    .map_err(|e| e.to_string())
-                            })
-                            .and_then(|value| {
-                                crate::graphics::parse_icon(&value).map_err(|e| e.to_string())
-                            });
-                        match parsed {
-                            Ok(icon) => {
-                                icons.insert(type_name, icon);
-                            }
-                            Err(reason) => send(Event::Log(
-                                LogTab::Simulation,
-                                LogLevel::Warning,
-                                format!("icon of {type_name}: {reason}"),
-                            )),
-                        }
-                    }
-                }
-                Err(reason) => {
-                    for type_name in types {
-                        send(Event::Log(
-                            LogTab::Simulation,
-                            LogLevel::Warning,
-                            format!("icon of {type_name}: {reason}"),
-                        ));
-                    }
-                }
-            }
-
-            // Now parse the diagram with the icons
-            let diagram = crate::diagram::parse_diagram(&instance_value, &icons);
-            send(Event::Diagram(class, diagram));
         }
         Job::Check { class, context } => {
             send(Event::Log(
@@ -907,7 +781,6 @@ fn fail_job(job: Job, message: String, send: &dyn Fn(Event)) {
             result: Err(message),
         }),
         Job::LoadIcon { class, .. } => send(Event::Icon(class, Err(message))),
-        Job::LoadDiagram { class, .. } => send(Event::Diagram(class, Err(message))),
         Job::Command { text, .. } => send(Event::Command(format!("{text}\n  {message}"))),
         Job::EditModel { class, .. } => send(Event::ModelEdited {
             class,

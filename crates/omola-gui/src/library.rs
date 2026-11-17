@@ -401,40 +401,6 @@ pub fn icon_script_with_user_files(
     Ok(script)
 }
 
-/// Fetch several component icons from one OMC process after loading libraries once.
-#[cfg(test)]
-pub fn icons_script(
-    types: &[String],
-    libraries: &[LibrarySpec],
-    user_file: Option<&Path>,
-) -> Result<String, BackendError> {
-    let files = user_file
-        .into_iter()
-        .map(Path::to_path_buf)
-        .collect::<Vec<_>>();
-    icons_script_with_user_files(types, libraries, &files)
-}
-
-pub fn icons_script_with_user_files(
-    types: &[String],
-    libraries: &[LibrarySpec],
-    user_files: &[PathBuf],
-) -> Result<String, BackendError> {
-    let mut script = String::new();
-    for (i, spec) in libraries.iter().enumerate() {
-        script.push_str(&load_statement(spec, &format!("omolaLib{i}"))?);
-    }
-    append_user_files(&mut script, user_files);
-    for class in types {
-        validate_class_name(class)?;
-        let key = format!("icon:{class}");
-        script.push_str(&format!(
-            "print(\"OMOLA_BEGIN {key}\\n\" + OpenModelica.Scripting.getModelInstanceAnnotation({class}, {{\"Icon\"}}) + \"\\nOMOLA_END {key}\\n\");\n"
-        ));
-    }
-    Ok(script)
-}
-
 /// Script running `checkModel` on a class from loaded libraries and/or a user file.
 #[cfg(test)]
 pub fn check_script(
@@ -787,24 +753,6 @@ mod tests {
         assert_eq!(script.matches("loadFile(\"/tmp/P/Helper.mo\")").count(), 1);
         assert_eq!(script.matches("loadFile(\"/tmp/P/Main.mo\")").count(), 2);
         assert!(script.contains("while omolaSourceProgress loop"));
-    }
-
-    #[test]
-    fn icons_script_loads_libraries_once_and_marks_each_type() {
-        let script = icons_script(
-            &[
-                "Modelica.Blocks.Sources.Constant".into(),
-                "Modelica.Blocks.Math.Gain".into(),
-            ],
-            &[msl()],
-            Some(Path::new("/tmp/My Model.mo")),
-        )
-        .unwrap();
-        assert_eq!(script.matches("loadModel(").count(), 1);
-        assert!(script.contains("loadFile(\"/tmp/My Model.mo\")"));
-        assert!(script.contains("OMOLA_BEGIN icon:Modelica.Blocks.Sources.Constant"));
-        assert!(script.contains("OMOLA_END icon:Modelica.Blocks.Math.Gain"));
-        assert!(icons_script(&["A); system(\"x\"".into()], &[], None).is_err());
     }
 
     #[test]

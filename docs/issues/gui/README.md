@@ -182,6 +182,7 @@ Dymola 風レイアウト(タイトル行・リボン・ブラウザ・モデル
 | [G50](G50-work-directory-cleanup.md) | 一時作業フォルダの掃除(古い session フォルダが残り続ける) | 易 | —(実装済み) |
 | [G51](G51-stale-docs-and-status-text.md) | 古くなった文書と状態表示の更新 | 易 | —(実装済み) |
 | [G52](G52-unimplemented-ribbon-buttons.md) | 動かないリボンボタンの整理(押しても何も起きないボタンを無くす) | 易 | G45〜G49(実装済み) |
+| [G54](G54-diagram-inherited-and-slow.md) | 【不具合】Diagram 層が空のまま/表示が遅い(継承した部品・結線を読まない、OMC を 2 回呼ぶ) | 中 | —(実装済み) |
 
 並行して進めてよいもの: G02, G03, G09, G10, G11, G13, G14 は互いに独立。
 
